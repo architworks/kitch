@@ -53,11 +53,11 @@ flowchart TD
     %% Specialized Spoke Dependencies
     SubChef -->|DB Tools| DB[(Supabase DB<br>meal_plans)]
     
-    SubVision -->|Multimodal Ingestion| Gemini[Gemini Multimodal API]
+    SubVision -->|Multimodal Ingestion| LLM[OpenAI-Compatible LLM Gateway via ADK LiteLlm]
     SubVision -->|Log Tools| DB[(Supabase DB<br>macro_diary & pantry_stock)]
     
     SubCart -->|search_memory| MemorySvc
-    SubCart -->|MCP Exporter Tool| MCP[Blinkit / Zepto MCP Cart]
+    SubCart -->|Payload Preview Tool| Payload[Blinkit / Zepto Payload Preview]
 ```
 
 ### 1. Dynamic Database Weekly Planner Integration
