@@ -991,27 +991,39 @@ export default function Home() {
 
       <form id="chat-input-form" className={`smart-input-dock ${smartDockExpanded ? "expanded" : ""}`} onSubmit={handleChatSubmit}>
         <div className="smart-chat-thread" aria-live="polite">
-          {chatHistory.slice(-2).map((msg, index) => (
-            <div key={`${msg.time}-${index}`} className={`smart-chat-bubble ${msg.sender}`}>
-              <div className="message-markdown">
-                {msg.text.split("\n").slice(0, 6).map((line, lidx) => {
-                  const boldRegex = /\*\*(.*?)\*\*/g;
-                  const parts = line.split(boldRegex);
-                  return (
-                    <p key={lidx}>
-                      {parts.map((part, pidx) => pidx % 2 === 1 ? <strong key={pidx}>{part}</strong> : part)}
-                    </p>
-                  );
-                })}
+          <div className="smart-chat-header">
+            <div>
+              <span className="smart-agent-avatar">🥗</span>
+              <div>
+                <strong>Kitch</strong>
+                <small>Household meal agent</small>
               </div>
-              <span>{msg.time}</span>
             </div>
-          ))}
-          {isChatTyping && (
-            <div className="smart-chat-bubble agent typing-bubble">
-              <div className="typing-dots"><span></span><span></span><span></span></div>
-            </div>
-          )}
+            <button type="button" aria-label="Close chat panel" onClick={() => setSmartDockExpanded(false)}>×</button>
+          </div>
+          <div className="smart-chat-messages">
+            {chatHistory.slice(-2).map((msg, index) => (
+              <div key={`${msg.time}-${index}`} className={`smart-chat-bubble ${msg.sender}`}>
+                <div className="message-markdown">
+                  {msg.text.split("\n").slice(0, 6).map((line, lidx) => {
+                    const boldRegex = /\*\*(.*?)\*\*/g;
+                    const parts = line.split(boldRegex);
+                    return (
+                      <p key={lidx}>
+                        {parts.map((part, pidx) => pidx % 2 === 1 ? <strong key={pidx}>{part}</strong> : part)}
+                      </p>
+                    );
+                  })}
+                </div>
+                <span>{msg.time}</span>
+              </div>
+            ))}
+            {isChatTyping && (
+              <div className="smart-chat-bubble agent typing-bubble">
+                <div className="typing-dots"><span></span><span></span><span></span></div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="quick-prompt-row">
           {quickPrompts.map(prompt => (
