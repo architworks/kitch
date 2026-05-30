@@ -20,10 +20,11 @@ from google.adk.tools import ToolContext
 from google.adk.events import Event
 from google.genai.types import Content, Part
 
-# Set Azure OpenAI Credentials directly in python (OpenAI Compatibility Mode)
-os.environ["OPENAI_API_KEY"] = "REMOVED_KEY"
-os.environ["OPENAI_API_BASE"] = "https://grmopenai-us2.openai.azure.com/openai/v1/"
-os.environ["OPENAI_MODEL_NAME"] = "gpt-5.5"
+from dotenv import load_dotenv
+
+# Load Azure OpenAI Credentials dynamically from local gitignored .env file (OpenAI Compatibility Mode)
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=env_path)
 
 # --- 1. Load Azure OpenAI Model via LiteLLM ---
 AZURE_MODEL = os.environ.get("OPENAI_MODEL_NAME", "gpt-5.5")
@@ -31,8 +32,8 @@ model_identifier = f"openai/{AZURE_MODEL}"
 
 azure_llm = LiteLlm(
     model=model_identifier,
-    api_key=os.environ["OPENAI_API_KEY"],
-    api_base=os.environ["OPENAI_API_BASE"],
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    api_base=os.environ.get("OPENAI_API_BASE"),
     custom_llm_provider="openai"
 )
 

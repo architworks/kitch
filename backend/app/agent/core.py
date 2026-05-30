@@ -26,24 +26,18 @@ from .tools import (
 from google.adk.agents.callback_context import CallbackContext
 from typing import Optional
 
-# 0. Set Azure OpenAI Credentials dynamically or directly as fallbacks (OpenAI Compatibility Mode)
-os.environ["OPENAI_API_KEY"] = os.environ.get(
-    "OPENAI_API_KEY", "REMOVED_KEY"
-)
-os.environ["OPENAI_API_BASE"] = os.environ.get(
-    "OPENAI_API_BASE", "https://grmopenai-us2.openai.azure.com/openai/v1/"
-)
-os.environ["OPENAI_MODEL_NAME"] = os.environ.get(
-    "OPENAI_MODEL_NAME", "gpt-5.5"
-)
+from dotenv import load_dotenv
 
-AZURE_MODEL = os.environ["OPENAI_MODEL_NAME"]
+# 0. Load Azure OpenAI Credentials dynamically from gitignored .env file (OpenAI Compatibility Mode)
+load_dotenv()
+
+AZURE_MODEL = os.environ.get("OPENAI_MODEL_NAME", "gpt-5.5")
 model_identifier = f"openai/{AZURE_MODEL}"
 
 azure_llm = LiteLlm(
     model=model_identifier,
-    api_key=os.environ["OPENAI_API_KEY"],
-    api_base=os.environ["OPENAI_API_BASE"],
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    api_base=os.environ.get("OPENAI_API_BASE"),
     custom_llm_provider="openai"
 )
 

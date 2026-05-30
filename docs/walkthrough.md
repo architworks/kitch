@@ -1,14 +1,16 @@
-# Walkthrough: Google ADK 2.0 Multi-Agent Backend Design & Production Integration
+# Walkthrough: Google ADK 2.0 Fully Dynamic LLM-Driven Recipe Engine
 
-We have successfully designed, validated, and fully migrated **Kitch's** multi-agent backend using the modern **Google Agent Development Kit (ADK) 2.0** framework running on **Azure OpenAI (gpt-5.5)**.
+We have successfully redesigned and implemented Kitch's multi-agent backend to operate as a **fully dynamic, LLM-reasoning-driven culinary assistant**. 
 
-This walkthrough outlines our architectural solutions, test results, and final integration into the production application (`backend/app/`).
+We have eliminated all hardcoded recipe catalogs, catalog indexes, and rigid arithmetic scalers. Portions, ingredients, dietary alignment, and pantry subtractions are now calculated dynamically in the **agent's mind** using advanced LLM reasoning, perfectly matching the original product vision.
+
+We have also **secured the entire codebase** by removing all hardcoded credentials from the repository, moving them dynamically to gitignored local `.env` files.
 
 ---
 
 ## 🛠️ Complete Multi-Agent Topology & System Architecture
 
-Our Hub-and-Spoke collaborative agent system is organized as follows:
+Our collaborative Hub-and-Spoke system is fully dynamic:
 
 ```mermaid
 flowchart TD
@@ -56,25 +58,31 @@ flowchart TD
     SubCart -->|MCP Exporter Tool| MCP[Blinkit / Zepto MCP Cart]
 ```
 
-### 1. Stable Model Driving (Azure OpenAI via LiteLLM)
-*   **The Problem**: The native Google GenAI model strings triggered rate limit and quota issues in our local environment, preventing multi-agent runs from completing successfully.
-*   **The Solution**: We replaced the native `Gemini` instances in [core.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/core.py) with the robust `LiteLlm` Azure OpenAI setup verified in our testing:
-    ```python
-    azure_llm = LiteLlm(
-        model="openai/gpt-5.5",
-        api_key=os.environ["OPENAI_API_KEY"],
-        api_base=os.environ["OPENAI_API_BASE"],
-        custom_llm_provider="openai"
-    )
-    ```
-    This client drives the coordinator, all 3 specialist sub-agents, and the background compactor model (`compactor_llm`).
-*   **Trimming Reasoning Configs**: We trimmed GenerateContentConfigs with native thinking levels, preventing socket read timeouts and gateway hangs on the custom Azure OpenAI endpoint.
+### 1. Dynamic Database Weekly Planner Integration
+*   We completely removed the hardcoded `RECIPE_DATABASE` and its associated static lookups/scalers (`get_recipes`, `scale_ingredients`, `calculate_intermediary_grocery_list`) from [tools.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/tools.py).
+*   The weekly meal planner Supabase table (`meal_plans`) now stores the **actual text names** of the custom recipes (e.g. `"Avocado & Poached Egg Toast"`, `"Spaghetti Carbonara"`) under day columns (`breakfast_recipe_id`, etc.) rather than rigid ID tags.
+*   **Dynamic Save Weekly Plan**: `save_weekly_plan_tool` parses dynamic recipe names and upserts them directly to Supabase.
+*   **Dynamic Update Single Meal**: `update_single_meal_in_schedule` targets a single weekday slot, substituting its name in Supabase while preserving other days and slots perfectly.
 
-### 2. Fully Dynamic LLM-Driven Recipe Engine
-*   **No Static DB**: We completely removed the static `RECIPE_DATABASE` and mathematical `scale_ingredients` / `calculate_intermediary_grocery_list` modules from the backend agent tools.
-*   **Text Recipe Names in Supabase**: The weekly meal planner Supabase table (`meal_plans`) now stores the **actual text names** of the custom recipes (e.g. `"Avocado & Poached Egg Toast"`, `"Spaghetti Carbonara"`) under day columns (`breakfast_recipe_id`, etc.) rather than rigid ID tags.
-*   **Agent-driven Portions & Checkouts**: The specialist agents utilize their own reasoning to scale ingredients and subtract inventory stock. The compiled list is passed directly as generic items to the delivery MCP cart exporter.
-*   **Next.js Real-time Dashboard Sync**: Updated the frontend React UI to fetch the live database meal plan from `/api/state/{user_name}` and hot-sync it into the React state. The weekly planner dashboard grid gracefully renders dynamic recipe names with a custom `✨ Custom Recipe` stats badge.
+### 2. LLM-Based Culinary Reasoning & Scaling
+*   **Dynamic Recipes**: The `chef_planner` agent generates balanced, nutritional meal plans and custom recipes dynamically from its own mind, customizing them to user dietary preferences (keto, vegan, balanced, Indian). Portions are scaled dynamically in conversation.
+*   **Dynamic Grocery Calculations**: Instead of static algorithms, the `checkout_exporter` agent compiles shopping lists dynamically:
+    1. It calls `get_weekly_schedule_tool` to fetch current recipe names planned for the week.
+    2. It calls `get_pantry_stock_tool` to fetch the household's current pantry stock.
+    3. Using its own culinary reasoning, it compiles required ingredients, scales them for the household size, subtracts pantry stock, and formulates the final required list.
+    4. It displays this shopping list to the user in a beautiful markdown format and can pass items (name, amount, unit) directly to `export_to_delivery`.
+
+### 3. Real-Time Dashboard Sync & Frontend Parity
+*   **State Sync**: We updated the FastAPI `/api/state/{user_name}` endpoint in [main.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/main.py) to fetch the live database meal plan using a new `get_weekly_schedule_dict` helper and return it in the state payload.
+*   **React Integration**: We updated `syncLiveState` in Next.js's [page.js](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/frontend/src/app/page.js) to hot-sync this `weekly_plan` React state. We also added reactive updates that trigger a state refresh whenever the agent modifies the planner or pantry.
+*   **Grid Rendering**: We updated the weekly planner dashboard grid to gracefully support dynamic recipe names directly, showing a custom `✨ Custom Recipe` stats badge when they are not in the hardcoded catalog!
+
+### 4. Codebase Credential Security & gitignore
+*   **Zero hardcoded credentials**: We completely extracted all Azure OpenAI gateway credentials (`OPENAI_API_KEY`, `OPENAI_API_BASE`, `OPENAI_MODEL_NAME`) out of the codebase.
+*   **Dynamic dotenv Loading**: 
+  * In the test harness [agent.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/test/kitch_debug/agent.py), keys are loaded dynamically from a gitignored local `test/kitch_debug/.env` file.
+  * In the production app [core.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/core.py), keys are loaded dynamically from a gitignored local `backend/.env` file.
+*   **Parity and gitignore**: Standardized the `.gitignore` pattern `**/__pycache__/` to ensure compiled caches are ignored recursively, and confirmed that both `.env` credential files are completely ignored by git.
 
 ---
 
