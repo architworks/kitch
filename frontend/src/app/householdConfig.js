@@ -17,7 +17,7 @@ export const WEEK_DAYS = [
   "Sunday"
 ];
 
-export const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"];
+export const MEAL_SLOTS = ["breakfast", "lunch", "dinner"];
 
 export function createEmptyPlanningWeekDates() {
   return WEEK_DAYS.reduce((dates, day) => {
@@ -57,8 +57,7 @@ export function createEmptyWeeklyPlan() {
     plan[day] = {
       breakfast: "",
       lunch: "",
-      dinner: "",
-      snack: ""
+      dinner: ""
     };
     return plan;
   }, {});

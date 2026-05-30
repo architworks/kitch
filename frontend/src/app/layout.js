@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Kitch — Personal Meal Planning & Grocery Agent",
-  description: "Generate custom macro-balanced weekly meal plans, track individual profile calories via camera plate logs, and automate grocery list checkouts via Blinkit MCP.",
+  title: "Kitch — AI Household Meal Planning Assistant",
+  description: "Plan shared household meals, track pantry stock, prepare groceries, and log personal nutrition with an AI kitchen companion.",
 };
 
 export default function RootLayout({ children }) {
@@ -14,4 +14,3 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
-

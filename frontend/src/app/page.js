@@ -14,6 +14,20 @@ import {
   getUpcomingPlanningWeekDates
 } from "./householdConfig.js";
 
+const getMealTitle = (meal, fallback = "No recipe set") => {
+  if (!meal) return fallback;
+  if (typeof meal === "string") return meal || fallback;
+  return meal.name || meal.title || meal.recipe_name || fallback;
+};
+
+const getMealIngredients = (meal) => {
+  if (!meal || typeof meal === "string") return [];
+  if (Array.isArray(meal.ingredients)) return meal.ingredients;
+  if (Array.isArray(meal.ingredient_list)) return meal.ingredient_list;
+  if (Array.isArray(meal.recipe?.ingredients)) return meal.recipe.ingredients;
+  return [];
+};
+
 // Default welcome messaging
 const INITIAL_CHAT = [
   {
@@ -26,6 +40,8 @@ const INITIAL_CHAT = [
 export default function Home() {
   // Application core state variables
   const [activeTab, setActiveTab] = useState("planner"); // planner, analytics, groceries
+  const [selectedPlannerDay, setSelectedPlannerDay] = useState("Monday");
+  const [expandedMealKey, setExpandedMealKey] = useState("Monday-dinner");
   const [dietPreference, setDietPreference] = useState("balanced");
   const [householdSize, setHouseholdSize] = useState(DEFAULT_HOUSEHOLD_SIZE);
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
@@ -39,6 +55,7 @@ export default function Home() {
   // UI state variables
   const [chatInput, setChatInput] = useState("");
   const [isChatTyping, setIsChatTyping] = useState(false);
+  const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
@@ -298,6 +315,7 @@ export default function Home() {
     if (!prompt.trim() || isChatTyping) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setSmartDockExpanded(true);
     setChatHistory(prev => [...prev, { sender: "user", text: prompt, time }]);
     
     setIsChatTyping(true);
@@ -473,6 +491,8 @@ export default function Home() {
 
   const draftMealSwapPrompt = (day, slot) => {
     setActiveTab("planner");
+    setSelectedPlannerDay(day);
+    setExpandedMealKey(`${day}-${slot}`);
     setChatInput(`Change ${day} ${slot} to `);
   };
 
@@ -529,10 +549,45 @@ export default function Home() {
       }));
   }, [groceryList]);
 
+  const firstPlannedDinner = WEEK_DAYS.map(day => ({
+    day,
+    date: planningWeekDates[day] || {},
+    dinner: getMealTitle(weeklyPlan[day]?.dinner, "")
+  })).find(item => item.dinner) || {
+    day: "Monday",
+    date: planningWeekDates.Monday || {},
+    dinner: "Ask Kitch to plan the first household dinner"
+  };
+
+  const tomorrowDay = WEEK_DAYS[1];
+  const tomorrowDinner = getMealTitle(weeklyPlan[tomorrowDay]?.dinner, "No dinner selected yet");
+  const selectedDayMeals = weeklyPlan[selectedPlannerDay] || {};
+  const selectedDayDate = planningWeekDates[selectedPlannerDay] || {};
+  const selectedDayMealList = MEAL_SLOTS.map(slot => ({
+    slot,
+    key: `${selectedPlannerDay}-${slot}`,
+    meal: selectedDayMeals[slot],
+    title: getMealTitle(selectedDayMeals[slot]),
+    ingredients: getMealIngredients(selectedDayMeals[slot])
+  }));
+  const selectedDayDinner = selectedDayMealList.find(item => item.slot === "dinner");
+  const pantryPreview = pantryStock.slice(0, 3);
+  const recentActivity = [
+    `${activeUser} is viewing personal macro logs`,
+    weeklyPlan.Monday?.dinner ? "Weekly plan is ready for the household" : "Weekly plan is waiting for Kitch",
+    pantryStock.length ? `${pantryStock.length} pantry items available` : "Pantry has not been scanned yet"
+  ];
+  const quickPrompts = [
+    "Plan next week for the whole household",
+    "What are we cooking tomorrow?",
+    "What groceries should I order for tomorrow?",
+    "Log what I just ate"
+  ];
+
   return (
     <div id="app">
       {/* SVG gradients for visual nutrition dial */}
-      <svg style={{ width: 0, height: 0, position: "absolute" }} width="0" height="0">
+      <svg className="visually-hidden-svg" width="0" height="0">
         <defs>
           <linearGradient id="emeraldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#34D399" />
@@ -545,603 +600,486 @@ export default function Home() {
         </defs>
       </svg>
 
-      {/* HEADER SECTION */}
-      <header className="app-header">
-        <div className="logo-section">
+      {scanningOverlay.active && (
+        <div id="vision-scanner" className="vision-scanner-overlay active">
+          <div className="scanning-image-box">
+            <div className="scan-laser-line"></div>
+            <div className="scan-emoji">
+              {scanningOverlay.fileName.includes("fridge") ? "❄️" :
+               scanningOverlay.fileName.includes("salmon") ? "🐟" :
+               scanningOverlay.fileName.includes("chicken") ? "🍗" :
+               scanningOverlay.fileName.includes("salad") ? "🥗" : "🍓"}
+            </div>
+          </div>
+          <h4 id="scanner-title-text" className="scanner-title">{scanningOverlay.title}</h4>
+          <div id="scan-terminal-log" className="scan-log-box">
+            {scanningOverlay.steps.map((step, idx) => (
+              <div key={idx} className="scan-log-line">{step}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <aside className="kitch-rail" aria-label="Kitch navigation">
+        <div className="rail-brand">
           <div className="logo-icon">🥗</div>
           <div>
             <h1>Kitch</h1>
-            <span>GenAI Culinary Agent</span>
+            <span>Household assistant</span>
           </div>
         </div>
-
-        <div className="controls-section">
-          <div className="control-group">
-            <label htmlFor="profile-selector">Active User</label>
-            <select
-              id="profile-selector"
-              value={activeUser}
-              onChange={(e) => switchActiveUser(e.target.value)}
+        <nav className="rail-nav">
+          {[
+            ["planner", "📅", "Weekly Plan"],
+            ["analytics", "📊", "Macro Logs"],
+            ["groceries", "🛒", "Grocery Cart"]
+          ].map(([key, icon, label]) => (
+            <button
+              key={key}
+              className={`rail-link ${activeTab === key ? "active" : ""}`}
+              onClick={() => setActiveTab(key)}
             >
-              {HOUSEHOLD_MEMBERS.map(member => (
-                <option key={member.value} value={member.value}>{member.label}</option>
-              ))}
-            </select>
-          </div>
+              <span>{icon}</span>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
 
-          <div className="control-group">
-            <label htmlFor="diet-selector">Diet Profile</label>
-            <select
-              id="diet-selector"
-              value={dietPreference}
-              onChange={(e) => switchDiet(e.target.value)}
-            >
-              <option value="balanced">Balanced Diet</option>
-              <option value="keto">Keto / Low-Carb</option>
-              <option value="vegan">Vegan / Plant-Based</option>
-              <option value="high-protein">High-Protein Active</option>
-            </select>
+      <div className="kitch-workspace">
+        <header className="app-header">
+          <div className="mobile-brand">
+            <div className="logo-icon">🥗</div>
+            <div>
+              <h1>Kitch</h1>
+              <span>Household assistant</span>
+            </div>
           </div>
-
-          <div className="control-group">
-            <label htmlFor="household-size">Household Size</label>
-            <input
-              type="number"
-              id="household-size"
-              min="1"
-              max="12"
-              value={householdSize}
-              onChange={(e) => updateHouseholdSize(e.target.value)}
-            />
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>People</span>
-          </div>
-        </div>
-      </header>
-
-      {/* MAIN APP CORE GRID */}
-      <main className="layout-grid">
-        
-        {/* LEFT: CHAT SIMULATOR PANEL */}
-        <section className="chat-simulator" aria-label="Kitch Chat Agent">
-          
-          {/* Computer Vision Scanner Scan Overlay */}
-          {scanningOverlay.active && (
-            <div id="vision-scanner" className="vision-scanner-overlay active">
-              <div className="scanning-image-box">
-                <div className="scan-laser-line"></div>
-                <div style={{ fontSize: "72px", display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center", height: "100%" }}>
-                  {scanningOverlay.fileName.includes("fridge") ? "❄️" : 
-                   scanningOverlay.fileName.includes("salmon") ? "🐟" : 
-                   scanningOverlay.fileName.includes("chicken") ? "🍗" : 
-                   scanningOverlay.fileName.includes("salad") ? "🥗" : "🍓"}
-                </div>
-              </div>
-              <h4 id="scanner-title-text" style={{ color: "var(--accent-primary)", marginBottom: "8px", fontWeight: 700, textTransform: "uppercase", fontSize: "13px" }}>
-                {scanningOverlay.title}
-              </h4>
-              <div id="scan-terminal-log" className="scan-log-box">
-                {scanningOverlay.steps.map((step, idx) => (
-                  <div key={idx} className="scan-log-line">{step}</div>
+          <div className="controls-section">
+            <div className="control-group">
+              <label htmlFor="profile-selector">Active User</label>
+              <select id="profile-selector" name="profile-selector" value={activeUser} onChange={(e) => switchActiveUser(e.target.value)}>
+                {HOUSEHOLD_MEMBERS.map(member => (
+                  <option key={member.value} value={member.value}>{member.label}</option>
                 ))}
-              </div>
+              </select>
             </div>
-          )}
-
-          {/* Chat Header */}
-          <div className="chat-header">
-            <div className="chat-bot-info">
-              <div className="bot-avatar">🤖</div>
-              <div className="bot-status">
-                <h3>Kitch Companion</h3>
-                <span>Online</span>
+            <div className="control-group">
+              <label htmlFor="diet-selector">Diet Profile</label>
+              <select id="diet-selector" name="diet-selector" value={dietPreference} onChange={(e) => switchDiet(e.target.value)}>
+                <option value="balanced">Balanced Diet</option>
+                <option value="keto">Keto / Low-Carb</option>
+                <option value="vegan">Vegan / Plant-Based</option>
+                <option value="high-protein">High-Protein Active</option>
+              </select>
+            </div>
+            <div className="control-group">
+              <span className="control-label">Household Size</span>
+              <div className="household-stepper" aria-label="Household size">
+                <button type="button" aria-label="Decrease household size" onClick={() => updateHouseholdSize(householdSize - 1)}>−</button>
+                <input
+                  type="number"
+                  id="household-size"
+                  name="household-size"
+                  min="1"
+                  max="12"
+                  value={householdSize}
+                  onChange={(e) => updateHouseholdSize(e.target.value)}
+                />
+                <button type="button" aria-label="Increase household size" onClick={() => updateHouseholdSize(householdSize + 1)}>+</button>
               </div>
+              <span className="control-unit-label">People</span>
             </div>
           </div>
+        </header>
 
-          {/* Message Bubbles */}
-          <div id="chat-messages" className="chat-messages">
-            {chatHistory.map((msg, index) => (
-              <div key={index} className={`msg-bubble ${msg.sender}`}>
-                {msg.image && (
-                  <div style={{ background: "rgba(255,255,255,0.08)", width: "100%", height: "110px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "8px", marginBottom: "8px", fontSize: "48px" }}>
-                    {msg.image.includes("fridge") ? "❄️" : 
-                     msg.image.includes("salmon") ? "🐟" : 
-                     msg.image.includes("chicken") ? "🍗" : 
-                     msg.image.includes("salad") ? "🥗" : "🍓"}
+        <main className="page-canvas">
+          {activeTab === "planner" && (
+            <section className="page-view planner-page" aria-label="Weekly meal planner">
+              <div className="planner-hero-grid">
+                <article className="dinner-hero-card">
+                  <div className="meal-hero-art">
+                    <div className="meal-hero-illustration" aria-hidden="true"></div>
+                    <span>{firstPlannedDinner.date.label || "Next week"}</span>
                   </div>
-                )}
-                <div style={{ whiteSpace: "pre-wrap" }}>
-                  {msg.text.split("\n").map((line, lidx) => {
-                    // Primitive bold markdown matching
-                    const boldRegex = /\*\*(.*?)\*\*/g;
-                    const parts = line.split(boldRegex);
-                    return (
-                      <p key={lidx} style={{ marginBottom: "6px" }}>
-                        {parts.map((part, pidx) => pidx % 2 === 1 ? <strong key={pidx}>{part}</strong> : part)}
-                      </p>
-                    );
-                  })}
-                </div>
-                <span className="msg-time">{msg.time}</span>
-              </div>
-            ))}
-
-            {isChatTyping && (
-              <div className="msg-bubble agent typing-bubble">
-                <div className="typing-dots">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Real Photo Upload & Log Tray */}
-          <div className="chat-photo-tray">
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h4 style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "1px" }}>📸 Upload & Scan Live Photo</h4>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <label className="photo-btn" style={{ background: "rgba(16, 185, 129, 0.15)", borderColor: "var(--accent-primary)", padding: "4px 8px", fontSize: "10px", height: "auto", width: "auto", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", borderRadius: "8px", border: "1px solid var(--glass-border)", transition: "var(--transition-smooth)" }}>
-                    <span>❄️</span>
-                    <strong style={{ cursor: "pointer" }}>Scan Fridge</strong>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(e) => handleRealPhotoUpload(e.target.files[0], true)}
-                    />
-                  </label>
-                  <label className="photo-btn" style={{ background: "rgba(59, 130, 246, 0.15)", borderColor: "#3B82F6", padding: "4px 8px", fontSize: "10px", height: "auto", width: "auto", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", borderRadius: "8px", border: "1px solid var(--glass-border)", transition: "var(--transition-smooth)" }}>
-                    <span>🍽️</span>
-                    <strong style={{ cursor: "pointer" }}>Scan Plate</strong>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(e) => handleRealPhotoUpload(e.target.files[0], false)}
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Message Inputs */}
-          <form id="chat-input-form" className="chat-input-area" onSubmit={handleChatSubmit}>
-            <input
-              type="text"
-              id="chat-user-input"
-              placeholder="Ask chef agent or type command..."
-              autoComplete="off"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-            />
-            <button type="submit" className="chat-send-btn">Send</button>
-          </form>
-        </section>
-
-        {/* RIGHT: WEB DASHBOARD TABS */}
-        <section className="dashboard-container" aria-label="Interactive Web Dashboard">
-          
-          {/* Tabs Selector */}
-          <nav className="dashboard-tabs">
-            <button
-              className={`tab-btn ${activeTab === "planner" ? "active" : ""}`}
-              onClick={() => setActiveTab("planner")}
-            >
-              📅 Weekly Planner
-            </button>
-            <button
-              className={`tab-btn ${activeTab === "analytics" ? "active" : ""}`}
-              onClick={() => setActiveTab("analytics")}
-            >
-              📊 Daily Intake Log
-            </button>
-            <button
-              className={`tab-btn ${activeTab === "groceries" ? "active" : ""}`}
-              onClick={() => setActiveTab("groceries")}
-            >
-              🛒 Grocery Cart
-            </button>
-          </nav>
-
-          {/* Dynamic Panel Wrapper */}
-          <div className="dashboard-content">
-            
-            {/* PANEL 1: WEEKLY PLANNER */}
-            <div id="panel-planner" className={`tab-panel ${activeTab === "planner" ? "active" : ""}`}>
-              <div className="planner-view">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <h3 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h3>
-                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
-                      {planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label
-                        ? `Planning week: ${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}`
-                        : "Planning week: upcoming Monday - Sunday"}
+                  <div className="meal-hero-copy">
+                    <span className="eyebrow">What&apos;s for dinner?</span>
+                    <h2>{firstPlannedDinner.dinner}</h2>
+                    <p>{firstPlannedDinner.day} dinner for the shared household plan. Tap a meal in the calendar to ask Kitch for swaps.</p>
+                    <div className="chip-row">
+                      <span>Household</span>
+                      <span>{householdSize} people</span>
+                      <span>{dietMeta.name}</span>
+                    </div>
+                    <div className="hero-footer">
+                      <div className="avatar-stack">
+                        {HOUSEHOLD_MEMBERS.map(member => (
+                          <span key={member.value}>{member.value[0]}</span>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setChatInput(`Show me the recipe for ${firstPlannedDinner.dinner}`)}>
+                        View recipe →
+                      </button>
                     </div>
                   </div>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>Ask Kitch in chat to create or swap meals.</span>
-                </div>
-                
-                <div id="weekly-plan-grid" className="weekly-grid">
-                  {WEEK_DAYS.map(day => {
-                    const dayMeals = weeklyPlan[day] || {};
-                    const dateMeta = planningWeekDates[day] || {};
+                </article>
 
-                    return (
-                      <div key={day} className="day-column">
-                        <div className="day-title">{day}</div>
-                        <div className="day-calories">{dateMeta.label || "Upcoming week"}</div>
-
-                        {MEAL_SLOTS.map(slot => {
-                          const recipeName = dayMeals[slot];
-
-                          return (
-                            <div
-                              key={slot}
-                              className="meal-card"
-                              onClick={() => draftMealSwapPrompt(day, slot)}
-                            >
-                              {recipeName ? (
-                                <>
-                                  <div>
-                                    <span className={`meal-label ${slot}`}>{slot}</span>
-                                    <div className="meal-name">{recipeName}</div>
-                                  </div>
-                                  <div className="meal-stats">
-                                    <span>Structured by Kitch</span>
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <div>
-                                    <span className={`meal-label ${slot}`}>{slot}</span>
-                                    <div className="meal-name" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No recipe set</div>
-                                  </div>
-                                  <div className="meal-stats">
-                                    <span>- kcal</span>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
+                <article className="nutrition-widget">
+                  <div className="widget-title-row">
+                    <h3>Your Nutrition</h3>
+                    <button type="button" onClick={() => setActiveTab("analytics")}>⋮</button>
+                  </div>
+                  <div className="nutrition-stat">
+                    <div>
+                      <span>Calories</span>
+                      <strong>{loggedCal} <small>/ {targetCalories} kcal</small></strong>
+                    </div>
+                    <div className="progress-track"><div className="progress-fill protein" style={{ width: `${calPercentage}%` }}></div></div>
+                  </div>
+                  <div className="mini-macros">
+                    <div><span>Protein ({loggedProt}g / {targetProtein}g)</span><div><b style={{ width: `${protPerc}%` }}></b></div></div>
+                    <div><span>Carbs ({loggedCarb}g / {targetCarbs}g)</span><div><b style={{ width: `${carbPerc}%` }}></b></div></div>
+                    <div><span>Fats ({loggedFat}g / {targetFat}g)</span><div><b style={{ width: `${fatPerc}%` }}></b></div></div>
+                  </div>
+                </article>
               </div>
-            </div>
 
-            {/* PANEL 2: DAILY ANALYTICS */}
-            <div id="panel-analytics" className={`tab-panel ${activeTab === "analytics" ? "active" : ""}`}>
-              <div className="analytics-view">
-                
-                {/* Circular Calorie Dial */}
-                <div className="summary-circle-container">
-                  <h3 className="tracker-title" id="calorie-tracker-user-title">Calories Today ({activeUser})</h3>
+              <section className="weekly-calendar-feature">
+                <div className="section-heading">
+                  <div>
+                    <span className="eyebrow">Upcoming household week</span>
+                    <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
+                  </div>
+                  <p>{planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label ? `${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}` : "Upcoming Monday - Sunday"}</p>
+                </div>
+                <div id="weekly-plan-grid" className="calendar-board">
+                  <div className="week-selector-strip">
+                    {WEEK_DAYS.map(day => {
+                      const dateMeta = planningWeekDates[day] || {};
+                      const dinnerTitle = getMealTitle(weeklyPlan[day]?.dinner, "Dinner not set");
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          className={`week-selector-card ${selectedPlannerDay === day ? "active" : ""}`}
+                          onClick={() => {
+                            setSelectedPlannerDay(day);
+                            setExpandedMealKey(`${day}-dinner`);
+                          }}
+                        >
+                          <span>{day.slice(0, 3)}</span>
+                          <strong>{dateMeta.label || "Soon"}</strong>
+                          <em>{dinnerTitle}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <article className="selected-day-planner">
+                    <div className="selected-day-glance">
+                      <div>
+                        <span className="eyebrow">{selectedDayDate.label || "Selected day"} at a glance</span>
+                        <h3>{selectedPlannerDay}</h3>
+                        <p>{selectedDayDate.longLabel || "Upcoming planning week"}</p>
+                      </div>
+                      <div className="glance-dinner-card">
+                        <span>Dinner focus</span>
+                        <strong>{selectedDayDinner?.title || "No dinner set"}</strong>
+                        <button type="button" onClick={() => setChatInput(`Show ingredients and cooking steps for ${selectedDayDinner?.title || `${selectedPlannerDay} dinner`}`)}>
+                          Ask for ingredients →
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="meal-accordion-list">
+                      {selectedDayMealList.map(({ slot, key, title, ingredients }) => {
+                        const isExpanded = expandedMealKey === key;
+                        return (
+                          <div key={key} className={`meal-accordion ${isExpanded ? "expanded" : ""}`}>
+                            <button
+                              type="button"
+                              className="meal-accordion-trigger"
+                              onClick={() => setExpandedMealKey(isExpanded ? "" : key)}
+                            >
+                              <span className={`meal-label ${slot}`}>{slot}</span>
+                              <strong>{title}</strong>
+                              <em>{isExpanded ? "−" : "+"}</em>
+                            </button>
+                            {isExpanded && (
+                              <div className="meal-accordion-body">
+                                {ingredients.length > 0 ? (
+                                  <ul>
+                                    {ingredients.map((ingredient, idx) => (
+                                      <li key={`${key}-${idx}`}>{typeof ingredient === "string" ? ingredient : `${ingredient.amount || ""} ${ingredient.unit || ""} ${ingredient.name || ""}`.trim()}</li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p>Kitch has the meal name saved, but ingredients are not attached to this structured plan yet.</p>
+                                )}
+                                <div className="meal-detail-actions">
+                                  <button type="button" onClick={() => setChatInput(`Show full ingredients for ${title} on ${selectedPlannerDay}`)}>Get ingredients</button>
+                                  <button type="button" onClick={() => draftMealSwapPrompt(selectedPlannerDay, slot)}>Swap this meal</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <div className="planner-bottom-grid">
+                <section className="snapshot-panel">
+                  <h3>Household Snapshot</h3>
+                  <div className="snapshot-grid">
+                    <div className="snapshot-card">
+                      <span className="snapshot-icon">⚠️</span>
+                      <h4>Pantry status</h4>
+                      {pantryPreview.length ? pantryPreview.map(item => (
+                        <p key={item.name}>{item.name} <b>{item.amount} {item.unit}</b></p>
+                      )) : <p>Scan the fridge to understand what is already available.</p>}
+                    </div>
+                    <div className="snapshot-card">
+                      <span className="snapshot-icon">🛒</span>
+                      <h4>Grocery list</h4>
+                      <p><b>{totalCount}</b> required items</p>
+                      <button type="button" onClick={() => setActiveTab("groceries")}>View full list</button>
+                    </div>
+                  </div>
+                </section>
+                <section className="activity-panel">
+                  <h3>Recent Activity</h3>
+                  <div className="activity-timeline">
+                    {recentActivity.map((item, idx) => (
+                      <div key={item} className="activity-item">
+                        <span>{idx + 1}</span>
+                        <p>{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </section>
+          )}
+
+          {activeTab === "analytics" && (
+            <section className="page-view analytics-page" aria-label="Macro logs">
+              <div className="section-heading page-heading">
+                <div>
+                  <span className="eyebrow">Personal nutrition</span>
+                  <h2>Macro Logs for {activeUser}</h2>
+                </div>
+                <button id="clear-diary-btn" className="clear-diary-btn" onClick={resetDailyLogs}>Clear Logs</button>
+              </div>
+              <div className="nutrition-page-grid">
+                <article className="calorie-focus-card">
+                  <h3>Calories Today</h3>
                   <div className="calorie-dial">
                     <svg width="180" height="180" viewBox="0 0 180 180">
                       <circle className="calorie-dial-ring-bg" cx="90" cy="90" r="75" />
-                      <circle
-                        id="calorie-dial-fill"
-                        className="calorie-dial-ring-fill"
-                        cx="90"
-                        cy="90"
-                        r="75"
-                        strokeDasharray="471.2"
-                        style={{ strokeDashoffset: strokeDashoffset }}
-                      />
+                      <circle id="calorie-dial-fill" className="calorie-dial-ring-fill" cx="90" cy="90" r="75" strokeDasharray="471.2" style={{ strokeDashoffset: strokeDashoffset }} />
                     </svg>
                     <div className="calorie-dial-info">
                       <h2 id="logged-calories-num">{loggedCal}</h2>
                       <p id="target-calories-num">/ {targetCalories} kcal</p>
                     </div>
                   </div>
-                  <span id="calorie-percentage-badge" style={{ fontSize: "12px", color: "var(--accent-primary)", fontWeight: 700, background: "rgba(16,185,129,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
-                    {calPercentage}% Met
-                  </span>
-                </div>
-
-                {/* Macro Bars */}
-                <div className="macro-breakdown-card">
+                  <span id="calorie-percentage-badge" className="calorie-percentage-badge">{calPercentage}% Met</span>
+                </article>
+                <article className="macro-breakdown-card">
                   <h3 className="tracker-title">Macros Breakdown</h3>
-                  
-                  <div className="macro-bar-group">
-                    <div className="macro-bar-header">
-                      <span>Protein (Target: <span id="protein-target-val">{targetProtein}</span>g)</span>
-                      <span><span id="protein-logged-val">{loggedProt}</span>g</span>
+                  {[
+                    ["Protein", loggedProt, targetProtein, protPerc, "protein"],
+                    ["Carbohydrates", loggedCarb, targetCarbs, carbPerc, "carbs"],
+                    ["Fats", loggedFat, targetFat, fatPerc, "fat"]
+                  ].map(([label, logged, target, percent, klass]) => (
+                    <div key={label} className="macro-bar-group">
+                      <div className="macro-bar-header"><span>{label} (Target: {target}g)</span><span>{logged}g</span></div>
+                      <div className="progress-track"><div className={`progress-fill ${klass}`} style={{ width: `${percent}%` }}></div></div>
                     </div>
-                    <div className="progress-track">
-                      <div id="protein-bar-fill" className="progress-fill protein" style={{ width: `${protPerc}%` }}></div>
-                    </div>
-                  </div>
-
-                  <div className="macro-bar-group">
-                    <div className="macro-bar-header">
-                      <span>Carbohydrates (Target: <span id="carbs-target-val">{targetCarbs}</span>g)</span>
-                      <span><span id="carbs-logged-val">{loggedCarb}</span>g</span>
-                    </div>
-                    <div className="progress-track">
-                      <div id="carbs-bar-fill" className="progress-fill carbs" style={{ width: `${carbPerc}%` }}></div>
-                    </div>
-                  </div>
-
-                  <div className="macro-bar-group">
-                    <div className="macro-bar-header">
-                      <span>Fats (Target: <span id="fat-target-val">{targetFat}</span>g)</span>
-                      <span><span id="fat-logged-val">{loggedFat}</span>g</span>
-                    </div>
-                    <div className="progress-track">
-                      <div id="fat-bar-fill" className="progress-fill fat" style={{ width: `${fatPerc}%` }}></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Journal List */}
-                <div className="diary-section">
-                  <div className="diary-header">
-                    <h3 style={{ fontSize: "16px", fontWeight: 600 }} id="diary-user-heading">Plate Logs ({activeUser})</h3>
-                    <button id="clear-diary-btn" className="clear-diary-btn" onClick={resetDailyLogs}>Clear Logs</button>
-                  </div>
-                  
+                  ))}
+                </article>
+                <article className="diary-section">
+                  <div className="diary-header"><h3 className="diary-heading" id="diary-user-heading">Plate Logs</h3></div>
                   <div id="diary-list" className="diary-list">
                     {loggedMeals.length === 0 ? (
-                      <div className="diary-empty-state">
-                        🍳 {activeUser} has not logged any plates today. Snap a photo in chat to auto-detect macros!
+                      <div className="diary-empty-state">🍳 {activeUser} has not logged any plates today. Use the camera button below to scan a plate.</div>
+                    ) : loggedMeals.map((meal, idx) => (
+                      <div key={idx} className="diary-item">
+                        <div className="diary-item-info"><h4>{meal.name}</h4><span>Log Time: {meal.time}</span></div>
+                        <div className="diary-item-macros">🔥 {meal.calories} kcal<span>P: {meal.macros.protein}g | C: {meal.macros.carbs}g | F: {meal.macros.fat}g</span></div>
                       </div>
-                    ) : (
-                      loggedMeals.map((meal, idx) => (
-                        <div key={idx} className="diary-item">
-                          <div className="diary-item-info">
-                            <h4>{meal.name}</h4>
-                            <span>Log Time: {meal.time}</span>
-                          </div>
-                          <div className="diary-item-macros">
-                            🔥 {meal.calories} kcal
-                            <span>P: {meal.macros.protein}g | C: {meal.macros.carbs}g | F: {meal.macros.fat}g</span>
-                          </div>
-                        </div>
-                      ))
-                    )}
+                    ))}
                   </div>
-                </div>
-
+                </article>
               </div>
-            </div>
+            </section>
+          )}
 
-            {/* PANEL 3: GROCERY CHECKLIST */}
-            <div id="panel-groceries" className={`tab-panel ${activeTab === "groceries" ? "active" : ""}`}>
-              <div className="grocery-layout-triple" style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 1fr", gap: "20px" }}>
-                
-                {/* Dynamic Shopping Cart */}
+          {activeTab === "groceries" && (
+            <section className="page-view groceries-page" aria-label="Grocery cart">
+              <div className="section-heading page-heading">
                 <div>
-                  <h3 style={{ fontSize: "15px", fontWeight: 700, marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    🛒 Shopping Cart
-                  </h3>
-                  <div id="grocery-list-grid" className="grocery-list-container">
-                    {totalCount === 0 ? (
-                      <div className="diary-empty-state">
-                        🛒 Your shopping cart is empty! Check back once a meal plan is configured.
-                      </div>
-                    ) : (
-                      Object.keys(groupedGroceries).map(category => (
-                        <div key={category} className="grocery-category">
-                          <div className="grocery-category-title">{category}</div>
-                          {groupedGroceries[category].map((item, idx) => {
-                            const isStocked = item.alreadyStocked;
-                            const isChecked = item.checked;
-                            
-                            return (
-                              <div
-                                key={idx}
-                                className={`grocery-item-row ${isChecked && !isStocked ? "completed" : ""} ${isStocked ? "stocked-in-pantry completed" : ""}`}
-                              >
-                                <label className="grocery-checkbox-label">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    disabled={isStocked}
-                                    onChange={() => toggleGroceryItem(item.name)}
-                                  />
-                                  <span className="item-name">{item.name}</span>
-                                </label>
-                                {isStocked ? (
-                                  <span className="stocked-badge">Met (Pantry)</span>
-                                ) : (
-                                  <span className="grocery-item-qty">
-                                    {Math.round(item.amount * 100) / 100} {item.unit}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <span className="eyebrow">Shared household cart</span>
+                  <h2>Grocery Cart</h2>
                 </div>
-
-                {/* Pantry Stock / Fridge Inventory */}
-                <div style={{ background: "rgba(255,255,255,0.01)", border: "1px solid var(--glass-border)", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "14px", maxHeight: "600px", overflowY: "auto" }}>
-                  <div>
-                    <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--accent-primary)", display: "flex", alignItems: "center", gap: "6px" }}>
-                      ❄️ Pantry Stock (In Fridge)
-                    </h3>
-                    <p style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "2px" }}>
-                      Stock levels here subtract automatically from your cart required totals!
-                    </p>
-                  </div>
-                  
-                  {/* Add Pantry Item Form */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "10px", background: "rgba(0,0,0,0.15)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.03)" }}>
-                    <h4 style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)" }}>
-                      Quick Add Fridge Stock
-                    </h4>
-                    <input
-                      type="text"
-                      placeholder="Item name..."
-                      value={pantryAddName}
-                      onChange={(e) => setPantryAddName(e.target.value)}
-                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--glass-border)", borderRadius: "6px", color: "#fff", padding: "6px 10px", fontSize: "12px", outline: "none" }}
-                    />
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <input
-                        type="number"
-                        placeholder="Qty"
-                        value={pantryAddAmount}
-                        min="0.1"
-                        step="0.1"
-                        onChange={(e) => setPantryAddAmount(parseFloat(e.target.value) || 1)}
-                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--glass-border)", borderRadius: "6px", color: "#fff", padding: "6px", fontSize: "12px", width: "60px", textAlign: "center", outline: "none" }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Unit"
-                        value={pantryAddUnit}
-                        onChange={(e) => setPantryAddUnit(e.target.value)}
-                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--glass-border)", borderRadius: "6px", color: "#fff", padding: "6px 8px", fontSize: "12px", flex: 1, outline: "none" }}
-                      />
+                <button className="grocery-checkout-btn" onClick={() => checkoutItems.length === 0 ? triggerBannerAlert("🛒 Your cart has no pending items to checkout!") : setMcpModalOpen(true)}>
+                  Preview Blinkit Payload
+                </button>
+              </div>
+              <div className="grocery-page-grid">
+                <section className="grocery-list-container">
+                  {totalCount === 0 ? (
+                    <div className="diary-empty-state">🛒 Your shopping cart is empty. Ask Kitch what groceries to order for tomorrow.</div>
+                  ) : Object.keys(groupedGroceries).map(category => (
+                    <div key={category} className="grocery-category">
+                      <div className="grocery-category-title">{category}</div>
+                      {groupedGroceries[category].map((item, idx) => (
+                        <div key={idx} className={`grocery-item-row ${item.checked ? "completed" : ""}`}>
+                          <label className="grocery-checkbox-label">
+                            <input type="checkbox" name={`grocery-${idx}`} checked={item.checked} disabled={item.alreadyStocked} onChange={() => toggleGroceryItem(item.name)} />
+                            <span className="item-name">{item.name}</span>
+                          </label>
+                          <span className={item.alreadyStocked ? "stocked-badge" : "grocery-item-qty"}>{item.alreadyStocked ? "Met (Pantry)" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</span>
+                        </div>
+                      ))}
                     </div>
-                    <button
-                      onClick={() => {
-                        addPantryItem(pantryAddName, pantryAddAmount, pantryAddUnit);
-                        triggerBannerAlert(`Manually added ${pantryAddAmount} ${pantryAddUnit} of "${pantryAddName}" to Fridge Stock.`);
-                        setPantryAddName("");
-                      }}
-                      style={{ background: "var(--accent-primary)", border: "none", borderRadius: "6px", color: "var(--text-inverse)", fontWeight: 700, fontSize: "12px", padding: "6px 0", cursor: "pointer", transition: "var(--transition-smooth)" }}
-                    >
-                      Add Stock
-                    </button>
+                  ))}
+                </section>
+                <section className="pantry-card">
+                  <div><h3 className="section-title section-title-sage">Pantry Stock</h3><p className="section-note">Stock levels subtract from your cart required totals.</p></div>
+                  <div className="pantry-add-box">
+                    <h4>Quick Add Fridge Stock</h4>
+                    <input id="pantry-item-name" name="pantry-item-name" type="text" placeholder="Item name..." value={pantryAddName} onChange={(e) => setPantryAddName(e.target.value)} />
+                    <div className="pantry-amount-row">
+                      <input id="pantry-item-qty" name="pantry-item-qty" type="number" placeholder="Qty" value={pantryAddAmount} min="0.1" step="0.1" onChange={(e) => setPantryAddAmount(parseFloat(e.target.value) || 1)} />
+                      <input id="pantry-item-unit" name="pantry-item-unit" type="text" placeholder="Unit" value={pantryAddUnit} onChange={(e) => setPantryAddUnit(e.target.value)} />
+                    </div>
+                    <button onClick={() => { addPantryItem(pantryAddName, pantryAddAmount, pantryAddUnit); triggerBannerAlert(`Manually added ${pantryAddAmount} ${pantryAddUnit} of "${pantryAddName}" to Fridge Stock.`); setPantryAddName(""); }}>Add Stock</button>
                   </div>
-
-                  {/* Pantry Stock List */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {pantryStock.length === 0 ? (
-                      <div className="diary-empty-state" style={{ padding: "16px", fontSize: "11px" }}>
-                        ❄️ Fridge inventory is empty! Add items manually or click Scan Fridge to upload an image.
+                  <div className="pantry-list">
+                    {pantryStock.length === 0 ? <div className="diary-empty-state diary-empty-state-compact">❄️ Fridge inventory is empty. Use the camera button below to scan it.</div> : pantryStock.map((pantryItem, idx) => (
+                      <div key={idx} className="pantry-item-row">
+                        <div className="pantry-item-row-info"><strong>{pantryItem.name}</strong><span>{pantryItem.amount} {pantryItem.unit} available</span></div>
+                        <button className="pantry-item-delete" onClick={() => { removePantryItem(idx); triggerBannerAlert(`Removed "${pantryItem.name}" from your fridge inventory.`); }}>&times;</button>
                       </div>
-                    ) : (
-                      pantryStock.map((pantryItem, idx) => (
-                        <div key={idx} className="pantry-item-row">
-                          <div className="pantry-item-row-info">
-                            <strong style={{ color: "#fff", display: "block" }}>{pantryItem.name}</strong>
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{pantryItem.amount} {pantryItem.unit} available</span>
-                          </div>
-                          <button
-                            className="pantry-item-delete"
-                            onClick={() => {
-                              removePantryItem(idx);
-                              triggerBannerAlert(`Removed "${pantryItem.name}" from your fridge inventory.`);
-                            }}
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      ))
-                    )}
+                    ))}
                   </div>
-                </div>
-
-                {/* Custom list options sidebar */}
-                <div className="grocery-summary-sidebar" style={{ height: "fit-content" }}>
+                </section>
+                <aside className="grocery-summary-sidebar">
                   <div className="grocery-add-form">
                     <h4>Add Custom Cart Item</h4>
-                    <input
-                      type="text"
-                      placeholder="E.g. Sparkling water, napkins..."
-                      value={groceryCustomName}
-                      onChange={(e) => setGroceryCustomName(e.target.value)}
-                    />
-                    <select
-                      value={groceryCustomCat}
-                      onChange={(e) => setGroceryCustomCat(e.target.value)}
-                    >
+                    <input id="custom-grocery-name" name="custom-grocery-name" type="text" placeholder="E.g. Sparkling water, napkins..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
+                    <select id="custom-grocery-category" name="custom-grocery-category" value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
                       <option value="Fresh Produce">Fresh Produce</option>
                       <option value="Proteins & Dairy">Proteins & Dairy</option>
                       <option value="Grains & Bakery">Grains & Bakery</option>
                       <option value="Pantry & Spices">Pantry & Spices</option>
                     </select>
-                    <button
-                      className="grocery-add-btn"
-                      onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}
-                    >
-                      Add to Cart
-                    </button>
+                    <button className="grocery-add-btn" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}>Add to Cart</button>
                   </div>
-
-                  <hr style={{ border: 0, height: "1px", background: "rgba(255,255,255,0.06)" }} />
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Required items:</span>
-                      <strong>{totalCount}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Stocked / Met:</span>
-                      <strong style={{ color: "var(--accent-primary)" }}>{checkedCount}</strong>
-                    </div>
-                  </div>
-
-                  <button
-                    className="grocery-checkout-btn"
-                    onClick={() => {
-                      if (checkoutItems.length === 0) {
-                        triggerBannerAlert("🛒 Your cart has no pending items to checkout!");
-                      } else {
-                        setMcpModalOpen(true);
-                      }
-                    }}
-                  >
-                    📦 Preview Blinkit Payload
-                  </button>
-                </div>
-
+                  <hr className="soft-divider" />
+                  <div className="grocery-summary-stats"><div><span>Required items:</span><strong>{totalCount}</strong></div><div><span>Stocked / Met:</span><strong>{checkedCount}</strong></div></div>
+                </aside>
               </div>
-            </div>
+            </section>
+          )}
+        </main>
+      </div>
 
-          </div>
-        </section>
-      </main>
+      <form id="chat-input-form" className={`smart-input-dock ${smartDockExpanded ? "expanded" : ""}`} onSubmit={handleChatSubmit}>
+        <div className="smart-chat-thread" aria-live="polite">
+          {chatHistory.slice(-2).map((msg, index) => (
+            <div key={`${msg.time}-${index}`} className={`smart-chat-bubble ${msg.sender}`}>
+              <div className="message-markdown">
+                {msg.text.split("\n").slice(0, 6).map((line, lidx) => {
+                  const boldRegex = /\*\*(.*?)\*\*/g;
+                  const parts = line.split(boldRegex);
+                  return (
+                    <p key={lidx}>
+                      {parts.map((part, pidx) => pidx % 2 === 1 ? <strong key={pidx}>{part}</strong> : part)}
+                    </p>
+                  );
+                })}
+              </div>
+              <span>{msg.time}</span>
+            </div>
+          ))}
+          {isChatTyping && (
+            <div className="smart-chat-bubble agent typing-bubble">
+              <div className="typing-dots"><span></span><span></span><span></span></div>
+            </div>
+          )}
+        </div>
+        <div className="quick-prompt-row">
+          {quickPrompts.map(prompt => (
+            <button key={prompt} type="button" onClick={() => setChatInput(prompt)}>
+              {prompt}
+            </button>
+          ))}
+        </div>
+        <div className="smart-input-shell">
+          <button type="button" className="input-icon-btn" aria-label="Voice input">🎙️</button>
+          <input
+            type="text"
+            id="chat-user-input"
+            name="chat-user-input"
+            placeholder="Ask Kitch to plan, log, or add items..."
+            autoComplete="off"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+          />
+          <label className="input-icon-btn" aria-label="Upload plate image">
+            🖼️
+            <input name="plate-image-upload" type="file" accept="image/*" className="hidden-file-input" onChange={(e) => handleRealPhotoUpload(e.target.files[0], false)} />
+          </label>
+          <label className="input-icon-btn" aria-label="Open camera to scan fridge">
+            📷
+            <input name="camera-fridge-upload" type="file" accept="image/*" capture="environment" className="hidden-file-input" onChange={(e) => handleRealPhotoUpload(e.target.files[0], true)} />
+          </label>
+          <button type="submit" className="smart-send-btn" disabled={isChatTyping}>↑</button>
+        </div>
+      </form>
 
       {/* PROVIDER PAYLOAD REVIEW DIALOG */}
       {mcpModalOpen && (
         <div id="mcp-modal" className="modal-overlay active">
-          <div className="modal-box" style={{ maxWidth: "500px" }}>
-            <div className="modal-header" style={{ background: "rgba(245, 158, 11, 0.1)", borderBottomColor: "rgba(245, 158, 11, 0.2)" }}>
-              <h3 style={{ color: "var(--accent-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="modal-box">
+            <div className="modal-header">
+              <h3>
                 📦 Provider Payload Review
               </h3>
               <button className="modal-close-btn" onClick={() => setMcpModalOpen(false)}>&times;</button>
             </div>
-            <div className="modal-body" style={{ padding: "20px" }}>
-              <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "12px" }}>
+            <div className="modal-body">
+              <p className="modal-note">
                 Review the provider payload below. The live Blinkit MCP cart connection is not configured yet.
               </p>
               
-              <div style={{ background: "#020617", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "12px", fontFamily: "monospace", fontSize: "11px", color: "#a5f3fc", overflowX: "auto", marginBottom: "16px" }}>
-                <span style={{ color: "#6ee7b7" }}>{"// Blinkit provider payload preview"}</span><br/>
+              <div className="payload-preview">
+                <span>{"// Blinkit provider payload preview"}</span><br/>
                 <strong>blinkit_payload.prepare</strong>({`{`}<br/>
-                &nbsp;&nbsp;items: <span style={{ color: "#fca5a5" }} id="mcp-items-json">{JSON.stringify(checkoutItems, null, 2)}</span>,<br/>
-                &nbsp;&nbsp;household_size: <span style={{ color: "#f59e0b" }} id="mcp-household-val">{householdSize}</span><br/>
+                &nbsp;&nbsp;items: <span id="mcp-items-json">{JSON.stringify(checkoutItems, null, 2)}</span>,<br/>
+                &nbsp;&nbsp;household_size: <span id="mcp-household-val">{householdSize}</span><br/>
                 {`})`}
               </div>
               
-              <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+              <div className="modal-actions">
                 <button
                   id="mcp-reject-btn"
+                  className="modal-reject"
                   onClick={() => {
                     setMcpModalOpen(false);
                     triggerBannerAlert("Blinkit payload preview dismissed.");
                   }}
-                  style={{ flex: 1, padding: "10px 0", borderRadius: "6px", border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "var(--accent-coral)", fontWeight: "600", cursor: "pointer" }}
                 >
-                  Reject Tool
+                  Dismiss
                 </button>
                 <button
                   id="mcp-approve-btn"
+                  className="modal-approve"
                   onClick={async () => {
                     setMcpModalOpen(false);
                     
@@ -1168,7 +1106,6 @@ export default function Home() {
                     const updatedCustom = customGroceryItems.map(item => ({ ...item, checked: true }));
                     setCustomGroceryItems(updatedCustom);
                   }}
-                  style={{ flex: 1, padding: "10px 0", borderRadius: "6px", border: "none", background: "var(--accent-primary)", color: "var(--text-inverse)", fontWeight: "600", cursor: "pointer" }}
                 >
                   Prepare Payload
                 </button>
