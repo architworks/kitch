@@ -1,0 +1,62 @@
+[
+  {
+    "id": "2.3",
+    "status": "PASS",
+    "details": "All salmon meals replaced. Schedule preserved: 21 \u2192 21 slots.",
+    "timestamp": "2026-05-30T17:01:49.665895"
+  },
+  {
+    "id": "6.1",
+    "status": "PASS",
+    "details": "Grocery list generated. Pantry update: yes. Tools: ['add_to_pantry_tool', 'add_to_pantry_tool', 'add_to_pantry_tool', 'calculate_intermediary_grocery_list']",
+    "timestamp": "2026-05-30T17:02:05.007357"
+  },
+  {
+    "id": "7.2",
+    "status": "PASS",
+    "details": "Agent acknowledged category preference. Routing: ['checkout_exporter']",
+    "timestamp": "2026-05-30T17:02:08.922348"
+  },
+  {
+    "id": "8.2",
+    "status": "PASS",
+    "details": "Correctly resolved 'tomorrow morning' to saturday breakfast.",
+    "timestamp": "2026-05-30T17:02:13.387485"
+  },
+  {
+    "id": "8.3",
+    "status": "PASS",
+    "details": "Agent queried macro diary for daily calorie check.",
+    "timestamp": "2026-05-30T17:02:17.962487"
+  },
+  {
+    "id": "9.3",
+    "status": "PASS",
+    "details": "Routed to checkout_exporter and called export_to_delivery.",
+    "timestamp": "2026-05-30T17:02:35.404852"
+  },
+  {
+    "id": "9.4",
+    "status": "PASS",
+    "details": "Agent proactively suggested next steps. Routing: []",
+    "timestamp": "2026-05-30T17:02:42.767706"
+  },
+  {
+    "id": "12.1",
+    "status": "PASS",
+    "details": "Used scale_ingredients tool for 10 people.",
+    "timestamp": "2026-05-30T17:02:49.249916"
+  },
+  {
+    "id": "12.2",
+    "status": "PASS",
+    "details": "Logged cheat meal: 2500 kcal",
+    "timestamp": "2026-05-30T17:02:54.205813"
+  },
+  {
+    "id": "3.3",
+    "status": "PASS",
+    "details": "Black coffee logged correctly: 5 kcal",
+    "timestamp": "2026-05-30T17:03:00.322351"
+  }
+]

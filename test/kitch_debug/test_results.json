@@ -1,0 +1,62 @@
+[
+  {
+    "id": "1.1",
+    "status": "PASS",
+    "details": "Plan saved. Schedule has 21 slots.",
+    "timestamp": "2026-05-30T15:19:30.916077"
+  },
+  {
+    "id": "2.1",
+    "status": "PASS",
+    "details": "Used update_single_meal_in_schedule correctly. Plan preserved: 21 \u2192 21 slots.",
+    "timestamp": "2026-05-30T15:19:37.740957"
+  },
+  {
+    "id": "3.1",
+    "status": "PASS",
+    "details": "Meal logged: 'Lunch: 2 rotis and dal' \u2014 450 kcal, P:18g C:62g F:10g",
+    "timestamp": "2026-05-30T15:19:43.701824"
+  },
+  {
+    "id": "3.2",
+    "status": "PASS",
+    "details": "Smoothie logged: 'Smoothie: banana, peanut butter, oats, and milk' \u2014 455 kcal",
+    "timestamp": "2026-05-30T15:19:52.933550"
+  },
+  {
+    "id": "5.1",
+    "status": "PASS",
+    "details": "Grocery list calculated using the intermediary tool.",
+    "timestamp": "2026-05-30T15:20:02.814763"
+  },
+  {
+    "id": "7.1",
+    "status": "PASS",
+    "details": "Brand preference saved: {'bread': \"Baker's Dozen whole wheat\"}",
+    "timestamp": "2026-05-30T15:20:09.297018"
+  },
+  {
+    "id": "8.1",
+    "status": "PASS",
+    "details": "Agent checked schedule and responded with today's (saturday) dinner.",
+    "timestamp": "2026-05-30T15:20:17.232429"
+  },
+  {
+    "id": "9.1",
+    "status": "PASS",
+    "details": "Coordinator handled greeting without routing.",
+    "timestamp": "2026-05-30T15:20:19.248883"
+  },
+  {
+    "id": "9.2",
+    "status": "PASS",
+    "details": "Correctly routed 'I'm hungry' to chef_planner.",
+    "timestamp": "2026-05-30T15:20:32.257708"
+  },
+  {
+    "id": "10.2",
+    "status": "PASS",
+    "details": "Agent queried macro diary to check daily calories.",
+    "timestamp": "2026-05-30T15:20:43.525430"
+  }
+]
