@@ -6,6 +6,8 @@ We have eliminated all hardcoded recipe catalogs, catalog indexes, and rigid ari
 
 We have also **secured the entire codebase** by removing all hardcoded credentials from the repository, moving them dynamically to gitignored local `.env` files.
 
+Furthermore, we **scrubbed the git history** of our branch to remove historical occurrences of the secret keys, bypassing the GitHub Push Protection block and successfully pushing all local commits to `origin/dev` cleanly.
+
 ---
 
 ## 🛠️ Complete Multi-Agent Topology & System Architecture
@@ -84,19 +86,14 @@ flowchart TD
   * In the production app [core.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/core.py), keys are loaded dynamically from a gitignored local `backend/.env` file.
 *   **Parity and gitignore**: Standardized the `.gitignore` pattern `**/__pycache__/` to ensure compiled caches are ignored recursively, and confirmed that both `.env` credential files are completely ignored by git.
 
----
-
-## ⚡ Verification & Clean Status
-
-1.  **FastAPI Syntax Validation**: We ran the python compiler check across all modified production files:
+### 5. Git History Scrubbing & Successful Push
+*   **GitHub Push Protection block**: The OpenAI API key was committed to historical commits (`7a9b4aefef60`, `23121d94eee9`, `963959e21cf1`), causing GitHub's push protection system to decline push requests to `dev`.
+*   **History rewriting**: Executed a `git filter-branch --tree-filter` command to recursively search and replace all occurrences of the Azure OpenAI secret key with `REMOVED_KEY` across the 7 local commits ahead of the remote:
     ```bash
-    venv/bin/python -m py_compile app/agent/core.py app/agent/tools.py app/main.py
+    git filter-branch --force --tree-filter "find . -type f -not -path '*/.git/*' -exec sed -i '' 's/<SECRET_KEY>/REMOVED_KEY/g' {} +" origin/dev..HEAD
     ```
-    The compilation completed successfully with **zero syntax, NameError, or import exceptions**.
-2.  **Live Uvicorn Hot-Reload**: The running backend microservice detected the file changes, reloaded dependencies, and bound all routers successfully:
+*   **Verified Key Removal**: Validated the complete removal of the secret string using `git log -S`, yielding a 100% clean, secret-free commit log.
+*   **Clean push**: Successfully pushed the branch to remote origin dev:
     ```
-    INFO:     Started server process [80692]
-    INFO:     Waiting for application startup.
-    INFO:     Application startup complete.
+    dc6f592..7bd97ef  dev -> dev
     ```
-3.  **Active Connections**: Next.js frontend and FastAPI backend are fully online and synced, with natural agentic routing running smoothly on the local host!
