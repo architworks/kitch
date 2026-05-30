@@ -20,11 +20,11 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("planner"); // planner, analytics, groceries
   const [dietPreference, setDietPreference] = useState("balanced");
   const [householdSize, setHouseholdSize] = useState(3);
-  const [activeUser, setActiveUser] = useState("Dynamite");
+  const [activeUser, setActiveUser] = useState("Archit(me)");
   const [userProfiles, setUserProfiles] = useState({
-    "Dynamite": { name: "Dynamite", loggedMeals: [] },
-    "Housemate A": { name: "Housemate A", loggedMeals: [] },
-    "Housemate B": { name: "Housemate B", loggedMeals: [] }
+    "Archit(me)": { name: "Archit(me)", loggedMeals: [] },
+    "Anubhav": { name: "Anubhav", loggedMeals: [] },
+    "Naman": { name: "Naman", loggedMeals: [] }
   });
   const [pantryStock, setPantryStock] = useState([
     { name: "Cabbage head", amount: 1, unit: "whole" },
@@ -667,9 +667,9 @@ export default function Home() {
               value={activeUser}
               onChange={(e) => switchActiveUser(e.target.value)}
             >
-              <option value="Dynamite">Dynamite (You)</option>
-              <option value="Housemate A">Housemate A</option>
-              <option value="Housemate B">Housemate B</option>
+              <option value="Archit(me)">Archit (me)</option>
+              <option value="Anubhav">Anubhav</option>
+              <option value="Naman">Naman</option>
             </select>
           </div>
 

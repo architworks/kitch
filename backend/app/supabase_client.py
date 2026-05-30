@@ -16,9 +16,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Helper: Map user names to static test UUIDs
 USER_ID_MAP = {
     "Archit": "00000000-0000-0000-0000-000000000000",
+    "Archit(me)": "00000000-0000-0000-0000-000000000000",
     "Anubhav": "11111111-1111-1111-1111-111111111111",
     "Naman": "22222222-2222-2222-2222-222222222222"
 }
