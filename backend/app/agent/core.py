@@ -40,7 +40,7 @@ gemini_35_config = GenerateContentConfig(
 chef_planner = LlmAgent(
     model="gemini-3.5-flash",
     name="chef_planner",
-    description="Nutritionist and chef Spoke agent focused on schedule database mutations.",
+    description="Handles all requests related to meal planning, suggesting recipes, scaling ingredient quantities, querying the weekly schedule, saving meal plans, and swapping or updating recipe slots on the calendar.",
     instruction=(
         "You are Kitch's Chef Planner sub-agent, the private chef and nutritionist for the household.\n"
         "Your role is to manage plans, recipes, scale ingredient sizes, and execute schedule updates.\n\n"
@@ -63,7 +63,7 @@ chef_planner = LlmAgent(
 vision_scanner = LlmAgent(
     model="gemini-3.5-flash",
     name="vision_scanner",
-    description="Multimodal visual scanning Spoke agent mapping fridge and plate snaps to Supabase.",
+    description="Processes image uploads of food plates or fridge/pantry shelves. Performs visual ingredient detection, calorie/macronutrient estimation, logging macro intakes, and updating pantry stock based on pictures.",
     instruction=(
         "You are Kitch's Vision Scanner sub-agent, interpreting photo uploads for the household.\n"
         "Your role is to identify visual plate meals or fridge shelves items and proactively log them.\n\n"
@@ -85,7 +85,7 @@ vision_scanner = LlmAgent(
 checkout_exporter = LlmAgent(
     model="gemini-3.5-flash",
     name="checkout_exporter",
-    description="Checkout logistics Spoke agent resolving brand memory and syncing MCP carts.",
+    description="Handles compiling grocery shopping lists, recording housemate brand preferences, mapping generic ingredients to branded products, and exporting/synchronizing final carts to Blinkit or Zepto.",
     instruction=(
         "You are Kitch's Checkout Exporter sub-agent, managing intermediate lists and logistics.\n"
         "Your role is to resolve custom brand rules from memory and sync final carts to MCP providers.\n\n"

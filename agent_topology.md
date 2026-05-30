@@ -16,42 +16,57 @@ flowchart TD
     Runner --> Gateway
     
     %% Native Services Layer
-    subgraph ADK_Services [ADK 2.0 Context & Persistence]
-        SessionSvc[(DatabaseSessionService<br>SQLite / PostgreSQL)]
-        MemorySvc{MemoryService<br>In-Memory / Vertex AI}
+    subgraph ADK_Services ["ADK 2.0 In-Memory Services"]
+        SessionSvc[(InMemorySessionService)]
+        MemorySvc{InMemoryMemoryService}
     end
     
     Runner --- SessionSvc
     Runner --- MemorySvc
     
     %% Parent Coordinator
-    Runner --> Parent[Kitch Coordinator Agent<br>General Manager / Triage]
-    Parent --> Runner
+    Runner --> Parent["kitch_coordinator (Central Hub / Triage Agent)"]
     
-    %% Multi-Agent Routing & Delegation (3-Spoke Topology)
-    subgraph Agent_Team [Kitch Collaborative Spoke Team]
-        SubChef[Chef Planner Agent<br>Nutritionist & Chef]
-        SubVision[Vision Scanner Agent<br>Multimodal OCR]
-        SubCart[Checkout Exporter Agent<br>Logistics & Brand Memory]
+    %% Multi-Agent Routing & Delegation (3-Spoke Team)
+    subgraph Agent_Team ["Kitch Collaborative Spoke Team"]
+        SubChef["chef_planner (Nutritionist & Chef Agent)"]
+        SubVision["vision_scanner (Multimodal Visual OCR Agent)"]
+        SubCart["checkout_exporter (Logistics & Brand Memory Agent)"]
     end
     
-    Parent -->|Delegates meal plans| SubChef
-    SubChef -->|Returns results| Parent
+    Parent -->|Delegates scheduling| SubChef
+    Parent -->|Delegates images| SubVision
+    Parent -->|Delegates logistics| SubCart
     
-    Parent -->|Delegates photo snaps| SubVision
-    SubVision -->|Returns logs| Parent
+    %% Spoke Tools & DB Connections
+    subgraph Chef_Tools ["chef_planner Tools"]
+        T_Recipes[get_recipes]
+        T_Scale[scale_ingredients]
+        T_GetSched[get_weekly_schedule_tool]
+        T_SavePlan[save_weekly_plan_tool]
+        T_SwapMeal[update_single_meal_in_schedule]
+    end
+    SubChef --> Chef_Tools
+    Chef_Tools -->|Queries & Upserts| SupabasePlanner["Supabase DB (meal_plans & recipes)"]
     
-    Parent -->|Delegates checkout| SubCart
-    SubCart -->|Returns sync status| Parent
+    subgraph Vision_Tools ["vision_scanner Tools"]
+        T_AddPantry[add_to_pantry_tool]
+        T_LogMacros[log_macros_tool]
+        T_GetPantry[get_pantry_stock_tool]
+        T_GetMacroDiary[get_macro_diary_tool]
+    end
+    SubVision --> Vision_Tools
+    Vision_Tools -->|Logs Macros & Fridge Stock| SupabaseDiary["Supabase DB (macro_diary & pantry_stock)"]
     
-    %% Specialized Spoke Dependencies
-    SubChef -->|DB Tools| DB[(Supabase DB<br>meal_plans & recipes)]
-    
-    SubVision -->|Multimodal Ingestion| Gemini[Gemini Multimodal API]
-    SubVision -->|Log Tools| DB[(Supabase DB<br>macro_diary & pantry_stock)]
-    
-    SubCart -->|search_memory| MemorySvc
-    SubCart -->|MCP Exporter Tool| MCP[Blinkit / Zepto MCP Cart]
+    subgraph Checkout_Tools ["checkout_exporter Tools"]
+        T_Export[export_to_delivery]
+        T_GetBrand[get_brand_preference]
+        T_SetBrand[set_brand_preference]
+    end
+    SubCart --> Checkout_Tools
+    T_SetBrand -->|Writes Brand Prefs| MemorySvc
+    T_Export -->|Reads Brand Prefs| MemorySvc
+    T_Export -->|Syncs Cart| MCP["Blinkit / Zepto MCP Cart"]
 ```
 
 ---
