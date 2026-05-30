@@ -1,0 +1,170 @@
+[
+  {
+    "id": "1.1",
+    "prompt": "Plan my meals for next week. Keep it balanced and diverse.",
+    "outcome": "Saved weekly plan dynamically to Supabase. Found 7 daily plans in DB.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:25:34.848409"
+  },
+  {
+    "id": "1.2",
+    "prompt": "Actually, I'm feeling like eating Indian food this week. Plan a completely new weekly meal plan focusing on delicious Indian dishes.",
+    "outcome": "Successfully generated Indian meal plan in Supabase. Detected keywords: ['paneer', 'roti', 'chole', 'dal', 'masala', 'chilla', 'poha', 'curry', 'rice']",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:26:00.525855"
+  },
+  {
+    "id": "1.3",
+    "prompt": "Change my preference to keto and make a full weekly keto meal plan.",
+    "outcome": "Successfully created keto weekly plan in Supabase. Keto keywords: ['keto', 'chia', 'egg', 'avocado', 'almond', 'spinach', 'chicken', 'paneer', 'salad']. Carb exclusions active.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:26:25.792188"
+  },
+  {
+    "id": "2.1",
+    "prompt": "Actually, swap Thursday dinner with something vegan.",
+    "outcome": "Thursday dinner swapped from 'Kerala-Style Coconut Fish Curry with Stir-Fried Beans' to 'Vegan Keto Tofu Coconut Curry with Stir-Fried Beans'. Plan preserved: 7 slots intact.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:26:47.498689"
+  },
+  {
+    "id": "2.2",
+    "prompt": "Change Monday breakfast to chia pudding",
+    "outcome": "Monday breakfast updated successfully to 'Keto Coconut Chia Pudding with Almonds'. All other slots intact.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:27:07.276562"
+  },
+  {
+    "id": "2.3",
+    "prompt": "I don't like salmon, replace it wherever it appears in my weekly meal plan.",
+    "outcome": "Checked schedule, found and replaced all occurrences of salmon successfully.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:27:30.215358"
+  },
+  {
+    "id": "3.1",
+    "prompt": "I ate 2 rotis and dal for lunch today",
+    "outcome": "Logged roti and dal lunch. Estimated: 430 kcal, P:16g, C:72g, F:8g",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:28:02.056900"
+  },
+  {
+    "id": "3.2",
+    "prompt": "Had a smoothie \u2014 banana, peanut butter, oats, milk",
+    "outcome": "Logged smoothie successfully. Estimated: 595 kcal.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:28:07.718369"
+  },
+  {
+    "id": "3.3",
+    "prompt": "Just had a black coffee, nothing else",
+    "outcome": "Black coffee logged with low calorie estimation: 2 kcal.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:28:30.619109"
+  },
+  {
+    "id": "4.1",
+    "prompt": "Log this salad plate photo",
+    "outcome": "Successfully ingested salad plate image and logged: 'Mixed salad plate' with 220 kcal.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:28:38.304119"
+  },
+  {
+    "id": "4.2",
+    "prompt": "Update my pantry with this fridge scan",
+    "outcome": "Fridge scan succeeded but pantry stock table is empty in DB.",
+    "status": "PARTIAL",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:28:41.966646"
+  },
+  {
+    "id": "5.1",
+    "prompt": "What groceries do I need for the week?",
+    "outcome": "Generated weekly grocery list dynamically using schedule query and agent reasoning.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:29:20.243503"
+  },
+  {
+    "id": "5.2",
+    "prompt": "Make a shopping list",
+    "outcome": "Successfully compiled shopping checklist dynamically.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:29:36.718945"
+  },
+  {
+    "id": "6.1",
+    "prompt": "I already have eggs and avocado, update the grocery list.",
+    "outcome": "Automatically added eggs/avocado to pantry stock in DB: ['eggs', 'avocado']. Grocery list compiled dynamically with stock subtracted.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:29:59.609148"
+  },
+  {
+    "id": "6.2",
+    "prompt": "Log my fridge scan and tell me what else I still need to buy",
+    "outcome": "multimodal scan updated pantry. Returned list respects pantry: 2 items in stock.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:07.186898"
+  },
+  {
+    "id": "7.1",
+    "prompt": "For bread, always get Baker's Dozen whole wheat",
+    "outcome": "Saved brand preference in native ADK memory. Brand mapping active in delivery export: 'Successfully synchronized 1 items to Blinkit MCP cart (with ADK native brand memory active). Mapped items: [{'name': \"Baker's Dozen Whole Wheat Bread\", 'qty': 1, 'unit': 'loaf'}]'",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:14.246651"
+  },
+  {
+    "id": "7.2",
+    "prompt": "Never add cereals or cookies to my grocery list \u2014 only dairy, fruits, and veggies.",
+    "outcome": "Agent acknowledged category exclusion preference: 'Got it \u2705 I\u2019ll **never add cereals or cookies** to your grocery lists.\n\nI\u2019ll also keep future grocery lists focused on **dairy, fruits, and vegetables ...'",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:18.878096"
+  },
+  {
+    "id": "7.3",
+    "prompt": "I prefer Amul butter over any other brand",
+    "outcome": "Successfully recorded Amul butter brand preference and applied to Zepto checkout cart: 'Successfully synchronized 1 items to Zepto MCP cart (with ADK native brand memory active). Mapped items: [{'name': 'Amul Butter', 'qty': 1, 'unit': 'pack'}]'",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:23.106316"
+  },
+  {
+    "id": "8.1",
+    "prompt": "What's for dinner tonight?",
+    "outcome": "Agent resolved today is Saturday and pulled recipe: 'Tonight is **Saturday**, and dinner is:\n\n## **Paneer Butter Masala and Rice**\n\nA rich, creamy paneer curry with rice \u2014 comforting and classic.'",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:41.333390"
+  },
+  {
+    "id": "8.2",
+    "prompt": "What am I eating tomorrow morning?",
+    "outcome": "Agent resolved tomorrow is Sunday and retrieved breakfast: 'Tomorrow morning is **Sunday breakfast**, and you\u2019re scheduled to eat:\n\n## **Avocado Toast**'",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:30:55.975853"
+  },
+  {
+    "id": "8.3",
+    "prompt": "How many calories have I eaten today so far?",
+    "outcome": "Agent queried macro diary and calculated daily total: 1247 kcal.",
+    "status": "PASS",
+    "fix_applied": "None",
+    "timestamp": "2026-05-30T21:31:09.546007"
+  }
+]

@@ -115,7 +115,7 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
           "lunch_recipe_id": str(lunch).strip(),
           "dinner_recipe_id": str(dinner).strip(),
           "snack_recipe_id": str(snack).strip()
-      }).execute()
+      }, on_conflict="profile_id,day").execute()
       
     return {"status": "success", "message": "Successfully synchronized weekly plan to database."}
   except Exception as e:
@@ -150,6 +150,7 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
     if response.data:
         # Row exists, update target column and carry over other columns
         row = response.data[0]
+        data["id"] = row.get("id")
         data["breakfast_recipe_id"] = row.get("breakfast_recipe_id")
         data["lunch_recipe_id"] = row.get("lunch_recipe_id")
         data["dinner_recipe_id"] = row.get("dinner_recipe_id")
@@ -168,7 +169,7 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
         
     data[target_col] = str(new_recipe_name).strip()
     
-    supabase.table("meal_plans").upsert(data).execute()
+    supabase.table("meal_plans").upsert(data, on_conflict="profile_id,day").execute()
     return {"status": "success", "message": f"Successfully updated {day_clean} {meal_category} to '{new_recipe_name}'."}
   except Exception as e:
     return {"status": "error", "message": f"Database update failed: {str(e)}"}
