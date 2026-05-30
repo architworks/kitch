@@ -77,7 +77,7 @@ flowchart TD
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: We updated the FastAPI `/api/state/{user_name}` endpoint in [main.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/main.py) to fetch the live database meal plan using a new `get_weekly_schedule_dict` helper and return it in the state payload.
 *   **React Integration**: We updated `syncLiveState` in Next.js's [page.js](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/frontend/src/app/page.js) to hot-sync this `weekly_plan` React state. We also added reactive updates that trigger a state refresh whenever the agent modifies the planner or pantry.
-*   **Grid Rendering**: The weekly planner dashboard renders dynamic recipe name strings directly from Supabase. The old local static recipe picker/catalog is no longer the source of truth for planner rendering.
+*   **Grid Rendering**: The weekly planner dashboard renders dynamic recipe name strings directly from Supabase. The old local static recipe picker/catalog is no longer the source of truth for planner rendering. The planner also shows the upcoming Monday-Sunday planning date window instead of highlighting a future weekday as "Today."
 
 ### 4. Codebase Credential Security & gitignore
 *   **Zero hardcoded credentials**: We completely extracted all Azure OpenAI gateway credentials (`OPENAI_API_KEY`, `OPENAI_API_BASE`, `OPENAI_MODEL_NAME`) out of the codebase.

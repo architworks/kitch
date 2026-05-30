@@ -29,9 +29,16 @@ def get_current_datetime() -> str:
   Returns the current date, time, and day of the week.
   Use this to answer questions like "what day is today", "what's for dinner tonight", etc.
   """
-  from datetime import datetime
+  from datetime import datetime, timedelta
   now = datetime.now()
-  return now.strftime("Today is %A, %B %d, %Y. The current time is %I:%M %p.")
+  days_until_next_monday = ((7 - now.weekday()) % 7) or 7
+  planning_start = now + timedelta(days=days_until_next_monday)
+  planning_end = planning_start + timedelta(days=6)
+  return (
+    now.strftime("Today is %A, %B %d, %Y. The current time is %I:%M %p. ")
+    + f"The upcoming planning week runs from {planning_start.strftime('%A, %B %d, %Y')} "
+    + f"through {planning_end.strftime('%A, %B %d, %Y')}."
+  )
 
 def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """

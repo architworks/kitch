@@ -8,8 +8,10 @@ import {
   HOUSEHOLD_MEMBERS,
   MEAL_SLOTS,
   WEEK_DAYS,
+  createEmptyPlanningWeekDates,
   createEmptyWeeklyPlan,
-  createUserProfiles
+  createUserProfiles,
+  getUpcomingPlanningWeekDates
 } from "./householdConfig.js";
 
 // Default welcome messaging
@@ -32,7 +34,7 @@ export default function Home() {
   const [weeklyPlan, setWeeklyPlan] = useState(createEmptyWeeklyPlan);
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
-  const [currentWeekday, setCurrentWeekday] = useState("");
+  const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
   // UI state variables
   const [chatInput, setChatInput] = useState("");
@@ -93,8 +95,10 @@ export default function Home() {
     try {
       const data = await fetchLiveState(userName);
       applyLiveState(userName, data);
+      return data;
     } catch (e) {
       console.error("Failed to sync live state with Supabase backend", e);
+      return null;
     }
   };
 
@@ -120,7 +124,7 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setCurrentWeekday(new Date().toLocaleDateString("en-US", { weekday: "long" }));
+      setPlanningWeekDates(getUpcomingPlanningWeekDates());
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -333,6 +337,8 @@ export default function Home() {
         }
       ]);
 
+      await syncLiveState(activeUser);
+
       if (response.action) {
         const act = response.action;
         if (act.type === "SWITCH_DIET") {
@@ -344,14 +350,11 @@ export default function Home() {
           else if (textLower.includes("balanced")) newDiet = "balanced";
 
           setDietPreference(newDiet);
-          syncLiveState(activeUser);
           triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
         } else if (act.type === "UPDATE_PLANNER") {
           triggerBannerAlert("Planner modified by Kitch Agent!");
-          syncLiveState(activeUser);
         } else if (act.type === "UPDATE_PANTRY") {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
-          syncLiveState(activeUser);
         }
       }
     } catch (e) {
@@ -751,19 +754,26 @@ export default function Home() {
             <div id="panel-planner" className={`tab-panel ${activeTab === "planner" ? "active" : ""}`}>
               <div className="planner-view">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h3 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h3>
+                  <div>
+                    <h3 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h3>
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
+                      {planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label
+                        ? `Planning week: ${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}`
+                        : "Planning week: upcoming Monday - Sunday"}
+                    </div>
+                  </div>
                   <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>Ask Kitch in chat to create or swap meals.</span>
                 </div>
                 
                 <div id="weekly-plan-grid" className="weekly-grid">
                   {WEEK_DAYS.map(day => {
                     const dayMeals = weeklyPlan[day] || {};
-                    const isToday = day === currentWeekday;
+                    const dateMeta = planningWeekDates[day] || {};
 
                     return (
-                      <div key={day} className={`day-column ${isToday ? "today" : ""}`}>
-                        <div className="day-title">{isToday ? "Today" : day}</div>
-                        <div className="day-calories">Agent-generated plan</div>
+                      <div key={day} className="day-column">
+                        <div className="day-title">{day}</div>
+                        <div className="day-calories">{dateMeta.label || "Upcoming week"}</div>
 
                         {MEAL_SLOTS.map(slot => {
                           const recipeName = dayMeals[slot];

@@ -70,6 +70,7 @@ The frontend no longer owns a static recipe catalog or default weekly recipe IDs
 
 - Backend returns planner rows as display-ready meal names.
 - The planner renders the actual recipe name strings saved by the ADK chef planner.
+- The planner displays an explicit upcoming Monday-Sunday date window. It does not label future plan days as "Today" just because the weekday matches the current weekday.
 - Meal swaps are requested through chat, not through a local static recipe picker.
 - `mockData.js` currently contains diet macro targets only.
 
@@ -175,6 +176,7 @@ It has no domain tools of its own.
 Its duties:
 
 - Generate dynamic weekly meal plans.
+- Treat "next week" planning as the upcoming Monday-Sunday planning window and include exact dates in chat responses.
 - Store recipe name strings in Supabase.
 - Update a single meal slot without rewriting the rest of the plan.
 - Answer "what is for dinner" style schedule questions.

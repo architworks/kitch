@@ -19,6 +19,39 @@ export const WEEK_DAYS = [
 
 export const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"];
 
+export function createEmptyPlanningWeekDates() {
+  return WEEK_DAYS.reduce((dates, day) => {
+    dates[day] = { label: "", longLabel: "", iso: "" };
+    return dates;
+  }, {});
+}
+
+export function getUpcomingPlanningWeekDates(referenceDate = new Date()) {
+  const start = new Date(referenceDate);
+  start.setHours(0, 0, 0, 0);
+
+  const currentDay = start.getDay();
+  const daysUntilNextMonday = ((8 - currentDay) % 7) || 7;
+  start.setDate(start.getDate() + daysUntilNextMonday);
+
+  return WEEK_DAYS.reduce((dates, day, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+
+    dates[day] = {
+      iso: date.toISOString().slice(0, 10),
+      label: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      longLabel: date.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric"
+      })
+    };
+
+    return dates;
+  }, {});
+}
+
 export function createEmptyWeeklyPlan() {
   return WEEK_DAYS.reduce((plan, day) => {
     plan[day] = {

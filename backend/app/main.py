@@ -116,6 +116,9 @@ async def chat_endpoint(payload: ChatRequest):
             diet_preference=payload.diet_preference,
             household_size=payload.household_size
         )
+
+        weekly_plan_before = get_weekly_schedule_dict()
+        pantry_before = get_pantry_stock()
         
         # 3. Construct a standard Content message for the ADK runner
         user_message = Content(
@@ -133,11 +136,22 @@ async def chat_endpoint(payload: ChatRequest):
             if event.is_final_response() and event.content and event.content.parts:
                 text_reply = event.content.parts[0].text
                 
-        # Detect if the model triggered grocery lists or planner sync actions
+        weekly_plan_after = get_weekly_schedule_dict()
+        pantry_after = get_pantry_stock()
+
+        # Detect persisted state changes first; text phrasing is only a fallback.
         action = None
         text_lower = text_reply.lower()
         
-        if "swapped" in text_lower or "modified your meal plan" in text_lower:
+        if weekly_plan_after and weekly_plan_after != weekly_plan_before:
+            action = {"type": "UPDATE_PLANNER"}
+        elif pantry_after != pantry_before:
+            action = {"type": "UPDATE_PANTRY"}
+        elif (
+            "swapped" in text_lower
+            or "modified your meal plan" in text_lower
+            or ("meal plan" in text_lower and "saved" in text_lower)
+        ):
             action = {"type": "UPDATE_PLANNER"}
         elif "dietary alignment complete" in text_lower or "switched dietary profile" in text_lower:
             action = {"type": "SWITCH_DIET"}
