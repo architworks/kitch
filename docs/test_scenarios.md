@@ -113,4 +113,4 @@ We successfully compiled and executed the test suites covering all **20 scenario
 | Suite | Scenarios Checked | Status | Outcome Details |
 |---|---|---|---|
 | **Round 1 (Core Mechanics)** | 10 Scenarios (1.1, 2.1, 3.1, 3.2, 5.1, 7.1, 8.1, 9.1, 9.2, 10.2) | **10 / 10 PASS** | Isolated session state works, brand preferences correctly record to ADK context, and database-bound logging tools execute successfully. |
-| **Round 2 (Edge Cases & Memory)** | 10 Scenarios (2.3, 6.1, 7.2, 8.2, 8.3, 9.3, 9.4, 12.1, 12.2, 3.3) | **10 / 10 PASS** | Decoupled cross-session brand mappings successfully injected during Blinkit MCP cart checkout. Guest scaling and empty states resolved perfectly. |
+| **Round 2 (Edge Cases & Memory)** | 10 Scenarios (2.3, 6.1, 7.2, 8.2, 8.3, 9.3, 9.4, 12.1, 12.2, 3.3) | **10 / 10 PASS** | Decoupled cross-session brand mappings successfully injected during provider payload preparation. Guest scaling and empty states resolved perfectly. |

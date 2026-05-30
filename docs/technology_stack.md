@@ -1,13 +1,13 @@
-# Production Technology Stack & Deployment Blueprint: PlateWise AI
+# Production Technology Stack & Deployment Blueprint: Kitch
 
 > [!NOTE]
-> This document outlines the **Production Technology Stack** for PlateWise AI. In accordance with project requirements, we prioritize **industry-standard free tiers** for hosting, databases, and APIs. We structure the app using a decoupled frontend/backend framework to natively support the Python-based Google Antigravity SDK.
+> This document outlines the **Production Technology Stack** for Kitch. In accordance with project requirements, we prioritize **industry-standard free tiers** for hosting, databases, and APIs. We structure the app using a decoupled frontend/backend framework to support the Python-based Google ADK 2.0 agent runtime.
 
 ---
 
 ## 1. High-Level Architectural Flow
 
-To ensure high performance while leveraging Vercel's hosting features and the Python-only Google Antigravity SDK, we propose a **Split Architecture**:
+To ensure high performance while leveraging Vercel's hosting features and the Python ADK runtime, we use a **Split Architecture**:
 
 ```mermaid
 graph LR
@@ -17,7 +17,7 @@ graph LR
     
     subgraph Render / Railway Free Container
         FastAPI[FastAPI Python Backend]
-        SDK[Google Antigravity SDK]
+        SDK[Google ADK 2.0]
         FastAPI <--> SDK
     end
     
@@ -26,15 +26,15 @@ graph LR
     end
     
     subgraph External APIs
-        Gemini[Google AI Studio Gemini API]
-        Blinkit[Blinkit Playwright MCP Server]
+        LLM[OpenAI-Compatible LLM Gateway]
+        Blinkit[Blinkit Playwright MCP Server - deferred]
         WhatsApp[Twilio WhatsApp Gateway]
     end
 
     NextJS <-->|REST API / SSE| FastAPI
     FastAPI <-->|SQL Queries| Supabase
-    SDK <-->|Multimodal LLM Calls| Gemini
-    SDK -->|Pluggable Adapter| Blinkit
+    SDK <-->|Multimodal LLM Calls| LLM
+    SDK -->|Future Pluggable Adapter| Blinkit
     WhatsApp <-->|Webhooks| FastAPI
 ```
 
@@ -49,8 +49,8 @@ graph LR
     *   *Includes*: Global CDN, SSL certificates, serverless API functions, and Git-integrated deployments.
 
 ### ⚙️ 2. Python Agentic Backend
-*   **Technology**: **FastAPI + Python 3.11+ + Google Antigravity SDK**.
-*   **Why**: The Antigravity SDK is a native Python library (`google-antigravity`). FastAPI is an extremely lightweight, high-performance web framework designed for asynchronous execution, making it the perfect gateway to run Antigravity's async loops.
+*   **Technology**: **FastAPI + Python 3.11+ + Google ADK 2.0**.
+*   **Why**: Google ADK provides native Python agent orchestration primitives (`LlmAgent`, `Runner`, `App`, session services, memory services). FastAPI is an extremely lightweight, high-performance web framework designed for asynchronous execution, making it the gateway for ADK turns.
 *   **Hosting**: **Render (Free Web Services)** or **Railway (Developer Plan)**.
     *   *Why*: Vercel serverless functions have a 10–15s timeout on free plans, which is too short for complex agentic loops or vision scans. A lightweight, hosted container on Render or Railway allows the Python process to remain persistent, handling long-lived chat streams, vision file parsing, and MCP operations.
 
@@ -59,20 +59,20 @@ graph LR
 *   **Why**: 
     *   **Generous Free Tier**: Includes 500MB database, 1GB file storage, and up to 50,000 active monthly users.
     *   **Postgres Power**: Perfect for relational structures (joining recipes, calendars, pantry inventory lists, and user profiles).
-    *   **Built-in Auth**: Standardizes multi-user profile authentication (so Dynamite, Housemate A, and Housemate B can log in securely).
+    *   **Built-in Auth**: Standardizes multi-user profile authentication for the current configured household members and future registered households.
 
 ### 🧠 4. Multimodal Generative AI
-*   **Technology**: **Google AI Studio (Gemini 2.0 Flash / Gemini 2.5 Flash)**.
+*   **Technology**: **OpenAI-compatible LLM gateway via ADK `LiteLlm`**.
 *   **Why**:
-    *   **Generous Free Tier**: Highly competitive rate limits on the free tier (up to 15 RPM / 1 million tokens/min).
-    *   **Gemini Multimodal Native**: Gemini is built from the ground up to handle visual files. Image bytes from fridge snaps and plate logs are logged directly via the Antigravity SDK's native file handler.
+    *   **Gateway Flexibility**: The backend reads `OPENAI_MODEL_NAME`, `OPENAI_API_KEY`, and `OPENAI_API_BASE` from environment variables.
+    *   **Multimodal Input**: Image bytes from fridge snaps and plate logs are passed through ADK-compatible content parts to the active agent turn.
 
 ### 🛒 5. Grocery Provisioning & Delivery (MCP)
-*   **Technology**: **Blinkit Model Context Protocol (MCP) Server** (`hereisSwapnil/blinkit-mcp`).
+*   **Technology**: **Blinkit Model Context Protocol (MCP) Server** (`hereisSwapnil/blinkit-mcp`) - planned.
 *   **Mechanism**:
-    *   The Blinkit MCP server runs a local **Playwright** browser engine under the hood. 
-    *   When the user approves an MCP cart tool call (`export_to_delivery`), the Blinkit Adapter maps the platform-agnostic Intermediary Grocery List items to Blinkit catalog matches, invokes the MCP tool, and automates product searches and cart placement.
-    *   UPI payment is finalized manually by the user on the Blinkit application.
+    *   The current app prepares provider-shaped payloads and applies ADK memory brand preferences.
+    *   Real Blinkit MCP cart insertion is deferred until the provider connection is configured.
+    *   UPI payment remains manual in the grocery provider app when this adapter is eventually wired.
 
 ### 💬 6. Conversational Chat Channels
 *   **WhatsApp API Gateway**: **Twilio (Free sandbox/trial)**.
@@ -88,9 +88,11 @@ All service integrations are connected securely using standard environment varia
 
 | Variable Name | Provider Source | Role in System |
 | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google AI Studio (Free) | Powers the Antigravity Agent and Subagent reasoning |
-| `SUPABASE_DB_URL` | Supabase Settings (Free) | Relational connection string for the database |
-| `SUPABASE_ANON_KEY` | Supabase API Keys (Free) | Authenticates frontend database fetches |
+| `OPENAI_MODEL_NAME` | LLM gateway config | Selects the ADK `LiteLlm` model |
+| `OPENAI_API_KEY` | LLM gateway config | Authenticates model calls |
+| `OPENAI_API_BASE` | LLM gateway config | Points ADK `LiteLlm` to the OpenAI-compatible base URL |
+| `SUPABASE_URL` | Supabase Settings | Supabase project URL |
+| `SUPABASE_KEY` | Supabase API Keys | Authenticates backend Supabase access |
 | `TELEGRAM_BOT_TOKEN` | BotFather (Free) | Auth token for conversational Telegram bot |
 | `TWILIO_AUTH_TOKEN` | Twilio Console (Trial) | Validates incoming WhatsApp webhook signatures |
 
@@ -99,5 +101,5 @@ All service integrations are connected securely using standard environment varia
 ## 4. Why This Configuration Works Best
 
 *   **100% Cost-Free Prototyping**: You can develop, host, and test the entire system without inputting a credit card.
-*   **Complete Separation of Concerns**: Next.js is focused on rendering interactive visual charts, planners, and lists, while the FastAPI service focuses on running the Antigravity agentic loops.
+*   **Complete Separation of Concerns**: Next.js is focused on rendering interactive visual charts, planners, and lists, while the FastAPI service focuses on running the ADK agentic loops.
 *   **Robust Data Integrity**: Relational constraints in PostgreSQL prevent mismatched calendar items or incorrect pantry deductions during concurrent swaps.

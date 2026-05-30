@@ -2,7 +2,10 @@
 
 This document records the programmatic integration tests run against the **live full-stack application** (FastAPI backend endpoints and live Supabase persistence) as of **2026-05-30 21:31:09**.
 
-## 🏆 Overall Outcome: 20 / 21 PASS (100% Success)
+> [!NOTE]
+> Checkout-related rows validate brand-memory mapping and provider payload preparation. Live Blinkit/Zepto MCP cart insertion is not currently implemented and is intentionally deferred until a provider MCP connection is configured.
+
+## 🏆 Overall Outcome: 20 / 21 PASS, 1 PARTIAL
 
 ---
 
@@ -71,11 +74,11 @@ Below is the verification trace for all 20 live scenarios:
 
 | Scenario | User Prompt | Outcome & Live Supabase Verification | Status |
 |---|---|---|---|
-| **7.1** | "For bread, always get Baker's Dozen whole wheat" | Saved brand preference in native ADK memory. Brand mapping active in delivery export: 'Successfully synchronized 1 items to Blinkit MCP cart (with ADK native brand memory active). Mapped items: [{'name': "Baker's Dozen Whole Wheat Bread", 'qty': 1, 'unit': 'loaf'}]' | **✅ PASS** |
+| **7.1** | "For bread, always get Baker's Dozen whole wheat" | Saved brand preference in native ADK memory. Brand mapping active in delivery payload preparation: mapped bread to Baker's Dozen Whole Wheat Bread. Live MCP cart insertion was not part of this validation. | **✅ PASS** |
 | **7.2** | "Never add cereals or cookies to my grocery list — only dairy, fruits, and veggies." | Agent acknowledged category exclusion preference: 'Got it ✅ I’ll **never add cereals or cookies** to your grocery lists.
 
 I’ll also keep future grocery lists focused on **dairy, fruits, and vegetables ...' | **✅ PASS** |
-| **7.3** | "I prefer Amul butter over any other brand" | Successfully recorded Amul butter brand preference and applied to Zepto checkout cart: 'Successfully synchronized 1 items to Zepto MCP cart (with ADK native brand memory active). Mapped items: [{'name': 'Amul Butter', 'qty': 1, 'unit': 'pack'}]' | **✅ PASS** |
+| **7.3** | "I prefer Amul butter over any other brand" | Successfully recorded Amul butter brand preference and applied it to Zepto-style payload preparation. Live MCP cart insertion was not part of this validation. | **✅ PASS** |
 
 ### 8. 🕐 Datetime Awareness
 
@@ -96,5 +99,5 @@ A rich, creamy paneer curry with rice — comforting and classic.' | **✅ PASS*
 ## 🏁 Summary of Accomplishments
 1. **No More Database Upsert Conflicts**: Live plans are now fully editable and updatable without any unique key exceptions.
 2. **End-to-End Multimodal Integration**: Tested image uploads for food logs and fridge scans, persisting directly in Supabase.
-3. **Persistent Native Memory**: Verified whole-wheat bread and butter brand mappings flowing directly from ADK's native memory into delivery checkout exports.
+3. **Persistent Native Memory**: Verified whole-wheat bread and butter brand mappings flowing directly from ADK's native memory into delivery payload preparation.
 4. **Time & Portions Math**: Confirmed date/time awareness for dynamic schedule queries and portion calculations are fully functional.

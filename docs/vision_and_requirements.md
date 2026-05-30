@@ -15,8 +15,8 @@ Modern life demands split-second decisions about what we eat, yet managing nutri
 3. **Subtracts ingredients you already own** (pantry/fridge stock) from the weekly grocery orders to eliminate redundant buying.
 4. **Maintains a platform-agnostic, Intermediary Native Grocery List** in its local database, separating planned needs from delivery logistics.
 5. **Logs nutrition with zero friction** on an *individualized* basis using simple photo uploads.
-6. **Remembers your precise ingredient brand preferences** using decentralized, offline local workspace memory files (`brand_preferences.md`) which the agent updates conversationally and consults natively during checkouts.
-7. **Integrates with modular grocery delivery tools (like Blinkit MCP)** via a flexible Adapter Pattern, letting users review and order their list from their provider of choice with active human-in-the-loop approvals.
+6. **Remembers your precise ingredient brand preferences** using agent-native plain-text memory that can later move to Vertex AI Memory Bank without forcing rigid relational schemas.
+7. **Prepares modular grocery delivery payloads (Blinkit/Zepto style)** via a flexible adapter boundary. Live provider MCP cart insertion is intentionally deferred until a provider connection is configured.
 
 ```mermaid
 graph TD
@@ -29,11 +29,12 @@ graph TD
     CoreAI --> VisionEngine[Plate & Fridge Vision Scanner]
     CoreAI --> PantryStock[Shared Pantry Inventory]
     CoreAI --> NativeList[Intermediary Native Grocery List]
-    CoreAI <-->|Natively Reads & Writes| BrandPref[Local Workspace Brand Memory File]
+    CoreAI <-->|Natively Reads & Writes| BrandPref[ADK Memory: Plain-Text Brand Preferences]
     
     NativeList -->|Modular Adapter Layer| DeliveryRouter{Delivery Provider Router}
-    DeliveryRouter -->|Blinkit Adapter| BlinkitMCP[Blinkit MCP Cart]
-    DeliveryRouter -->|Zepto Adapter| ZeptoMCP[Zepto MCP Cart]
+    DeliveryRouter -->|Current Preview| ProviderPayload[Provider Payload Review]
+    DeliveryRouter -->|Future Adapter| BlinkitMCP[Blinkit MCP Cart]
+    DeliveryRouter -->|Future Adapter| ZeptoMCP[Zepto MCP Cart]
     DeliveryRouter -->|Future Adapters| OtherAPI[Instacart / BigBasket API]
 ```
 
@@ -59,27 +60,27 @@ graph TD
 *Shared collaborative assets alongside private personal health tracking.*
 *   **The Shared Household Mind (Pantry & Weekly Schedule):** Pantry inventories, weekly recipe calendars, and intermediary grocery lists are collaborative household assets. All housemates see, edit, and subtract from the *same* physical inventory.
 *   **The Individual Minds (Macro Diaries & User Preferences):** Calorie progress dials, daily macronutrient logs (Protein, Carbs, Fats, Fiber), and health journals are isolated **independently** per household member. 
-*   **Frictionless Personal Logs:** If Dynamite snaps a photo of their lunch, it logs macros only to Dynamite's target diary. Housemate A and Housemate B's personal diaries remain separate and private.
+*   **Frictionless Personal Logs:** If the active member snaps a photo of their lunch, it logs macros only to that member's target diary. Other members' personal diaries remain separate.
 
 ### 📸 Pillar 4: Snap & Log (Computer Vision OCR)
 *Say goodbye to tedious manual logging.*
 *   **Photo-Based Estimation:** Snap a picture of your plate after eating. The multimodal GenAI identifies ingredients, estimates portion sizes, and logs personal macro/micro values.
 *   **Interactive Refinement:** The AI presents its best estimate ("Looks like 150g grilled chicken, 100g quinoa. Correct?") and lets you confirm or adjust with a simple tap.
 
-### 📝 Pillar 5: Decentralized Brand Preferences & Local File Memory
+### 📝 Pillar 5: Agent-Native Brand Preferences
 *No redundant relational table overhead. The agent manages its own records.*
-*   **Local Preferences Markdown:** Rather than storing brand preferences in strict database tables, Kitch records your specific brand settings (e.g., always ordering bread from Brand A, paneer from Brand B) in a local markdown file (`brand_preferences.md`).
-*   **Active Conversational Updates:** If you casually tell Kitch during a chat: *"Oh, remember to always buy Country Delight milk from now on,"* the agent utilizes its file editing tools to update your preference markdown dynamically.
-*   **Checkout Consulting:** When you export your cart to Blinkit, the agent reads the local markdown file to translate generic recipe ingredients (e.g. "paneer 200g") into your favored branded SKUs (e.g., "Amul Malai Paneer 200g") in the delivery checkout payloads.
-*   **Resource-Light Memory:** This file memory is only consulted when necessary, preventing bloat in the main conversational LLM prompt context window on routine chit-chat.
+*   **Plain-Text Preference Memory:** Rather than storing brand preferences in strict database tables, Kitch records specific brand settings as flexible text in ADK memory.
+*   **Active Conversational Updates:** If you casually tell Kitch during a chat: *"Oh, remember to always buy Country Delight milk from now on,"* the agent stores that preference for later grocery preparation.
+*   **Checkout Consulting:** When you prepare a provider payload, the agent consults brand memory to translate generic recipe ingredients (e.g. "paneer 200g") into favored branded items (e.g. "Amul Malai Paneer 200g").
+*   **Deployment Path:** Local testing currently uses ADK in-memory services. Deployment should replace that with Vertex AI Memory Bank for persistence.
 
-### 💬 Pillar 6: Conversational Chat & Delivery Verification
-*An agent that lives in your ecosystem and fills your actual shopping cart.*
-*   **Blinkit/Zepto MCP Cart Provisioning:** Finalized grocery lists can be exported directly into your grocery app cart via MCP tool hooks.
-*   **Human-in-the-loop Review:** Before any grocery order is submitted, the application presents a clear terminal review prompt displaying the exact list. The order is placed only after explicit human approval.
+### 💬 Pillar 6: Conversational Chat & Delivery Preparation
+*An agent that lives in your ecosystem and prepares delivery-ready grocery payloads.*
+*   **Blinkit/Zepto Payload Preparation:** Finalized grocery lists can be mapped into provider-style payloads. Direct MCP cart insertion is a planned integration, not current behavior.
+*   **Human-in-the-loop Review:** Before any future provider automation runs, the application presents a clear review prompt displaying the exact list. Current behavior stops at payload preparation.
 *   **Conversational Chat (Telegram/WhatsApp):** Interact with Kitch on-the-go:
     *   *“We have chicken and spinach in the fridge, what can we make for the 3 of us tonight?”*
-    *   *“Remember that Dynamite always prefers strictly organic whole wheat bread.”*
+    *   *“Remember that our household prefers strictly organic whole wheat bread.”*
     *   *“Export my shopping list to Blinkit.”*
 
 ---
@@ -108,10 +109,10 @@ graph TD
 ### Feature Set 4: Workspace File Memory & MCP Delivery
 | Feature ID | Feature Name | Description | User Impact |
 | :--- | :--- | :--- | :--- |
-| **REQ-008** | Brand Preference Memory | Agent maintains and conversationally updates a local workspace file (`brand_preferences.md`) detailing specific item brands. | Customizes order fulfillment automatically. |
+| **REQ-008** | Brand Preference Memory | Agent maintains conversational plain-text brand preferences in ADK memory, later migratable to Vertex AI Memory Bank. | Customizes grocery payload preparation without rigid schema rules. |
 | **REQ-009** | Native Intermediary List | Maintains a unified, provider-agnostic required shopping list in the database. | Decouples groceries from merchants. |
-| **REQ-010** | Modular Exporter (MCP) | Exposes pluggable delivery adapters (Blinkit, Zepto, etc.) to map native items to branded merchant cart payloads. | Prepares for multi-app expansion. |
-| **REQ-011** | Human-in-the-loop Review | Displays an authorization dialog showing cart JSON inputs, prompting for explicit user approval before execution. | High security and error prevention. |
+| **REQ-010** | Modular Exporter Boundary | Exposes pluggable delivery adapter boundaries (Blinkit, Zepto, etc.) to map native items to branded merchant payloads. | Prepares for multi-app expansion. |
+| **REQ-011** | Human-in-the-loop Review | Displays an authorization dialog showing provider payload inputs before any future provider execution. | High security and error prevention. |
 
 ---
 
@@ -120,33 +121,33 @@ graph TD
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Dynamite as Dynamite (Telegram)
+    actor Archit as Archit (Telegram)
     participant Agent as Kitch Agent
-    participant File as brand_preferences.md
+    participant Memory as ADK Memory
     participant DB as Supabase DB
-    participant Blinkit as Blinkit MCP Cart
+    participant Payload as Provider Payload Preview
     
-    Note over Dynamite, File: Scenario A: Updating Brand Preferences
-    Dynamite->>Agent: "Remember to always order bread of brand Bakers Dozen."
-    Agent->>File: Write preference ("bread" -> "Bakers Dozen Whole Wheat")
-    File-->>Agent: Preference saved successfully
-    Agent->>Dynamite: "📝 Got it! I've updated your brand preferences file. I'll always map bread to Bakers Dozen."
+    Note over Archit, Memory: Scenario A: Updating Brand Preferences
+    Archit->>Agent: "Remember to always order bread of brand Bakers Dozen."
+    Agent->>Memory: Save preference ("bread" -> "Bakers Dozen Whole Wheat")
+    Memory-->>Agent: Preference saved successfully
+    Agent->>Archit: "Got it. I've updated household brand memory. I'll map bread to Bakers Dozen."
     
-    Note over Dynamite, DB: Scenario B: Shared Subtracted List Compilation
-    Dynamite->>Agent: "Compile our grocery list."
+    Note over Archit, DB: Scenario B: Shared Subtracted List Compilation
+    Archit->>Agent: "Compile our grocery list."
     Agent->>DB: Pull planned ingredients, subtract shared pantry, write required items
     DB->>Agent: Shared native list compiled
-    Agent->>Dynamite: "Household Shopping List compiled in your database."
+    Agent->>Archit: "Household Shopping List compiled in your database."
     
-    Note over Dynamite, Blinkit: Scenario C: Brand-Mapped Checkout
-    Dynamite->>Agent: "Export our grocery list to Blinkit."
-    Agent->>File: Read brand preferences
-    File-->>Agent: Brand maps returned
-    Agent->>Blinkit: Map native ingredients (e.g. 'bread') to branded items (e.g. 'Bakers Dozen Bread')
-    Blinkit->>Dynamite: Prompt [Human Approval Dialog]
-    Dynamite->>Blinkit: Click [APPROVE MCP CALL]
-    Blinkit->>Agent: Sync Cart Successful!
-    Agent->>Dynamite: "✨ Success! Blinkit cart loaded with your preferred branded products."
+    Note over Archit, Payload: Scenario C: Brand-Mapped Checkout Prep
+    Archit->>Agent: "Export our grocery list to Blinkit."
+    Agent->>Memory: Read brand preferences
+    Memory-->>Agent: Brand maps returned
+    Agent->>Payload: Map native ingredients (e.g. 'bread') to branded items (e.g. 'Bakers Dozen Bread')
+    Payload->>Archit: Prompt [Provider Payload Review]
+    Archit->>Payload: Click [Prepare Payload]
+    Payload->>Agent: Payload prepared
+    Agent->>Archit: "Blinkit payload prepared with your preferred branded products. MCP cart connection is not configured yet."
 ```
 
 ---

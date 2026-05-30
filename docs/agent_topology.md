@@ -70,7 +70,7 @@ flowchart TD
     SubCart --> Checkout_Tools
     T_SetBrand -->|Writes Brand Prefs| MemorySvc
     T_Export -->|Reads Brand Prefs| MemorySvc
-    T_Export -->|Syncs Cart| MCP["Blinkit / Zepto MCP Cart"]
+    T_Export -->|Prepares Payload Until Adapter Exists| MCP["Blinkit / Zepto MCP Cart"]
 ```
 
 ---
@@ -109,9 +109,9 @@ flowchart TD
 *   **Role**: The multimodal vision interpretation engine.
 *   **Sub-Agents**: None.
 *   **Tools**:
-    1.  `add_to_pantry_tool(user_name: str, ingredient_name: str, amount: float, unit: str)`: Appends segmented fridge items directly into Supabase's pantry stock.
+    1.  `add_to_pantry_tool(user_name: str, ingredient_name: str, amount: float, unit: str)`: Appends segmented fridge items directly into the shared household pantry stock.
     2.  `log_macros_tool(user_name: str, meal_name: str, calories: int, protein: int, carbs: int, fat: int, fiber: int)`: Inserts estimated plate calories and macros into the individual housemate's macro diary.
-    3.  `get_pantry_stock_tool(user_name: str)`: Fetches current pantry items.
+    3.  `get_pantry_stock_tool(user_name: str)`: Fetches current shared household pantry items.
     4.  `get_macro_diary_tool(user_name: str)`: Queries logs for daily totals.
     5.  `get_current_datetime()`: Provides date and time context.
 *   **Memory & Database Scope**: Ingests multimodal image bytes; writes to shared pantry or isolated individual macro tables.
@@ -126,16 +126,16 @@ flowchart TD
 *   **Role**: The household logistics and smart brand-mapping coordinator.
 *   **Sub-Agents**: None.
 *   **Tools**:
-    1.  `export_to_delivery(items: list[dict], provider: str)`: Filters unstocked required items, checks brand memory rules, and pushes payloads to the Blinkit/Zepto MCP cart.
+    1.  `export_to_delivery(items: list[dict], provider: str)`: Filters unstocked required items, checks brand memory rules, and prepares a Blinkit/Zepto-style provider payload. Real MCP cart insertion is not wired yet.
     2.  `get_brand_preference(ingredient: str)`: Native tool helper representing brand lookup confirmations.
     3.  `set_brand_preference(ingredient: str, branded_sku: str)`: Native tool to write a brand choice permanently to the shared household `MemoryService` when discussed.
-    4.  `get_pantry_stock_tool(user_name: str)`: Queries what's currently in the household stock.
+    4.  `get_pantry_stock_tool(user_name: str)`: Queries what's currently in the shared household stock.
     5.  `add_to_pantry_tool(user_name: str, ingredient_name: str, amount: float, unit: str)`: Registers existing items.
     6.  `get_weekly_schedule_tool()`: Fetches recipe names in the active meal plan.
     7.  `get_current_datetime()`: Date and time context.
-*   **Memory & Database Scope**: Queries the unified household `MemoryService` and communicates with the Stdio/SSE MCP delivery server tools.
+*   **Memory & Database Scope**: Queries the unified household `MemoryService` and prepares delivery-provider payloads. Stdio/SSE MCP delivery server execution is deferred until the provider connection is configured.
 *   **Instruction Focus**:
     *   **Agent-Driven Shopping Lists**: Generates required grocery lists dynamically using its own culinary knowledge. It pulls current planned recipe names (`get_weekly_schedule_tool`), pulls pantry stock (`get_pantry_stock_tool`), scales ingredient requirements for household sizes, performs the subtraction mathematically, and formats the shopping list in clean markdown with categories.
     *   If the user says they already have items at home, it calls `add_to_pantry_tool` to update pantry stock first, then compiles the updated grocery list.
     *   Applies semantic mappings to replace generic items with branded preferences from native memory during checkouts.
-    *   Enforces secure Human-in-the-Loop confirmations before order placement.
+    *   Enforces secure Human-in-the-Loop payload review before any future provider-side order placement.

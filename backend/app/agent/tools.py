@@ -1,10 +1,9 @@
 # Kitch: Core ADK 2.0 Custom Tools
 
-import os
-import math
 import json as _json
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
+from app.household_config import DEFAULT_ACTIVE_USER, get_household_profile_id
 from app.supabase_client import (
     get_pantry_stock as db_get_pantry_stock,
     add_to_pantry as db_add_to_pantry,
@@ -34,14 +33,13 @@ def get_current_datetime() -> str:
   now = datetime.now()
   return now.strftime("Today is %A, %B %d, %Y. The current time is %I:%M %p.")
 
-def get_weekly_schedule_dict(user_name: str = "Archit") -> Dict[str, Dict[str, str]]:
+def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """
-  Queries Supabase to fetch the current week's planned meal schedule for the household.
+  Queries Supabase to fetch the household's current planned meal schedule.
   Transforms DB rows into frontend's expected dictionary mapping weekdays to meal categories and recipe names.
   """
   try:
-    from app.supabase_client import get_user_id
-    profile_id = get_user_id(user_name)
+    profile_id = get_household_profile_id()
     response = supabase.table("meal_plans").select("*").eq("profile_id", profile_id).execute()
     
     plan_dict = {}
@@ -70,7 +68,7 @@ def get_weekly_schedule_dict(user_name: str = "Archit") -> Dict[str, Dict[str, s
     print(f"Error fetching weekly schedule dict: {e}")
     return {}
 
-def get_weekly_schedule_tool(user_name: str = "Archit") -> Dict[str, Dict[str, str]]:
+def get_weekly_schedule_tool(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """
   Fetch the current week's planned meal schedule for the household.
   Returns a dictionary mapping day of week to meal slots and their recipe names.
@@ -78,7 +76,7 @@ def get_weekly_schedule_tool(user_name: str = "Archit") -> Dict[str, Dict[str, s
   """
   return get_weekly_schedule_dict(user_name)
 
-def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str = "Archit") -> Dict[str, Any]:
+def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str = "") -> Dict[str, Any]:
   """
   Saves the entire structured 7-day weekly meal plan to the database.
   Each day's meals map directly to the recipe name string (e.g. "Avocado Toast", "Spaghetti Carbonara").
@@ -87,11 +85,10 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
   Args:
       weekly_plan: Dict mapping day names to meal category -> recipe name mappings.
                    Example: {"Monday": {"breakfast": "Scrambled Eggs", "lunch": "Salad", "dinner": "Tofu Stir-fry"}, ...}
-      user_name: Profile name to associate with this meal plan (default: "Archit")
+      user_name: Ignored for now. Meal plans are shared by the configured household.
   """
   try:
-    from app.supabase_client import get_user_id
-    profile_id = get_user_id(user_name)
+    profile_id = get_household_profile_id()
     weekly_plan = _ensure_dict(weekly_plan)
     
     if not isinstance(weekly_plan, dict):
@@ -121,7 +118,7 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
   except Exception as e:
     return {"status": "error", "message": f"Database insertion failed: {str(e)}"}
 
-def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name: str, user_name: str = "Archit") -> Dict[str, Any]:
+def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name: str, user_name: str = "") -> Dict[str, Any]:
   """
   Swaps, replaces, or modifies a single meal slot in the weekly schedule in the database.
   Always call this whenever a user requests to swap or change a scheduled meal slot.
@@ -131,11 +128,10 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
       day: Weekday of the slot (e.g. 'Thursday', 'Monday')
       meal_category: Meal slot to replace (e.g. 'breakfast', 'dinner')
       new_recipe_name: The name of the new recipe (e.g. 'Garlic Salmon', 'Keto Chia Pudding')
-      user_name: Profile name to associate with this meal plan (default: "Archit")
+      user_name: Ignored for now. Meal plans are shared by the configured household.
   """
   try:
-    from app.supabase_client import get_user_id
-    profile_id = get_user_id(user_name)
+    profile_id = get_household_profile_id()
     day_clean = day.strip().capitalize()
     meal_category = meal_category.lower().strip()
     
@@ -175,19 +171,19 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
     return {"status": "error", "message": f"Database update failed: {str(e)}"}
 
 # --- Section 2: Supabase Pantry Stock & Logs ---
-def get_pantry_stock_tool(user_name: str) -> List[Dict[str, Any]]:
+def get_pantry_stock_tool(user_name: str = "") -> List[Dict[str, Any]]:
   """
-  Query Supabase to fetch current pantry stock levels for a user.
+  Query Supabase to fetch current shared household pantry stock levels.
   """
-  return db_get_pantry_stock(user_name)
+  return db_get_pantry_stock()
 
-def add_to_pantry_tool(user_name: str, ingredient_name: str, amount: float, unit: str = "piece") -> str:
+def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:
   """
-  Add or update an ingredient in the user's pantry/fridge stock database on Supabase.
+  Add or update an ingredient in the shared household pantry/fridge stock database on Supabase.
   """
   res = db_add_to_pantry(user_name, ingredient_name, amount, unit)
   if res:
-      return f"Successfully added {amount} {unit} of '{ingredient_name}' to {user_name}'s pantry stock."
+      return f"Successfully added {amount} {unit} of '{ingredient_name}' to the shared household pantry stock."
   return "Failed to add item to database."
 
 def log_macros_tool(
@@ -283,8 +279,8 @@ async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: 
 async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_context: ToolContext = None) -> str:
   """
   Decoupled Checkout Exporter: Translates generic required ingredients in your grocery list
-  into your favored branded products from the shared factual memory service, then loads them
-  into the chosen delivery merchant cart (Blinkit or Zepto).
+  into your favored branded products from the shared factual memory service, then returns
+  a provider-shaped payload preview. Live merchant cart insertion is intentionally deferred.
   """
   print(f"*** export_to_delivery called with items={items}, provider='{provider}' ***")
   provider_clean = provider.lower().strip()
@@ -316,8 +312,15 @@ async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_co
       pass
   
   for item in to_buy:
-    name_clean = item["name"].lower().strip()
-    branded_name = item["name"]
+    item_name = item.get("name") or item.get("item")
+    amount = item.get("amount", item.get("quantity", item.get("qty", 1)))
+    unit = item.get("unit", "piece")
+
+    if not item_name:
+      continue
+
+    name_clean = str(item_name).lower().strip()
+    branded_name = str(item_name).strip()
     
     # Query shared household memory natively for brand preferences
     if mem_svc:
@@ -338,8 +341,8 @@ async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_co
           
     payload.append({
       "name": branded_name,
-      "qty": item["amount"],
-      "unit": item["unit"]
+      "qty": amount,
+      "unit": unit
     })
     
-  return f"Successfully synchronized {len(payload)} items to {provider_clean.capitalize()} MCP cart (with ADK native brand memory active). Mapped items: {payload}"
+  return f"Prepared {len(payload)} {provider_clean.capitalize()} payload items with ADK native brand memory active. MCP cart connection is not configured yet. Mapped items: {payload}"

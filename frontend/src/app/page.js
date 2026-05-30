@@ -1,45 +1,42 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { DIET_TYPES, RECIPES, DEFAULT_WEEKLY_PLAN, IMAGE_CATALOG } from "./mockData.js";
+import { DIET_TYPES } from "./mockData.js";
+import {
+  DEFAULT_ACTIVE_USER,
+  DEFAULT_HOUSEHOLD_SIZE,
+  HOUSEHOLD_MEMBERS,
+  MEAL_SLOTS,
+  WEEK_DAYS,
+  createEmptyWeeklyPlan,
+  createUserProfiles
+} from "./householdConfig.js";
 
 // Default welcome messaging
 const INITIAL_CHAT = [
   {
     sender: "agent",
-    text: "👋 **Welcome back to Kitch!** I am your GenAI Culinary Companion.\n\nI have scaled your weekly meal plan for your **3-person household**. \n\n✨ **Live Capabilities Active:**\n1. **Individual Macro Logs:** Select your active user in the header. We track macros separately for each housemate in Supabase!\n2. **Pantry Subtraction:** Click the **Scan Fridge** button to upload a photo of your shelves, or type *'We have 6 eggs'* to automatically update your inventory in the database!\n3. **Blinkit MCP:** Export your finalized grocery checklist directly to delivery carts via our backend API.",
+    text: `👋 **Welcome back to Kitch!** I am your GenAI Culinary Companion.\n\nI am synced to your **${DEFAULT_HOUSEHOLD_SIZE}-person household**. \n\n✨ **Live Capabilities Active:**\n1. **Individual Macro Logs:** Select your active user in the header. We track macros separately for each housemate in Supabase!\n2. **Shared Pantry:** Click **Scan Fridge** to upload a photo, or type *'We have 6 eggs'* to update the household inventory.\n3. **Grocery Prep:** Ask me to compile the grocery list. Blinkit MCP cart insertion is intentionally pending until the provider connection is configured.`,
     time: "09:00 AM"
   }
 ];
 
 export default function Home() {
-  // Hydration guard state
-  const [isMounted, setIsMounted] = useState(false);
-
   // Application core state variables
   const [activeTab, setActiveTab] = useState("planner"); // planner, analytics, groceries
   const [dietPreference, setDietPreference] = useState("balanced");
-  const [householdSize, setHouseholdSize] = useState(3);
-  const [activeUser, setActiveUser] = useState("Archit(me)");
-  const [userProfiles, setUserProfiles] = useState({
-    "Archit(me)": { name: "Archit(me)", loggedMeals: [] },
-    "Anubhav": { name: "Anubhav", loggedMeals: [] },
-    "Naman": { name: "Naman", loggedMeals: [] }
-  });
-  const [pantryStock, setPantryStock] = useState([
-    { name: "Cabbage head", amount: 1, unit: "whole" },
-    { name: "Whole wheat bread slices", amount: 2, unit: "slice" }
-  ]);
+  const [householdSize, setHouseholdSize] = useState(DEFAULT_HOUSEHOLD_SIZE);
+  const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
+  const [userProfiles, setUserProfiles] = useState(createUserProfiles);
+  const [pantryStock, setPantryStock] = useState([]);
+  const [weeklyPlan, setWeeklyPlan] = useState(createEmptyWeeklyPlan);
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
-  const [checkedGroceryItems, setCheckedGroceryItems] = useState({});
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
+  const [currentWeekday, setCurrentWeekday] = useState("");
 
   // UI state variables
   const [chatInput, setChatInput] = useState("");
   const [isChatTyping, setIsChatTyping] = useState(false);
-  const [activeModalDay, setActiveModalDay] = useState(null);
-  const [activeModalMealType, setActiveModalMealType] = useState(null);
-  const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
@@ -58,94 +55,76 @@ export default function Home() {
   const [pantryAddAmount, setPantryAddAmount] = useState(1);
   const [pantryAddUnit, setPantryAddUnit] = useState("piece");
 
-  // Helper to load live DB state from backend
+  const applyLiveState = (userName, data) => {
+    if (data.pantry_stock) {
+      setPantryStock(data.pantry_stock);
+    }
+    if (data.macro_diary) {
+      setUserProfiles(prev => ({
+        ...prev,
+        [userName]: {
+          name: userName,
+          loggedMeals: data.macro_diary
+        }
+      }));
+    }
+    if (data.profile) {
+      if (data.profile.diet_preference) {
+        setDietPreference(data.profile.diet_preference);
+      }
+      if (data.profile.household_size) {
+        setHouseholdSize(data.profile.household_size);
+      }
+    }
+    if (data.weekly_plan) {
+      setWeeklyPlan(data.weekly_plan);
+    }
+  };
+
+  const fetchLiveState = async (userName) => {
+    const res = await fetch(`http://localhost:8000/api/state/${userName}`);
+    if (!res.ok) {
+      throw new Error(`State sync failed with status ${res.status}`);
+    }
+    return res.json();
+  };
+
   const syncLiveState = async (userName) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/state/${userName}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.pantry_stock) {
-          setPantryStock(data.pantry_stock);
-        }
-        if (data.macro_diary) {
-          setUserProfiles(prev => ({
-            ...prev,
-            [userName]: {
-              name: userName,
-              loggedMeals: data.macro_diary
-            }
-          }));
-        }
-        if (data.profile) {
-          if (data.profile.diet_preference) {
-            setDietPreference(data.profile.diet_preference);
-          }
-          if (data.profile.household_size) {
-            setHouseholdSize(data.profile.household_size);
-          }
-        }
-        if (data.weekly_plan) {
-          setWeeklyPlan(data.weekly_plan);
-        }
-      }
+      const data = await fetchLiveState(userName);
+      applyLiveState(userName, data);
     } catch (e) {
       console.error("Failed to sync live state with Supabase backend", e);
     }
   };
 
-  // 1. Initial mounting & LocalStorage sync
   useEffect(() => {
-    setIsMounted(true);
-    const saved = localStorage.getItem("kitch_state_v2");
-    if (saved) {
+    let ignore = false;
+
+    async function loadState() {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed.weeklyPlan) setWeeklyPlan(parsed.weeklyPlan);
-        if (parsed.activeUser) setActiveUser(parsed.activeUser);
-        if (parsed.chatHistory) setChatHistory(parsed.chatHistory);
-        if (parsed.checkedGroceryItems) setCheckedGroceryItems(parsed.checkedGroceryItems);
-        if (parsed.customGroceryItems) setCustomGroceryItems(parsed.customGroceryItems);
+        const data = await fetchLiveState(activeUser);
+        if (!ignore) {
+          applyLiveState(activeUser, data);
+        }
       } catch (e) {
-        console.error("Failed to parse saved state, resetting...", e);
+        console.error("Failed to sync live state with Supabase backend", e);
       }
     }
+
+    loadState();
+    return () => {
+      ignore = true;
+    };
+  }, [activeUser]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCurrentWeekday(new Date().toLocaleDateString("en-US", { weekday: "long" }));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
-
-  // Sync state reactively when activeUser changes
-  useEffect(() => {
-    if (isMounted) {
-      syncLiveState(activeUser);
-    }
-  }, [activeUser, isMounted]);
-
-  // Initialize weekly plan state reactively to default plan
-  const [weeklyPlan, setWeeklyPlan] = useState({ ...DEFAULT_WEEKLY_PLAN.balanced });
-
-  // Update weekly plan when dietPreference changes, if we haven't mounted yet
-  // Once mounted, user switches diet manually
-  useEffect(() => {
-    if (!isMounted) {
-      setWeeklyPlan({ ...DEFAULT_WEEKLY_PLAN[dietPreference] });
-    }
-  }, [dietPreference, isMounted]);
-
-  // Save state to localStorage whenever state variables change
-  useEffect(() => {
-    if (isMounted) {
-      const stateToSave = {
-        dietPreference,
-        householdSize,
-        weeklyPlan,
-        activeUser,
-        userProfiles,
-        pantryStock,
-        chatHistory,
-        checkedGroceryItems,
-        customGroceryItems
-      };
-      localStorage.setItem("kitch_state_v2", JSON.stringify(stateToSave));
-    }
-  }, [dietPreference, householdSize, weeklyPlan, activeUser, userProfiles, pantryStock, chatHistory, checkedGroceryItems, customGroceryItems, isMounted]);
 
   // Sync alert auto-dismiss timer
   useEffect(() => {
@@ -159,73 +138,8 @@ export default function Home() {
 
   // 2. Computed values - Reactive Shopping Cart List
   const groceryList = useMemo(() => {
-    const scaleFactor = householdSize;
-    const aggregated = {};
-
-    // A. Gather all required ingredients from the active plan
-    Object.keys(weeklyPlan).forEach(day => {
-      const dayMeals = weeklyPlan[day] || {};
-      Object.keys(dayMeals).forEach(slot => {
-        const recipeId = dayMeals[slot];
-        const recipe = RECIPES.find(r => r.id === recipeId);
-        
-        if (recipe) {
-          recipe.ingredients.forEach(ing => {
-            const key = ing.name.toLowerCase().trim();
-            const scaledAmount = ing.amount * scaleFactor;
-
-            if (aggregated[key]) {
-              aggregated[key].amount += scaledAmount;
-            } else {
-              let category = "Pantry & Spices";
-              const name = key;
-              if (name.includes("chicken") || name.includes("steak") || name.includes("salmon") || name.includes("beef") || name.includes("egg") || name.includes("tofu")) {
-                category = "Proteins & Dairy";
-              } else if (name.includes("avocado") || name.includes("broccoli") || name.includes("spinach") || name.includes("asparagus") || name.includes("tomato") || name.includes("cucumber") || name.includes("onion") || name.includes("pepper") || name.includes("berry") || name.includes("raspberries") || name.includes("blueberries")) {
-                category = "Fresh Produce";
-              } else if (name.includes("bread") || name.includes("oats") || name.includes("quinoa") || name.includes("rice") || name.includes("tortilla") || name.includes("chia")) {
-                category = "Grains & Bakery";
-              }
-
-              aggregated[key] = {
-                name: ing.name,
-                amount: scaledAmount,
-                unit: ing.unit,
-                category,
-                checked: false,
-                alreadyStocked: false
-              };
-            }
-          });
-        }
-      });
-    });
-
-    // B. Subtract Pantry Inventory stocks from the required list
-    pantryStock.forEach(pantryItem => {
-      const key = pantryItem.name.toLowerCase().trim();
-      if (aggregated[key]) {
-        aggregated[key].amount = Math.max(0, aggregated[key].amount - pantryItem.amount);
-        
-        if (aggregated[key].amount === 0) {
-          aggregated[key].alreadyStocked = true;
-          aggregated[key].checked = true;
-        }
-      }
-    });
-
-    // C. Merge in manually checked checkmarks
-    Object.keys(aggregated).forEach(key => {
-      if (checkedGroceryItems[key]) {
-        aggregated[key].checked = true;
-      }
-    });
-
-    const plannedList = Object.values(aggregated);
-
-    // D. Combine with manual custom items
-    return [...plannedList, ...customGroceryItems];
-  }, [weeklyPlan, householdSize, pantryStock, checkedGroceryItems, customGroceryItems]);
+    return customGroceryItems;
+  }, [customGroceryItems]);
 
   // Sync count statistics
   const totalCount = groceryList.length;
@@ -239,7 +153,6 @@ export default function Home() {
   const switchDiet = (dietType) => {
     if (DIET_TYPES[dietType]) {
       setDietPreference(dietType);
-      setWeeklyPlan({ ...DEFAULT_WEEKLY_PLAN[dietType] });
       triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[dietType].name}!`);
     }
   };
@@ -318,12 +231,6 @@ export default function Home() {
       const updated = [...customGroceryItems];
       updated[customIdx] = { ...updated[customIdx], checked: !updated[customIdx].checked };
       setCustomGroceryItems(updated);
-    } else {
-      // It is a planned ingredient
-      setCheckedGroceryItems(prev => ({
-        ...prev,
-        [key]: !prev[key]
-      }));
     }
   };
 
@@ -437,7 +344,7 @@ export default function Home() {
           else if (textLower.includes("balanced")) newDiet = "balanced";
 
           setDietPreference(newDiet);
-          setWeeklyPlan({ ...DEFAULT_WEEKLY_PLAN[newDiet] });
+          syncLiveState(activeUser);
           triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
         } else if (act.type === "UPDATE_PLANNER") {
           triggerBannerAlert("Planner modified by Kitch Agent!");
@@ -506,7 +413,7 @@ export default function Home() {
 
       setScanningOverlay(prev => ({
         ...prev,
-        steps: [...prev.steps, "🧠 Running computer vision segmentation in Gemini 3.5..."]
+        steps: [...prev.steps, "🧠 Running ADK multimodal vision analysis..."]
       }));
 
       const res = await fetch("http://localhost:8000/api/upload-photo", {
@@ -561,23 +468,9 @@ export default function Home() {
     }
   };
 
-  // 6. Modal Meal Swap actions
-  const openRecipeSwapModal = (day, slot) => {
-    setActiveModalDay(day);
-    setActiveModalMealType(slot);
-    setRecipeModalOpen(true);
-  };
-
-  const handleRecipeSwapSelection = (recipe) => {
-    const updatedPlan = { ...weeklyPlan };
-    if (!updatedPlan[activeModalDay]) {
-      updatedPlan[activeModalDay] = {};
-    }
-    updatedPlan[activeModalDay][activeModalMealType] = recipe.id;
-    
-    setWeeklyPlan(updatedPlan);
-    setRecipeModalOpen(false);
-    triggerBannerAlert(`Successfully set ${recipe.name} as ${activeModalDay}'s ${activeModalMealType}!`);
+  const draftMealSwapPrompt = (day, slot) => {
+    setActiveTab("planner");
+    setChatInput(`Change ${day} ${slot} to `);
   };
 
   // Consolidated group category calculator
@@ -627,8 +520,8 @@ export default function Home() {
     return groceryList
       .filter(item => !item.checked)
       .map(item => ({
-        item: item.name,
-        quantity: Math.round(item.amount * 100) / 100,
+        name: item.name,
+        amount: Math.round(item.amount * 100) / 100,
         unit: item.unit
       }));
   }, [groceryList]);
@@ -667,9 +560,9 @@ export default function Home() {
               value={activeUser}
               onChange={(e) => switchActiveUser(e.target.value)}
             >
-              <option value="Archit(me)">Archit (me)</option>
-              <option value="Anubhav">Anubhav</option>
-              <option value="Naman">Naman</option>
+              {HOUSEHOLD_MEMBERS.map(member => (
+                <option key={member.value} value={member.value}>{member.label}</option>
+              ))}
             </select>
           </div>
 
@@ -706,7 +599,7 @@ export default function Home() {
       <main className="layout-grid">
         
         {/* LEFT: CHAT SIMULATOR PANEL */}
-        <section className="chat-simulator" aria-label="Kitch Chat Agent Sim">
+        <section className="chat-simulator" aria-label="Kitch Chat Agent">
           
           {/* Computer Vision Scanner Scan Overlay */}
           {scanningOverlay.active && (
@@ -858,56 +751,37 @@ export default function Home() {
             <div id="panel-planner" className={`tab-panel ${activeTab === "planner" ? "active" : ""}`}>
               <div className="planner-view">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h3 id="planner-household-heading">Weekly Plan for {householdSize} {householdSize === 1 ? "Person" : "People"}</h3>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>💡 Click any card below to swap meals on the fly!</span>
+                  <h3 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h3>
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>Ask Kitch in chat to create or swap meals.</span>
                 </div>
                 
                 <div id="weekly-plan-grid" className="weekly-grid">
-                  {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(day => {
+                  {WEEK_DAYS.map(day => {
                     const dayMeals = weeklyPlan[day] || {};
-                    let dayCalories = 0;
-                    
-                    Object.values(dayMeals).forEach(recipeId => {
-                      const rec = RECIPES.find(r => r.id === recipeId);
-                      if (rec) dayCalories += rec.calories;
-                    });
-
-                    const isToday = typeof window !== "undefined" && day === new Date().toLocaleDateString('en-US', { weekday: 'long' });
+                    const isToday = day === currentWeekday;
 
                     return (
                       <div key={day} className={`day-column ${isToday ? "today" : ""}`}>
                         <div className="day-title">{isToday ? "Today" : day}</div>
-                        <div className="day-calories">{dayCalories} kcal</div>
+                        <div className="day-calories">Agent-generated plan</div>
 
-                        {["breakfast", "lunch", "dinner", "snack"].map(slot => {
-                          const recipeId = dayMeals[slot];
-                          const recipe = RECIPES.find(r => r.id === recipeId);
+                        {MEAL_SLOTS.map(slot => {
+                          const recipeName = dayMeals[slot];
 
                           return (
                             <div
                               key={slot}
                               className="meal-card"
-                              onClick={() => openRecipeSwapModal(day, slot)}
+                              onClick={() => draftMealSwapPrompt(day, slot)}
                             >
-                              {recipe ? (
+                              {recipeName ? (
                                 <>
                                   <div>
                                     <span className={`meal-label ${slot}`}>{slot}</span>
-                                    <div className="meal-name">{recipe.name}</div>
+                                    <div className="meal-name">{recipeName}</div>
                                   </div>
                                   <div className="meal-stats">
-                                    <span>🔥 {recipe.calories} kcal</span>
-                                    <span>🥩 {recipe.macros.protein}g P</span>
-                                  </div>
-                                </>
-                              ) : recipeId ? (
-                                <>
-                                  <div>
-                                    <span className={`meal-label ${slot}`}>{slot}</span>
-                                    <div className="meal-name">{recipeId}</div>
-                                  </div>
-                                  <div className="meal-stats">
-                                    <span>✨ Custom Recipe</span>
+                                    <span>Structured by Kitch</span>
                                   </div>
                                 </>
                               ) : (
@@ -1006,7 +880,7 @@ export default function Home() {
                   <div id="diary-list" className="diary-list">
                     {loggedMeals.length === 0 ? (
                       <div className="diary-empty-state">
-                        🍳 {activeUser} has not logged any plates today. Snap a photo in the chat simulator to auto-detect macros!
+                        🍳 {activeUser} has not logged any plates today. Snap a photo in chat to auto-detect macros!
                       </div>
                     ) : (
                       loggedMeals.map((meal, idx) => (
@@ -1211,7 +1085,7 @@ export default function Home() {
                       }
                     }}
                   >
-                    📦 Order via Blinkit MCP
+                    📦 Preview Blinkit Payload
                   </button>
                 </div>
 
@@ -1222,72 +1096,24 @@ export default function Home() {
         </section>
       </main>
 
-      {/* RECIPE SWAP MODAL */}
-      {recipeModalOpen && (
-        <div id="recipe-modal" className="modal-overlay active">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3>Select {activeModalMealType.charAt(0).toUpperCase() + activeModalMealType.slice(1)} Replacement</h3>
-              <button className="modal-close-btn" onClick={() => setRecipeModalOpen(false)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "8px" }}>
-                Choose a macro-balanced recipe to swap. Your grocery cart and calories will update automatically!
-              </p>
-              
-              <div className="recipe-options-list">
-                {RECIPES.filter(r => r.type === activeModalMealType).map(recipe => {
-                  const isMatchingDiet = recipe.diets.includes(dietPreference);
-                  
-                  return (
-                    <div
-                      key={recipe.id}
-                      className="recipe-select-option"
-                      onClick={() => handleRecipeSwapSelection(recipe)}
-                    >
-                      <div className="recipe-select-details">
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <h4 style={{ color: "#fff", fontWeight: 600, fontSize: "14px" }}>{recipe.name}</h4>
-                          {isMatchingDiet && (
-                            <span style={{ fontSize: "9px", background: "rgba(16,185,129,0.15)", color: "var(--accent-primary)", padding: "2px 6px", borderRadius: "4px", fontWeight: 600, textTransform: "uppercase" }}>
-                              Matches Diet
-                            </span>
-                          )}
-                        </div>
-                        <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                          ⏳ Prep: {recipe.prepTime} | P: {recipe.macros.protein}g, C: {recipe.macros.carbs}g, F: {recipe.macros.fat}g
-                        </p>
-                      </div>
-                      <div className="recipe-select-macros" style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent-secondary)" }}>
-                        🔥 {recipe.calories} Cal
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MCP TOOL CALL HUMAN-IN-THE-LOOP REVIEW DIALOG */}
+      {/* PROVIDER PAYLOAD REVIEW DIALOG */}
       {mcpModalOpen && (
         <div id="mcp-modal" className="modal-overlay active">
           <div className="modal-box" style={{ maxWidth: "500px" }}>
             <div className="modal-header" style={{ background: "rgba(245, 158, 11, 0.1)", borderBottomColor: "rgba(245, 158, 11, 0.2)" }}>
               <h3 style={{ color: "var(--accent-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
-                📦 Human-in-the-Loop MCP Review
+                📦 Provider Payload Review
               </h3>
               <button className="modal-close-btn" onClick={() => setMcpModalOpen(false)}>&times;</button>
             </div>
             <div className="modal-body" style={{ padding: "20px" }}>
               <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "12px" }}>
-                An MCP tool execution has been requested. Please review the parameters below before allowing the agent to place the Blinkit order.
+                Review the provider payload below. The live Blinkit MCP cart connection is not configured yet.
               </p>
               
               <div style={{ background: "#020617", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "12px", fontFamily: "monospace", fontSize: "11px", color: "#a5f3fc", overflowX: "auto", marginBottom: "16px" }}>
-                <span style={{ color: "#6ee7b7" }}>// Calling Blinkit MCP Cart Tool...</span><br/>
-                <strong>blinkit_mcp.add_to_cart</strong>({`{`}<br/>
+                <span style={{ color: "#6ee7b7" }}>{"// Blinkit provider payload preview"}</span><br/>
+                <strong>blinkit_payload.prepare</strong>({`{`}<br/>
                 &nbsp;&nbsp;items: <span style={{ color: "#fca5a5" }} id="mcp-items-json">{JSON.stringify(checkoutItems, null, 2)}</span>,<br/>
                 &nbsp;&nbsp;household_size: <span style={{ color: "#f59e0b" }} id="mcp-household-val">{householdSize}</span><br/>
                 {`})`}
@@ -1298,7 +1124,7 @@ export default function Home() {
                   id="mcp-reject-btn"
                   onClick={() => {
                     setMcpModalOpen(false);
-                    triggerBannerAlert("❌ Blinkit MCP Tool execution aborted by user.");
+                    triggerBannerAlert("Blinkit payload preview dismissed.");
                   }}
                   style={{ flex: 1, padding: "10px 0", borderRadius: "6px", border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "var(--accent-coral)", fontWeight: "600", cursor: "pointer" }}
                 >
@@ -1320,7 +1146,7 @@ export default function Home() {
                       });
                       if (res.ok) {
                         const data = await res.json();
-                        triggerBannerAlert(`✨ Real MCP Call Successful! ${data.result}`);
+                        triggerBannerAlert(`Payload prepared. ${data.result}`);
                       } else {
                         throw new Error("API call failed");
                       }
@@ -1329,21 +1155,12 @@ export default function Home() {
                       console.error(e);
                     }
                     
-                    // Mark all non-pantry checkout items as checked
-                    const newChecked = { ...checkedGroceryItems };
-                    groceryList.forEach(item => {
-                      if (!item.alreadyStocked) {
-                        newChecked[item.name.toLowerCase().trim()] = true;
-                      }
-                    });
-                    setCheckedGroceryItems(newChecked);
-
                     const updatedCustom = customGroceryItems.map(item => ({ ...item, checked: true }));
                     setCustomGroceryItems(updatedCustom);
                   }}
                   style={{ flex: 1, padding: "10px 0", borderRadius: "6px", border: "none", background: "var(--accent-primary)", color: "var(--text-inverse)", fontWeight: "600", cursor: "pointer" }}
                 >
-                  Approve MCP Call
+                  Prepare Payload
                 </button>
               </div>
             </div>

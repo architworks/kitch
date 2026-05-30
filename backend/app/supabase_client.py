@@ -4,6 +4,13 @@ import os
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from app.household_config import (
+    DEFAULT_HOUSEHOLD_SIZE,
+    HOUSEHOLD_NAME,
+    canonical_user_name,
+    get_household_profile_id,
+    get_user_id,
+)
 
 load_dotenv()
 
@@ -15,17 +22,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Supabase credentials missing! Set SUPABASE_URL and SUPABASE_KEY in your .env file.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-USER_ID_MAP = {
-    "Archit": "00000000-0000-0000-0000-000000000000",
-    "Archit(me)": "00000000-0000-0000-0000-000000000000",
-    "Anubhav": "11111111-1111-1111-1111-111111111111",
-    "Naman": "22222222-2222-2222-2222-222222222222"
-}
-
-def get_user_id(user_name: str) -> str:
-    """Returns the UUID for a user name, falling back to Archit."""
-    return USER_ID_MAP.get(user_name, USER_ID_MAP["Archit"])
 
 # 2. Profiles CRUD
 def get_profile(user_name: str) -> Dict[str, Any]:
@@ -40,8 +36,30 @@ def get_profile(user_name: str) -> Dict[str, Any]:
         print(f"Error fetching profile: {e}")
         return {}
 
+def get_household_profile() -> Dict[str, Any]:
+    """Fetches the shared household profile settings."""
+    try:
+        response = supabase.table("profiles").select("*").eq("id", get_household_profile_id()).execute()
+        if response.data:
+            return response.data[0]
+        return {
+            "full_name": HOUSEHOLD_NAME,
+            "diet_preference": "balanced",
+            "household_size": DEFAULT_HOUSEHOLD_SIZE,
+            "daily_calorie_target": 2000
+        }
+    except Exception as e:
+        print(f"Error fetching household profile: {e}")
+        return {
+            "full_name": HOUSEHOLD_NAME,
+            "diet_preference": "balanced",
+            "household_size": DEFAULT_HOUSEHOLD_SIZE,
+            "daily_calorie_target": 2000
+        }
+
 def update_profile(user_name: str, diet_preference: str, household_size: int, daily_calorie_target: int = 2000) -> Dict[str, Any]:
     """Updates user profile information in Supabase."""
+    user_name = canonical_user_name(user_name)
     profile_id = get_user_id(user_name)
     data = {
         "full_name": user_name,
@@ -56,10 +74,26 @@ def update_profile(user_name: str, diet_preference: str, household_size: int, da
         print(f"Error updating profile: {e}")
         return {}
 
+def update_household_profile(diet_preference: str, household_size: int, daily_calorie_target: int = 2000) -> Dict[str, Any]:
+    """Updates shared household planning settings."""
+    data = {
+        "id": get_household_profile_id(),
+        "full_name": HOUSEHOLD_NAME,
+        "diet_preference": diet_preference,
+        "household_size": household_size,
+        "daily_calorie_target": daily_calorie_target
+    }
+    try:
+        response = supabase.table("profiles").upsert(data).execute()
+        return response.data[0] if response.data else {}
+    except Exception as e:
+        print(f"Error updating household profile: {e}")
+        return {}
+
 # 3. Pantry & Fridge Stock CRUD
-def get_pantry_stock(user_name: str) -> List[Dict[str, Any]]:
-    """Fetches pantry stock levels for a specific profile from Supabase."""
-    profile_id = get_user_id(user_name)
+def get_pantry_stock(user_name: str | None = None) -> List[Dict[str, Any]]:
+    """Fetches shared household pantry stock levels from Supabase."""
+    profile_id = get_household_profile_id()
     try:
         response = supabase.table("pantry_stock").select("*").eq("profile_id", profile_id).execute()
         # Map DB keys to frontend state format
@@ -75,13 +109,13 @@ def get_pantry_stock(user_name: str) -> List[Dict[str, Any]]:
         print(f"Error fetching pantry stock: {e}")
         return []
 
-def add_to_pantry(user_name: str, name: str, amount: float, unit: str = "piece") -> Dict[str, Any]:
-    """Adds or updates a pantry ingredient stock in Supabase."""
-    profile_id = get_user_id(user_name)
+def add_to_pantry(user_name: str | None, name: str, amount: float, unit: str = "piece") -> Dict[str, Any]:
+    """Adds or updates an ingredient in the shared household pantry."""
+    profile_id = get_household_profile_id()
     name_clean = name.strip()
     try:
         # Check if item already exists case-insensitively
-        pantry_items = get_pantry_stock(user_name)
+        pantry_items = get_pantry_stock()
         existing = next((i for i in pantry_items if i["name"].lower() == name_clean.lower()), None)
         
         if existing:
@@ -106,9 +140,9 @@ def add_to_pantry(user_name: str, name: str, amount: float, unit: str = "piece")
         print(f"Error adding to pantry: {e}")
         return {}
 
-def remove_from_pantry(user_name: str, name: str) -> bool:
-    """Removes a pantry item from Supabase."""
-    profile_id = get_user_id(user_name)
+def remove_from_pantry(user_name: str | None, name: str) -> bool:
+    """Removes a pantry item from the shared household pantry."""
+    profile_id = get_household_profile_id()
     try:
         supabase.table("pantry_stock").delete().eq("profile_id", profile_id).eq("ingredient_name", name).execute()
         return True

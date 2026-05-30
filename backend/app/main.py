@@ -1,16 +1,16 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
-import os
 import time
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any, List
+from typing import Dict, Any
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
 from app.agent.tools import get_weekly_schedule_dict, export_to_delivery
+from app.household_config import DEFAULT_HOUSEHOLD_SIZE, canonical_user_name, household_members_text
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
 
@@ -21,9 +21,8 @@ from app.supabase_client import (
     clear_macro_diary,
     add_to_pantry,
     remove_from_pantry,
-    log_macros,
-    get_profile,
-    update_profile
+    get_household_profile,
+    update_household_profile
 )
 
 load_dotenv()
@@ -34,12 +33,14 @@ async def get_or_create_session(user_name: str, session_id: str, diet_preference
     Looks up the ADK session thread. Syncs user profile parameters 
     into persistent user: and app: prefixed session states before executing.
     """
-    user_id = user_name.replace(" ", "_")
+    active_user = canonical_user_name(user_name)
+    user_id = active_user.replace(" ", "_")
     
     state_updates = {
-        "user:profile_name": user_name,
+        "user:profile_name": active_user,
         "user:dietary_profile": diet_preference,
-        "app:household_size": household_size
+        "app:household_size": household_size,
+        "app:household_members": household_members_text()
     }
     
     session = await session_service.get_session(app_name="kitch", user_id=user_id, session_id=session_id)
@@ -98,19 +99,19 @@ async def chat_endpoint(payload: ChatRequest):
     running the Google ADK 2.0 persistent session loops.
     """
     try:
-        user_id = payload.active_user.replace(" ", "_")
+        active_user = canonical_user_name(payload.active_user)
+        user_id = active_user.replace(" ", "_")
         session_id = f"kitch_chat_session_{user_id}"
         
-        # 1. Update Supabase profile settings
-        update_profile(
-            user_name=payload.active_user,
+        # 1. Update shared household planning settings
+        update_household_profile(
             diet_preference=payload.diet_preference,
             household_size=payload.household_size
         )
         
         # 2. Sync profile parameters into the ADK session state persistently
         await get_or_create_session(
-            user_name=payload.active_user,
+            user_name=active_user,
             session_id=session_id,
             diet_preference=payload.diet_preference,
             household_size=payload.household_size
@@ -164,13 +165,14 @@ async def upload_photo_endpoint(
         file_bytes = await file.read()
         file_name = file.filename
         
+        active_user = canonical_user_name(active_user)
         user_id = active_user.replace(" ", "_")
         session_id = f"kitch_chat_session_{user_id}"
         
-        # Resolve active profile settings from Supabase to keep state in sync
-        profile = get_profile(active_user)
+        # Resolve shared household settings from Supabase to keep state in sync
+        profile = get_household_profile()
         diet_preference = profile.get("diet_preference", "balanced")
-        household_size = profile.get("household_size", 3)
+        household_size = profile.get("household_size", DEFAULT_HOUSEHOLD_SIZE)
         
         # Sync parameters to active ADK session
         await get_or_create_session(
@@ -185,7 +187,7 @@ async def upload_photo_endpoint(
             prompt = (
                 f"Analyze this fridge shelf photo upload: {file_name}. "
                 "1. List all ingredients present.\n"
-                f"2. PROACTIVELY call the 'add_to_pantry_tool' for each detected ingredient to save it to {active_user}'s stock in Supabase. "
+                "2. PROACTIVELY call the 'add_to_pantry_tool' for each detected ingredient to save it to the shared household pantry in Supabase. "
                 "Include the ingredient name, estimated amount, and standard unit (e.g. 'stalks', 'slice', 'whole', 'large', 'tbsp').\n"
                 "3. In your response text, summarize the pantry updates in a friendly list."
             )
@@ -235,10 +237,11 @@ async def get_state_endpoint(user_name: str):
     directly from Supabase for initial dashboard sync.
     """
     try:
-        profile = get_profile(user_name)
-        pantry = get_pantry_stock(user_name)
-        diary = get_macro_diary(user_name)
-        weekly_plan = get_weekly_schedule_dict(user_name)
+        active_user = canonical_user_name(user_name)
+        profile = get_household_profile()
+        pantry = get_pantry_stock()
+        diary = get_macro_diary(active_user)
+        weekly_plan = get_weekly_schedule_dict()
         
         return {
             "profile": profile,
@@ -253,7 +256,7 @@ async def get_state_endpoint(user_name: str):
 async def add_pantry_endpoint(payload: Dict[str, Any]):
     """Adds a pantry item manually to Supabase."""
     try:
-        user = payload.get("user_name", "Dynamite")
+        user = canonical_user_name(payload.get("user_name"))
         name = payload.get("name", "")
         amount = float(payload.get("amount", 1))
         unit = payload.get("unit", "piece")
@@ -276,7 +279,7 @@ async def remove_pantry_endpoint(user_name: str, item_name: str):
 async def clear_diary_endpoint(user_name: str):
     """Clears macro logs in Supabase."""
     try:
-        res = clear_macro_diary(user_name)
+        res = clear_macro_diary(canonical_user_name(user_name))
         return {"status": "success" if res else "failed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -298,8 +301,8 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
 @app.post("/api/grocery/export")
 async def export_grocery_endpoint(payload: Dict[str, Any]):
     """
-    Decoupled Checkout: Maps required items to chosen delivery merchant
-    using brand preferences mapping file.
+    Decoupled checkout preview: maps required items to chosen delivery merchant
+    using ADK native brand preference memory. Real MCP cart connection is deferred.
     """
     try:
         items = payload.get("items", [])
