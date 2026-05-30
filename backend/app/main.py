@@ -292,12 +292,12 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
         household_size = int(payload.get("household_size", 3))
         pantry_stock = payload.get("pantry_stock", [])
         
-        grocery_list = calculate_intermediary_grocery_list(
+        res_dict = calculate_intermediary_grocery_list(
             weekly_plan=weekly_plan,
             household_size=household_size,
             pantry_stock=pantry_stock
         )
-        return {"grocery_list": grocery_list}
+        return {"grocery_list": res_dict.get("grocery_list", [])}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

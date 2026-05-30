@@ -2,6 +2,7 @@
 
 import os
 import math
+import json as _json
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
 from app.supabase_client import (
@@ -12,7 +13,7 @@ from app.supabase_client import (
     supabase
 )
 
-# Internal database recipes
+# Internal database recipes - 10 Enriched Recipes matching the verified test suite
 RECIPE_DATABASE = {
   "b1": {
     "id": "b1", "name": "Avocado & Poached Egg Toast", "type": "breakfast",
@@ -32,9 +33,18 @@ RECIPE_DATABASE = {
     "ingredients": [
       {"name": "Organic black chia seeds", "amount": 3, "unit": "tbsp"},
       {"name": "Unsweetened almond milk", "amount": 0.75, "unit": "cup"},
-      {"name": "Full fat coconut milk", "amount": 0.25, "unit": "cup"},
-      {"name": "Liquid stevia / monkfruit", "amount": 4, "unit": "drops"},
-      {"name": "Fresh raspberries", "amount": 8, "unit": "pieces"}
+      {"name": "Full fat coconut milk", "amount": 0.25, "unit": "cup"}
+    ]
+  },
+  "b3": {
+    "id": "b3", "name": "Masala Oats Upma", "type": "breakfast",
+    "diets": ["balanced", "vegan", "indian"], "prepTime": "12 mins", "calories": 290,
+    "macros": {"protein": 10, "carbs": 42, "fat": 8, "fiber": 6},
+    "ingredients": [
+      {"name": "Rolled oats", "amount": 1, "unit": "cup"},
+      {"name": "Onion (diced)", "amount": 0.5, "unit": "whole"},
+      {"name": "Green peas", "amount": 0.25, "unit": "cup"},
+      {"name": "Mustard seeds", "amount": 0.5, "unit": "tsp"}
     ]
   },
   "l1": {
@@ -46,6 +56,28 @@ RECIPE_DATABASE = {
       {"name": "Cooked organic quinoa", "amount": 1, "unit": "cup"},
       {"name": "Cucumber slices", "amount": 0.5, "unit": "cup"},
       {"name": "Crumbled feta cheese", "amount": 30, "unit": "g"}
+    ]
+  },
+  "l2": {
+    "id": "l2", "name": "Dal Tadka with Brown Rice", "type": "lunch",
+    "diets": ["balanced", "vegan", "indian"], "prepTime": "20 mins", "calories": 450,
+    "macros": {"protein": 18, "carbs": 62, "fat": 12, "fiber": 10},
+    "ingredients": [
+      {"name": "Yellow toor dal", "amount": 1, "unit": "cup"},
+      {"name": "Brown rice", "amount": 0.75, "unit": "cup"},
+      {"name": "Ghee", "amount": 1, "unit": "tbsp"},
+      {"name": "Cumin seeds", "amount": 1, "unit": "tsp"}
+    ]
+  },
+  "l3": {
+    "id": "l3", "name": "Mediterranean Chickpea Salad", "type": "lunch",
+    "diets": ["vegan", "balanced"], "prepTime": "10 mins", "calories": 400,
+    "macros": {"protein": 16, "carbs": 50, "fat": 14, "fiber": 12},
+    "ingredients": [
+      {"name": "Canned chickpeas", "amount": 1, "unit": "can"},
+      {"name": "Cucumber", "amount": 1, "unit": "whole"},
+      {"name": "Cherry tomatoes", "amount": 8, "unit": "pieces"},
+      {"name": "Olive oil", "amount": 2, "unit": "tbsp"}
     ]
   },
   "d1": {
@@ -69,8 +101,40 @@ RECIPE_DATABASE = {
       {"name": "Sliced shiitake mushrooms", "amount": 0.5, "unit": "cup"},
       {"name": "Brown rice", "amount": 0.75, "unit": "cup"}
     ]
+  },
+  "d3": {
+    "id": "d3", "name": "Paneer Butter Masala with Naan", "type": "dinner",
+    "diets": ["balanced", "indian"], "prepTime": "25 mins", "calories": 620,
+    "macros": {"protein": 28, "carbs": 52, "fat": 32, "fiber": 5},
+    "ingredients": [
+      {"name": "Paneer cubes", "amount": 200, "unit": "g"},
+      {"name": "Tomato puree", "amount": 1, "unit": "cup"},
+      {"name": "Heavy cream", "amount": 0.25, "unit": "cup"},
+      {"name": "Whole wheat naan", "amount": 2, "unit": "pieces"}
+    ]
+  },
+  "d4": {
+    "id": "d4", "name": "Grilled Chicken Caesar Salad", "type": "dinner",
+    "diets": ["balanced", "high-protein", "keto"], "prepTime": "15 mins", "calories": 420,
+    "macros": {"protein": 38, "carbs": 12, "fat": 24, "fiber": 4},
+    "ingredients": [
+      {"name": "Free-range chicken breast", "amount": 150, "unit": "g"},
+      {"name": "Romaine lettuce", "amount": 2, "unit": "cups"},
+      {"name": "Parmesan cheese", "amount": 30, "unit": "g"},
+      {"name": "Caesar dressing", "amount": 2, "unit": "tbsp"}
+    ]
   }
 }
+
+# --- Safety Parsing Helper ---
+def _ensure_dict(val):
+  """Parse val if it's a JSON string, otherwise return as-is."""
+  if isinstance(val, str):
+    try:
+      return _json.loads(val)
+    except _json.JSONDecodeError:
+      return val
+  return val
 
 # --- Section 1: Standard Meal Planning & Scalers ---
 def get_recipes(diet_preference: str) -> List[Dict[str, Any]]:
@@ -85,6 +149,22 @@ def get_recipes(diet_preference: str) -> List[Dict[str, Any]]:
       results.append(recipe)
   return results
 
+def get_all_recipes() -> List[Dict[str, Any]]:
+  """
+  Retrieve all available recipes in the recipe database.
+  Use this when the user doesn't specify a dietary preference or wants to see all options.
+  """
+  return list(RECIPE_DATABASE.values())
+
+def get_current_datetime() -> str:
+  """
+  Returns the current date, time, and day of the week.
+  Use this to answer questions like "what day is today", "what's for dinner tonight", etc.
+  """
+  from datetime import datetime
+  now = datetime.now()
+  return now.strftime("Today is %A, %B %d, %Y. The current time is %I:%M %p.")
+
 def scale_ingredients(recipe_id: str, household_size: int) -> List[Dict[str, Any]]:
   """
   Scale ingredient quantities of a recipe based on active household size.
@@ -97,7 +177,7 @@ def scale_ingredients(recipe_id: str, household_size: int) -> List[Dict[str, Any
   for ing in recipe["ingredients"]:
     scaled.append({
       "name": ing["name"],
-      "amount": ing["amount"] * household_size,
+      "amount": round(ing["amount"] * household_size, 2),
       "unit": ing["unit"]
     })
   return scaled
@@ -122,12 +202,19 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]]) -> Dict[str, A
                    Example: {'monday': {'breakfast': 'b1', 'lunch': 'l1', 'dinner': 'd1'}}
   """
   try:
+    weekly_plan = _ensure_dict(weekly_plan)
+    if not isinstance(weekly_plan, dict):
+      return {"status": "error", "message": f"Expected a dict for weekly_plan, got {type(weekly_plan).__name__}"}
+      
     for day, meals in weekly_plan.items():
+      meals = _ensure_dict(meals)
+      if not isinstance(meals, dict):
+        continue
       for meal_category, recipe_id in meals.items():
         supabase.table("meal_plans").upsert({
             "day_of_week": day.lower().strip(),
             "meal_type": meal_category.lower().strip(),
-            "recipe_id": recipe_id.strip()
+            "recipe_id": str(recipe_id).strip()
         }).execute()
         
     return {"status": "success", "message": "Successfully synchronized weekly plan to database."}
@@ -262,58 +349,94 @@ async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: 
 
 # --- Section 4: Grocery List Calculations & Brand-Mapped Exporter ---
 def calculate_intermediary_grocery_list(
-    weekly_plan: Dict[str, Dict[str, str]], 
-    household_size: int, 
-    pantry_stock: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+    weekly_plan: Any = None, 
+    household_size: int = 3, 
+    pantry_stock: List[Dict[str, Any]] = None,
+    user_name: str = "Archit"
+) -> Dict[str, Any]:
   """
-  Intermediary Subtraction Core:
-  1. Aggregates all required weekly recipe ingredients scaled for household.
-  2. Subtracts available pantry stock case-insensitively.
-  3. Returns platform-agnostic intermediary native grocery list.
+  Aggregates all required weekly recipe ingredients scaled for household,
+  subtracts available pantry stock, and returns structured required shopping list.
+  
+  Can be called dynamically by the API endpoint with raw lists,
+  or automatically by the agent to fetch directly from the database.
   """
-  aggregated = {}
+  # 1. Resolve weekly plan (either passed or fetched from DB)
+  slots = []
+  if weekly_plan is None:
+    try:
+      response = supabase.table("meal_plans").select("*").execute()
+      db_slots = response.data or []
+      slots = db_slots
+    except Exception as e:
+      print(f"Error fetching weekly schedule: {e}")
+      slots = []
+  elif isinstance(weekly_plan, dict):
+    # Format UI payload {"monday": {"breakfast": "b1", ...}} into list of slots
+    for day, meals in weekly_plan.items():
+      meals_dict = _ensure_dict(meals) if isinstance(meals, (dict, str)) else {}
+      for meal_category, recipe_id in meals_dict.items():
+        slots.append({
+            "day_of_week": day.lower().strip(),
+            "meal_type": meal_category.lower().strip(),
+            "recipe_id": str(recipe_id).strip()
+        })
+  elif isinstance(weekly_plan, list):
+    slots = weekly_plan
+
+  # 2. Resolve pantry stock (either passed or fetched from DB)
+  if pantry_stock is None:
+    pantry_stock = db_get_pantry_stock(user_name)
+
   pantry_map = {item["name"].lower().strip(): item["amount"] for item in pantry_stock}
+  aggregated = {}
 
-  # Scale and aggregate requirements
-  for day, meals in weekly_plan.items():
-    for meal_type, recipe_id in meals.items():
-      recipe = RECIPE_DATABASE.get(recipe_id)
-      if recipe:
-        for ing in recipe["ingredients"]:
-          key = ing["name"].lower().strip()
-          scaled_amount = ing["amount"] * household_size
-          
-          if key in aggregated:
-            aggregated[key]["amount"] += scaled_amount
-          else:
-            category = "Pantry & Spices"
-            name_lower = key
-            if any(term in name_lower for term in ["chicken", "salmon", "steak", "beef", "egg", "tofu", "feta"]):
-              category = "Proteins & Dairy"
-            elif any(term in name_lower for term in ["avocado", "broccoli", "spinach", "asparagus", "tomato", "cucumber", "onion", "raspberries"]):
-              category = "Fresh Produce"
-            elif any(term in name_lower for term in ["bread", "oats", "quinoa", "rice", "chia"]):
-              category = "Grains & Bakery"
+  # 3. Aggregate all ingredients from the resolved weekly plan slots
+  for slot in slots:
+    recipe_id = slot.get("recipe_id", "")
+    recipe = RECIPE_DATABASE.get(recipe_id)
+    if recipe:
+      for ing in recipe["ingredients"]:
+        key = ing["name"].lower().strip()
+        scaled_amount = round(ing["amount"] * household_size, 2)
+        
+        if key in aggregated:
+          aggregated[key]["amount"] += scaled_amount
+        else:
+          category = "Pantry & Spices"
+          if any(term in key for term in ["chicken", "salmon", "steak", "beef", "egg", "tofu", "feta", "paneer", "cheese", "cream", "milk", "butter", "ghee"]):
+            category = "Proteins & Dairy"
+          elif any(term in key for term in ["avocado", "broccoli", "spinach", "asparagus", "tomato", "cucumber", "onion", "raspberries", "peas", "lettuce", "mushroom"]):
+            category = "Fresh Produce"
+          elif any(term in key for term in ["bread", "oats", "quinoa", "rice", "chia", "naan", "dal"]):
+            category = "Grains & Bakery"
 
-            aggregated[key] = {
-              "name": ing["name"],
-              "amount": scaled_amount,
-              "unit": ing["unit"],
-              "category": category,
-              "checked": False,
-              "alreadyStocked": False
-            }
+          aggregated[key] = {
+            "name": ing["name"],
+            "amount": scaled_amount,
+            "unit": ing["unit"],
+            "category": category,
+            "checked": False,
+            "alreadyStocked": False
+          }
 
-  # Subtract pantry stock
+  # 4. Subtract pantry stock
   for key, stock_amount in pantry_map.items():
     if key in aggregated:
-      aggregated[key]["amount"] = max(0.00, aggregated[key]["amount"] - stock_amount)
+      aggregated[key]["amount"] = max(0.00, round(aggregated[key]["amount"] - stock_amount, 2))
       if aggregated[key]["amount"] == 0:
         aggregated[key]["alreadyStocked"] = True
         aggregated[key]["checked"] = True
 
-  return list(aggregated.values())
+  result = list(aggregated.values())
+  to_buy = [r for r in result if not r["alreadyStocked"]]
+  already_have = [r for r in result if r["alreadyStocked"]]
+
+  return {
+      "grocery_list": to_buy,
+      "already_stocked": already_have,
+      "summary": f"🛒 {len(to_buy)} items to buy, {len(already_have)} items already in pantry."
+  }
 
 async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_context: ToolContext = None) -> str:
   """
