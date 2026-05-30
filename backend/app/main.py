@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
-from app.agent.tools import calculate_intermediary_grocery_list, export_to_delivery
+from app.agent.tools import get_weekly_schedule_dict, export_to_delivery
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
 
@@ -238,11 +238,13 @@ async def get_state_endpoint(user_name: str):
         profile = get_profile(user_name)
         pantry = get_pantry_stock(user_name)
         diary = get_macro_diary(user_name)
+        weekly_plan = get_weekly_schedule_dict(user_name)
         
         return {
             "profile": profile,
             "pantry_stock": pantry,
-            "macro_diary": diary
+            "macro_diary": diary,
+            "weekly_plan": weekly_plan
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -288,17 +290,7 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     and returns the intermediary platform-agnostic required shopping list.
     """
     try:
-        weekly_plan = payload.get("weekly_plan", {})
-        household_size = int(payload.get("household_size", 3))
-        pantry_stock = payload.get("pantry_stock", [])
-        
-        res_dict = calculate_intermediary_grocery_list(
-            weekly_plan=weekly_plan,
-            household_size=household_size,
-            pantry_stock=pantry_stock
-        )
-        return {"grocery_list": res_dict.get("grocery_list", [])}
-        
+        return {"grocery_list": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

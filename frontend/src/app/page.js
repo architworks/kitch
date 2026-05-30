@@ -84,6 +84,9 @@ export default function Home() {
             setHouseholdSize(data.profile.household_size);
           }
         }
+        if (data.weekly_plan) {
+          setWeeklyPlan(data.weekly_plan);
+        }
       }
     } catch (e) {
       console.error("Failed to sync live state with Supabase backend", e);
@@ -438,8 +441,10 @@ export default function Home() {
           triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
         } else if (act.type === "UPDATE_PLANNER") {
           triggerBannerAlert("Planner modified by Kitch Agent!");
+          syncLiveState(activeUser);
         } else if (act.type === "UPDATE_PANTRY") {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
+          syncLiveState(activeUser);
         }
       }
     } catch (e) {
@@ -893,6 +898,16 @@ export default function Home() {
                                   <div className="meal-stats">
                                     <span>🔥 {recipe.calories} kcal</span>
                                     <span>🥩 {recipe.macros.protein}g P</span>
+                                  </div>
+                                </>
+                              ) : recipeId ? (
+                                <>
+                                  <div>
+                                    <span className={`meal-label ${slot}`}>{slot}</span>
+                                    <div className="meal-name">{recipeId}</div>
+                                  </div>
+                                  <div className="meal-stats">
+                                    <span>✨ Custom Recipe</span>
                                   </div>
                                 </>
                               ) : (

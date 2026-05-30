@@ -1,173 +1,144 @@
-# AI Layer Architectural Proposal: PlateWise AI (Pure Antigravity SDK)
+# AI Layer Architectural Proposal: Kitch (Google ADK 2.0 Dynamic Engine)
 
 > [!NOTE]
-> This document outlines the revised **AI Layer Architecture** for PlateWise AI. Following strict project requirements, we have **rejected all LangChain, LangGraph, and wrapper dependencies**. We rely exclusively on the **Google Antigravity SDK** (`google-antigravity`) as our singular agentic harness, implementing autonomous conversational loops, native subagent delegation, and decoupled grocery-to-merchant delivery adapters.
+> This document outlines the core **AI Layer Architecture** for Kitch. We rely exclusively on the **Google Agent Development Kit (ADK) 2.0** (`google.adk`) as our singular agentic harness, implementing autonomous multi-agent routing (Hub-and-Spoke Topology), dynamic LLM-based recipe and scaling reasoning, in-memory compactor logic, and Supabase database integration.
 
 ---
 
-## 1. Core Framework & Harness: Google Antigravity SDK
+## 1. Core Framework & Harness: Google ADK 2.0
 
-The Google Antigravity SDK is our exclusive agentic harness. It abstracts the core cognitive loop (Planning $\rightarrow$ Tool Selection $\rightarrow$ Execution $\rightarrow$ Observation) while keeping the agent decoupled from the runtime environment.
+The Google ADK 2.0 framework serves as our exclusive agentic harness. It coordinates the cognitive loop, persists sessions, manages native shared memory, and isolates operational domains across cooperative specialist sub-agents.
 
 ```mermaid
-graph TD
-    User([User Chat / Web]) <--> Coordinator[PlateWise Coordinator Agent]
+flowchart TD
+    User([Housemate / User]) <--> Gateway[FastAPI Gateway app.main:app]
+    Gateway <-->|runner.run_async| Runner[ADK Runner]
     
-    subgraph Antigravity SDK Autonomous Loop
-        Coordinator -->|Spawns Subagent| SubPlanner[Culinary Planner Subagent]
-        Coordinator -->|Spawns Subagent| SubVision[Vision Subagent]
-        
-        SubPlanner -->|Tools| RecipeDB[(Recipe Database)]
-        SubVision -->|Native File Ingestion| GeminiMultimodal[Gemini 2.0/3.5 Vision API]
+    subgraph ADK_Services ["ADK 2.0 In-Memory Services"]
+        SessionSvc[(InMemorySessionService)]
+        MemorySvc{InMemoryMemoryService}
     end
     
-    Coordinator -->|Compiles| NativeList[Intermediary Native Grocery List]
+    Runner --- SessionSvc
+    Runner --- MemorySvc
     
-    subgraph Decoupled Delivery Integration Layer
-        NativeList -->|Modular Adapters| Router[Delivery Provider Router]
-        Router -->|Blinkit Adapter| BlinkitMCP[Blinkit MCP Server]
-        Router -->|Zepto Adapter| ZeptoMCP[Zepto MCP Server]
+    %% Parent Coordinator
+    Runner <--> Coordinator["kitch_coordinator (Parent Hub Agent)"]
+    
+    %% Multi-Agent Routing & Delegation (3-Spoke Team)
+    subgraph Agent_Team ["Kitch Collaborative Spoke Team"]
+        SubChef["chef_planner (Dynamic Culinary Agent)"]
+        SubVision["vision_scanner (Multimodal OCR Agent)"]
+        SubCart["checkout_exporter (Dynamic Logistics Agent)"]
     end
     
-    Router -->|ask_user Policy| Prompt[Human Approval Prompt]
+    Coordinator <-->|Triage & delegation| SubChef
+    Coordinator <-->|Image segmentations| SubVision
+    Coordinator <-->|Logistics checkouts| SubCart
+    
+    %% Spoke Tools & DB Connections
+    SubChef -->|Saves Recipe Name Strings| SupabasePlanner["Supabase DB (meal_plans table)"]
+    SubVision -->|Logs Macros & Pantry Stock| SupabaseDiary["Supabase DB (macro_diary & pantry_stock)"]
+    SubCart -->|Reads & Writes Brand Prefs| MemorySvc
+    SubCart -->|Fulfills MCP Cart| MCP["Blinkit / Zepto MCP Cart"]
 ```
 
 ---
 
-## 2. Dynamic Native Subagents & Context Quarantine
+## 2. Dynamic Hub-and-Spoke Subagents
 
-To prevent context bloat, the **PlateWise Coordinator Agent** natively spawns and manages specialized subagents. Subagents run in isolated context windows—their intermediate tool calls and dense raw logs are quarantined. They return only clean, structured results back to the Coordinator.
+To prevent context window bloat, the **Kitch Coordinator Agent** natively routes requests to three specialized sub-agents. Sub-agents run in isolated context windows, returning only clean, structured markdown results back to the Coordinator.
 
-### A. PlateWise Coordinator Agent (Parent Manager)
-*   **Role**: Primary conversational orchestrator and general manager.
-*   **Instruction**: Triage user requests, direct household parameters (household size, diet profiles), manage overall state, compile the **Intermediary Native Grocery List**, and spawn subagents.
+### A. Kitch Coordinator Agent (`kitch_coordinator`)
+*   **Role**: Primary parent orchestrator and general manager.
+*   **Instruction**: Triage user requests, direct household parameters (household size, diet profiles), manage overall state, and delegate operational commands behind the scenes without explicitly exposing agent names.
 
-### B. Culinary Planner Subagent
-*   **Role**: Nutritionist and chef.
-*   **Trigger**: Spawned when users request weekly plans, meal swaps, or portion scaling.
-*   **Tools**: `get_recipes()`, `scale_ingredients(household_size)`, `apply_substitution()`.
+### B. Chef Planner Agent (`chef_planner`)
+*   **Role**: Empathetic household nutritionist and private chef.
+*   **Dynamic Recipe Logic**: **Generates all recipes and plans dynamically from its own mind.** No static databases or IDs exist. Recipes are stored in the Supabase database as actual text recipe names (e.g. `"Avocado & Poached Egg Toast"`, `"Spaghetti Carbonara"`) under breakfast, lunch, dinner, and snack columns.
+*   **Tools**: `get_weekly_schedule_tool()`, `save_weekly_plan_tool()`, `update_single_meal_in_schedule()`, `get_current_datetime()`.
 
-### C. Vision Subagent
+### C. Vision Scanner Agent (`vision_scanner`)
 *   **Role**: Multimodal computer vision analyst.
-*   **Trigger**: Spawned when image payloads are submitted (plate snaps or fridge interior shelf uploads).
-*   **Multimodal Input**: Natively ingests raw image bytes utilizing Antigravity's native file ingestion, forwarding them to Gemini to estimate portions or count pantry items.
-*   **Response Format**: Returns structured JSON formats (e.g. `MacroLog` or `FridgeScanResult` arrays).
+*   **Multimodal Input**: Natively ingests raw image bytes utilizing ADK 2.0 `Part` builders, segmenting fridge interior shelves (ocr scan) or post-meal plates (estimating macros).
+*   **Tools**: `add_to_pantry_tool()`, `log_macros_tool()`, `get_pantry_stock_tool()`, `get_macro_diary_tool()`, `get_current_datetime()`.
+
+### D. Checkout Exporter Agent (`checkout_exporter`)
+*   **Role**: Smart logistics coordinator and delivery exporter.
+*   **Dynamic Grocery calculations**: Compiles, scales, and subtracts grocery lists dynamically using its own culinary reasoning. It fetches current planned recipe names (`get_weekly_schedule_tool`), retrieves pantry stock (`get_pantry_stock_tool`), scales ingredients for the household size, subtracts stock mathematically, and formats the shopping checklist in markdown.
+*   **Tools**: `get_weekly_schedule_tool()`, `get_pantry_stock_tool()`, `add_to_pantry_tool()`, `set_brand_preference()`, `get_brand_preference()`, `export_to_delivery()`, `get_current_datetime()`.
 
 ---
 
 ## 3. Platform-Agnostic Intermediary Grocery List
 
-To prevent our grocery core from being tightly coupled to a single merchant (such as Blinkit):
-1.  **Intermediary Native List**: Required items (planned requirements minus pantry stock) are compiled and stored in our local database as a provider-agnostic required shopping list.
-2.  **Delivery Provider Router (Provider Pattern)**: The Coordinator interfaces with a pluggable `DeliveryRouter` module.
-3.  **Modular Exporters**: When the user requests checkout, the backend instantiates the matching delivery adapter (e.g. `BlinkitAdapter`, `ZeptoAdapter`) which maps the native required ingredients to the specific merchant catalog format, then triggers the respective MCP tools.
+To prevent our grocery core from being tightly coupled to a single delivery merchant:
+1.  **Intermediate State**: Pantry stocks and planned recipe names are persisted in live Supabase postgres tables.
+2.  **Dynamic Brand Preferences Mapping**: Stored brand preferences (e.g. mapping bread to `"Baker's Dozen Whole Wheat"`) are saved to the unified `InMemoryMemoryService` under `user_id="shared_household"`.
+3.  **MCP Exporters**: When exporting, `checkout_exporter` maps generic required checklist items to branded preferences from native memory, then pushes the target list directly to the `Blinkit` or `Zepto` MCP adapter tools.
 
 ---
 
-## 4. Native Human-in-the-Loop & Safety Policies
+## 4. Pure Python ADK 2.0 Blueprint
 
-Safety and trust are managed natively through **Antigravity's declarative Safety Policies** and **Decide Lifecycle Hooks** rather than deterministic graph state routing.
-
-### A. Declarative "Deny-by-Default" Security Policy
-All tool calls operate on a strict security sandbox. Sensitive tools (like order placements or external file writes) are blocked by default or forced to await user confirmation:
+Below is the technical assembly blueprint using pure `google.adk` primitives, matching the production application:
 
 ```python
-from google.antigravity import Policies
+import os
+from google.adk.agents.llm_agent import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.memory import InMemoryMemoryService
+from google.adk.apps.app import App, EventsCompactionConfig
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+from google.adk.models.lite_llm import LiteLlm
 
-# Establish strict governance policies
-pantry_policy = Policies(
-    allow=["get_recipes", "add_pantry_item"],
-    deny=["shell_execute", "network_post"],
-    ask_user=["export_to_delivery"]  # declarative human approval trigger on checkout
-)
-```
-
-### B. The `Decide` Lifecycle Hook
-For dynamic tool-execution validation, the Antigravity SDK provides blocking **Decide Hooks**. This hook inspects tool payloads in transit before they hit external servers. If a tool call targets `export_to_delivery`, the SDK pauses the agentic run, displays the JSON payload to the user, and awaits UI confirmation.
-
----
-
-## 5. Pure Python Antigravity SDK Blueprint
-
-Below is the complete technical code architecture using pure `google-antigravity` SDK primitives:
-
-```python
-import asyncio
-from google.antigravity import Agent, Subagent, Tools, Policies, Decide, LocalAgentConfig
-from pydantic import BaseModel, Field
-
-# --- 1. Define Structured Output Schemas ---
-class MacroLog(BaseModel):
-    recipe_name: str = Field(description="Identified food item")
-    calories: int = Field(description="Estimated energy intake")
-    protein_g: int = Field(description="Grams of protein")
-    carbs_g: int = Field(description="Grams of carbs")
-    fat_g: int = Field(description="Grams of fats")
-
-class PantryItem(BaseModel):
-    name: str = Field(description="Ingredient name")
-    amount: float = Field(description="Available quantity")
-    unit: str = Field(description="Measurement unit")
-
-# --- 2. Define Custom Tools ---
-def get_recipes(diet_type: str) -> list[dict]:
-    """Retrieve recipes from local DB matching dietary profile."""
-    # Local recipe lookups...
-    pass
-
-def export_to_delivery(items: list[dict], provider: str = "blinkit") -> str:
-    """
-    Decoupled checkout tool: Maps native grocery list items
-    to the selected merchant cart via the modular DeliveryRouter.
-    """
-    # Router routes to pluggable adapters (BlinkitAdapter, ZeptoAdapter)
-    # and communicates with the respective local MCP server...
-    return f"Successfully added {len(items)} items to {provider} cart."
-
-# --- 3. Establish Declarative Safety Policies & Hooks ---
-safety_policy = Policies(
-    allow=["get_recipes", "scale_ingredients"],
-    ask_user=["export_to_delivery"] # Declarative HITL safety policy on checkout
+# Initialize model using stable Azure OpenAI LiteLLM driver
+azure_llm = LiteLlm(
+    model="openai/gpt-5.5",
+    api_key=os.environ["OPENAI_API_KEY"],
+    api_base=os.environ["OPENAI_API_BASE"],
+    custom_llm_provider="openai"
 )
 
-@Decide(tools=["export_to_delivery"])
-def verify_checkout_payload(tool_call):
-    """
-    Decide lifecycle hook: Runs before the delivery exporter executes.
-    Inspects parameters in transit and verifies merchant availability.
-    """
-    args = tool_call.arguments
-    provider = args.get("provider", "blinkit")
-    if provider not in ["blinkit", "zepto"]:
-        raise ValueError(f"Unsupported delivery provider: {provider}!")
-    return True
+# 1. Assemble sub-agents with tools
+chef_planner = LlmAgent(
+    model=azure_llm,
+    name="chef_planner",
+    instruction="Generate recipes and weekly plans dynamically. Save recipe name strings to DB.",
+    tools=[get_weekly_schedule_tool, save_weekly_plan_tool, update_single_meal_in_schedule]
+)
 
-# --- 4. Assemble the Agent & Subagent Network ---
-async def initialize_platewise_agent():
-    config = LocalAgentConfig(
-        model="google:gemini-3.5-flash",
-        policies=safety_policy
+checkout_exporter = LlmAgent(
+    model=azure_llm,
+    name="checkout_exporter",
+    instruction="Fetch plan names and pantry stock. Scale and subtract grocery items dynamically.",
+    tools=[get_weekly_schedule_tool, get_pantry_stock_tool, export_to_delivery]
+)
+
+# 2. Assemble coordinator parent agent
+kitch_coordinator = LlmAgent(
+    model=azure_llm,
+    name="kitch_coordinator",
+    sub_agents=[chef_planner, checkout_exporter],
+    before_agent_callback=inject_datetime_callback
+)
+
+# 3. Enable background compaction to compress context turns
+app_instance = App(
+    name="kitch",
+    root_agent=kitch_coordinator,
+    events_compaction_config=EventsCompactionConfig(
+        compaction_interval=4,
+        overlap_size=1,
+        summarizer=LlmEventSummarizer(llm=azure_llm)
     )
-    
-    async with Agent(config, name="platewise_coordinator") as coordinator:
-        planner_sub = Subagent(
-            name="culinary_planner",
-            instruction="Focus on recipes, dietary restrictions, and ingredients.",
-            tools=[get_recipes]
-        )
-        
-        vision_sub = Subagent(
-            name="multimodal_vision",
-            instruction="Ingest photos. Extract plate macro metrics or fridge stock details.",
-            tools=[]
-        )
-        
-        coordinator.register_subagents([planner_sub, vision_sub])
-        
-        # Example: Requesting cart checkout for a specific provider
-        checkout_response = await coordinator.chat("Export our finalized shopping list to Zepto.")
-        print(await checkout_response.text())
+)
 
-if __name__ == "__main__":
-    asyncio.run(initialize_platewise_agent())
+# 4. Instantiate central runner
+runner = Runner(
+    app=app_instance,
+    session_service=InMemorySessionService(),
+    memory_service=InMemoryMemoryService()
+)
 ```
