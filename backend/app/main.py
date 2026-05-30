@@ -313,7 +313,7 @@ async def export_grocery_endpoint(payload: Dict[str, Any]):
         items = payload.get("items", [])
         provider = payload.get("provider", "blinkit")
         
-        result = export_to_delivery(items=items, provider=provider)
+        result = await export_to_delivery(items=items, provider=provider)
         return {"status": "success", "result": result}
         
     except Exception as e:

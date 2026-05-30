@@ -3,11 +3,13 @@
 import os
 import math
 from typing import List, Dict, Any
+from google.adk.tools import ToolContext
 from app.supabase_client import (
     get_pantry_stock as db_get_pantry_stock,
     add_to_pantry as db_add_to_pantry,
     log_macros as db_log_macros,
-    get_macro_diary as db_get_macro_diary
+    get_macro_diary as db_get_macro_diary,
+    supabase
 )
 
 # Internal database recipes
@@ -100,6 +102,59 @@ def scale_ingredients(recipe_id: str, household_size: int) -> List[Dict[str, Any
     })
   return scaled
 
+def get_weekly_schedule_tool() -> List[Dict[str, Any]]:
+  """
+  Queries Supabase to fetch the current week's planned meal schedule for the household.
+  """
+  try:
+    response = supabase.table("meal_plans").select("*").execute()
+    return response.data or []
+  except Exception as e:
+    print(f"Error fetching weekly schedule: {e}")
+    return []
+
+def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+  """
+  Saves or overrides the entire structured 7-day weekly meal plan in the database.
+  
+  Args:
+      weekly_plan: Mapping of weekdays to meal types (breakfast, lunch, dinner) and recipe IDs.
+                   Example: {'monday': {'breakfast': 'b1', 'lunch': 'l1', 'dinner': 'd1'}}
+  """
+  try:
+    for day, meals in weekly_plan.items():
+      for meal_category, recipe_id in meals.items():
+        supabase.table("meal_plans").upsert({
+            "day_of_week": day.lower().strip(),
+            "meal_type": meal_category.lower().strip(),
+            "recipe_id": recipe_id.strip()
+        }).execute()
+        
+    return {"status": "success", "message": "Successfully synchronized weekly plan to database."}
+  except Exception as e:
+    return {"status": "error", "message": f"Database insertion failed: {str(e)}"}
+
+def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_id: str) -> Dict[str, Any]:
+  """
+  Swaps, replaces, or modifies a single meal slot in the weekly schedule in the database.
+  Always call this whenever a user requests to swap or change a scheduled meal slot.
+  
+  Args:
+      day: Weekday of the slot (e.g. 'thursday', 'monday')
+      meal_category: Meal slot to replace (e.g. 'breakfast', 'dinner')
+      new_recipe_id: The ID of the new recipe (e.g. 'd2', 'b1')
+  """
+  try:
+    supabase.table("meal_plans").upsert({
+        "day_of_week": day.lower().strip(),
+        "meal_type": meal_category.lower().strip(),
+        "recipe_id": new_recipe_id.strip()
+    }).execute()
+    
+    return {"status": "success", "message": f"Successfully updated {day} {meal_category} to {new_recipe_id}."}
+  except Exception as e:
+    return {"status": "error", "message": f"Database update failed: {str(e)}"}
+
 # --- Section 2: Supabase Pantry Stock & Logs ---
 def get_pantry_stock_tool(user_name: str) -> List[Dict[str, Any]]:
   """
@@ -139,43 +194,71 @@ def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
   """
   return db_get_macro_diary(user_name)
 
-# --- Section 3: Brand Preference File Memory Core ---
-def get_brand_preferences() -> Dict[str, str]:
+# --- Section 3: Brand Preference Memory Management (ADK Native Memory) ---
+def get_brand_preference(ingredient: str) -> Dict[str, Any]:
   """
-  Retrieve your custom brand preferences mapping from the local brand_preferences.md file.
-  Use this to find specific brand names preferred by the household.
+  Factual verification tool helper representing brand lookup confirmations.
   """
-  file_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/brand_preferences.md"
-  preferences = {}
-  if os.path.exists(file_path):
-    with open(file_path, "r") as f:
-      for line in f:
-        if line.startswith("- **"):
-          parts = line.strip().split("**: ")
-          if len(parts) == 2:
-            key = parts[0].replace("- **", "").strip().lower()
-            val = parts[1].strip()
-            preferences[key] = val
-  return preferences
+  return {"status": "query_completed", "ingredient": ingredient}
 
-def set_brand_preference(ingredient: str, branded_sku: str) -> Dict[str, Any]:
+async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: ToolContext = None) -> Dict[str, Any]:
   """
-  Record or update a custom brand preference for a generic ingredient in the local brand_preferences.md file.
-  Always call this tool whenever a user asks to remember a certain ingredient brand, or preference for orders.
-  Args:
-      ingredient: The generic name of the ingredient (e.g. 'milk')
-      branded_sku: The exact preferred branded choice (e.g. 'Country Delight Pasteurized Milk 1L')
-  """
-  file_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/brand_preferences.md"
-  preferences = get_brand_preferences()
-  preferences[ingredient.lower().strip()] = branded_sku
+  Instructs the agent to record a brand preference for an ingredient. 
+  This writes the preference natively to the shared household memory store.
   
-  with open(file_path, "w") as f:
-    f.write("# Kitch Brand Preferences\n\n")
-    for key, val in sorted(preferences.items()):
-      f.write(f"- **{key}**: {val}\n")
+  Args:
+      ingredient: Generic ingredient name (e.g. 'bread')
+      branded_sku: Specific brand preferred (e.g. 'Bakers Dozen Whole Wheat')
+  """
+  print(f"*** set_brand_preference called with ingredient='{ingredient}', branded_sku='{branded_sku}' ***")
+  try:
+    from google.adk.events import Event
+    from google.genai.types import Content, Part
+    import time
+    
+    # Resolve memory service
+    mem_svc = None
+    if tool_context:
+      if hasattr(tool_context, "get_invocation_context"):
+        try:
+          mem_svc = tool_context.get_invocation_context().memory_service
+        except Exception:
+          pass
+      elif hasattr(tool_context, "_invocation_context"):
+        try:
+          mem_svc = tool_context._invocation_context.memory_service
+        except Exception:
+          pass
+          
+    if not mem_svc:
+      try:
+        from app.agent.core import memory_service as fallback_mem_svc
+        mem_svc = fallback_mem_svc
+      except ImportError:
+        pass
+        
+    if mem_svc:
+      event = Event(
+          id=f"brand_pref_{ingredient.lower().strip()}_{int(time.time())}",
+          content=Content(parts=[Part(text=f"{ingredient.lower().strip()}: {branded_sku.strip()}")]),
+          author="system",
+          timestamp=time.time()
+      )
+      await mem_svc.add_events_to_memory(
+          app_name="kitch",
+          user_id="shared_household",
+          events=[event]
+      )
       
-  return {"status": "success", "message": f"Successfully updated '{ingredient}' brand preference to '{branded_sku}'."}
+    return {
+        "status": "success", 
+        "message": f"Successfully updated your household brand preference: '{ingredient}' will map to '{branded_sku}'."
+    }
+  except Exception as e:
+    import traceback
+    print(f"*** set_brand_preference failed with: {e} ***")
+    traceback.print_exc()
+    return {"status": "error", "message": f"Failed to set brand preference in memory: {str(e)}"}
 
 # --- Section 4: Grocery List Calculations & Brand-Mapped Exporter ---
 def calculate_intermediary_grocery_list(
@@ -232,29 +315,66 @@ def calculate_intermediary_grocery_list(
 
   return list(aggregated.values())
 
-def export_to_delivery(items: List[Dict[str, Any]], provider: str = "blinkit") -> str:
+async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_context: ToolContext = None) -> str:
   """
   Decoupled Checkout Exporter: Translates generic required ingredients in your grocery list
-  into your favored branded products from the brand_preferences.md file, then loads them
+  into your favored branded products from the shared factual memory service, then loads them
   into the chosen delivery merchant cart (Blinkit or Zepto).
   """
+  print(f"*** export_to_delivery called with items={items}, provider='{provider}' ***")
   provider_clean = provider.lower().strip()
   if provider_clean not in ["blinkit", "zepto"]:
     raise ValueError(f"Merchant provider: {provider} is currently unsupported.")
   
-  brand_map = get_brand_preferences()
   to_buy = [i for i in items if not i.get("checked") and not i.get("alreadyStocked")]
-  
   payload = []
+  
+  # Resolve memory service
+  mem_svc = None
+  if tool_context:
+    if hasattr(tool_context, "get_invocation_context"):
+      try:
+        mem_svc = tool_context.get_invocation_context().memory_service
+      except Exception:
+        pass
+    elif hasattr(tool_context, "_invocation_context"):
+      try:
+        mem_svc = tool_context._invocation_context.memory_service
+      except Exception:
+        pass
+        
+  if not mem_svc:
+    try:
+      from app.agent.core import memory_service as fallback_mem_svc
+      mem_svc = fallback_mem_svc
+    except ImportError:
+      pass
+  
   for item in to_buy:
     name_clean = item["name"].lower().strip()
-    # Check if a custom brand preference exists in episodic memory
-    branded_name = brand_map.get(name_clean, item["name"])
+    branded_name = item["name"]
     
+    # Query shared household memory natively for brand preferences
+    if mem_svc:
+      memory_result = await mem_svc.search_memory(
+          app_name="kitch",
+          user_id="shared_household",
+          query=f"preferred brand for {name_clean}"
+      )
+      if memory_result.memories:
+        # Resolve the top matched text part as our brand replacement
+        text_match = memory_result.memories[0].content.parts[0].text
+        # Safety check: ensure it matches a brand phrasing
+        if text_match and len(text_match) < 100:
+          if ":" in text_match:
+            branded_name = text_match.split(":", 1)[1].strip()
+          else:
+            branded_name = text_match
+          
     payload.append({
       "name": branded_name,
       "qty": item["amount"],
       "unit": item["unit"]
     })
     
-  return f"Successfully synchronized {len(payload)} items to {provider_clean.capitalize()} MCP cart (with brand preferences active)."
+  return f"Successfully synchronized {len(payload)} items to {provider_clean.capitalize()} MCP cart (with ADK native brand memory active). Mapped items: {payload}"

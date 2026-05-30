@@ -18,14 +18,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Helper: Map user names to static test UUIDs
 USER_ID_MAP = {
-    "Dynamite": "00000000-0000-0000-0000-000000000000",
-    "Housemate A": "11111111-1111-1111-1111-111111111111",
-    "Housemate B": "22222222-2222-2222-2222-222222222222"
+    "Archit": "00000000-0000-0000-0000-000000000000",
+    "Anubhav": "11111111-1111-1111-1111-111111111111",
+    "Naman": "22222222-2222-2222-2222-222222222222"
 }
 
 def get_user_id(user_name: str) -> str:
-    """Returns the UUID for a user name, falling back to Dynamite."""
-    return USER_ID_MAP.get(user_name, USER_ID_MAP["Dynamite"])
+    """Returns the UUID for a user name, falling back to Archit."""
+    return USER_ID_MAP.get(user_name, USER_ID_MAP["Archit"])
 
 # 2. Profiles CRUD
 def get_profile(user_name: str) -> Dict[str, Any]:
