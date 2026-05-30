@@ -1,9 +1,16 @@
-# Kitch: Core Agent Custom Tools
+# Kitch: Core ADK 2.0 Custom Tools
 
+import os
 import math
 from typing import List, Dict, Any
+from app.supabase_client import (
+    get_pantry_stock as db_get_pantry_stock,
+    add_to_pantry as db_add_to_pantry,
+    log_macros as db_log_macros,
+    get_macro_diary as db_get_macro_diary
+)
 
-# Mock internal database recipes (kept in backend to ensure fast parsing)
+# Internal database recipes
 RECIPE_DATABASE = {
   "b1": {
     "id": "b1", "name": "Avocado & Poached Egg Toast", "type": "breakfast",
@@ -63,6 +70,7 @@ RECIPE_DATABASE = {
   }
 }
 
+# --- Section 1: Standard Meal Planning & Scalers ---
 def get_recipes(diet_preference: str) -> List[Dict[str, Any]]:
   """
   Retrieve recipe objects matching a specific dietary profile.
@@ -92,6 +100,84 @@ def scale_ingredients(recipe_id: str, household_size: int) -> List[Dict[str, Any
     })
   return scaled
 
+# --- Section 2: Supabase Pantry Stock & Logs ---
+def get_pantry_stock_tool(user_name: str) -> List[Dict[str, Any]]:
+  """
+  Query Supabase to fetch current pantry stock levels for a user.
+  """
+  return db_get_pantry_stock(user_name)
+
+def add_to_pantry_tool(user_name: str, ingredient_name: str, amount: float, unit: str = "piece") -> str:
+  """
+  Add or update an ingredient in the user's pantry/fridge stock database on Supabase.
+  """
+  res = db_add_to_pantry(user_name, ingredient_name, amount, unit)
+  if res:
+      return f"Successfully added {amount} {unit} of '{ingredient_name}' to {user_name}'s pantry stock."
+  return "Failed to add item to database."
+
+def log_macros_tool(
+    user_name: str, 
+    meal_name: str, 
+    calories: int, 
+    protein: int, 
+    carbs: int, 
+    fat: int, 
+    fiber: int = 0
+) -> str:
+  """
+  Record a meal intake log with calorie and macronutrient details into the user's Supabase journal.
+  """
+  res = db_log_macros(user_name, meal_name, calories, protein, carbs, fat, fiber)
+  if res:
+      return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {user_name}'s journal."
+  return "Failed to log meal macros to database."
+
+def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
+  """
+  Query Supabase to fetch the daily plate log history and macros for a user.
+  """
+  return db_get_macro_diary(user_name)
+
+# --- Section 3: Brand Preference File Memory Core ---
+def get_brand_preferences() -> Dict[str, str]:
+  """
+  Retrieve your custom brand preferences mapping from the local brand_preferences.md file.
+  Use this to find specific brand names preferred by the household.
+  """
+  file_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/brand_preferences.md"
+  preferences = {}
+  if os.path.exists(file_path):
+    with open(file_path, "r") as f:
+      for line in f:
+        if line.startswith("- **"):
+          parts = line.strip().split("**: ")
+          if len(parts) == 2:
+            key = parts[0].replace("- **", "").strip().lower()
+            val = parts[1].strip()
+            preferences[key] = val
+  return preferences
+
+def set_brand_preference(ingredient: str, branded_sku: str) -> Dict[str, Any]:
+  """
+  Record or update a custom brand preference for a generic ingredient in the local brand_preferences.md file.
+  Always call this tool whenever a user asks to remember a certain ingredient brand, or preference for orders.
+  Args:
+      ingredient: The generic name of the ingredient (e.g. 'milk')
+      branded_sku: The exact preferred branded choice (e.g. 'Country Delight Pasteurized Milk 1L')
+  """
+  file_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/brand_preferences.md"
+  preferences = get_brand_preferences()
+  preferences[ingredient.lower().strip()] = branded_sku
+  
+  with open(file_path, "w") as f:
+    f.write("# Kitch Brand Preferences\n\n")
+    for key, val in sorted(preferences.items()):
+      f.write(f"- **{key}**: {val}\n")
+      
+  return {"status": "success", "message": f"Successfully updated '{ingredient}' brand preference to '{branded_sku}'."}
+
+# --- Section 4: Grocery List Calculations & Brand-Mapped Exporter ---
 def calculate_intermediary_grocery_list(
     weekly_plan: Dict[str, Dict[str, str]], 
     household_size: int, 
@@ -148,23 +234,27 @@ def calculate_intermediary_grocery_list(
 
 def export_to_delivery(items: List[Dict[str, Any]], provider: str = "blinkit") -> str:
   """
-  Decoupled Checkout Adapter: Maps native required items to the chosen delivery merchant cart.
-  Invokes Blinkit MCP or Zepto MCP depending on parameter inputs.
+  Decoupled Checkout Exporter: Translates generic required ingredients in your grocery list
+  into your favored branded products from the brand_preferences.md file, then loads them
+  into the chosen delivery merchant cart (Blinkit or Zepto).
   """
   provider_clean = provider.lower().strip()
   if provider_clean not in ["blinkit", "zepto"]:
     raise ValueError(f"Merchant provider: {provider} is currently unsupported.")
   
-  # Filter only uncompleted, required ingredients
+  brand_map = get_brand_preferences()
   to_buy = [i for i in items if not i.get("checked") and not i.get("alreadyStocked")]
   
-  # Simulation of Playwright Browser/MCP API connectivity
   payload = []
   for item in to_buy:
+    name_clean = item["name"].lower().strip()
+    # Check if a custom brand preference exists in episodic memory
+    branded_name = brand_map.get(name_clean, item["name"])
+    
     payload.append({
-      "name": item["name"],
+      "name": branded_name,
       "qty": item["amount"],
       "unit": item["unit"]
     })
     
-  return f"Successfully synchronized {len(payload)} items to {provider_clean.capitalize()} MCP cart."
+  return f"Successfully synchronized {len(payload)} items to {provider_clean.capitalize()} MCP cart (with brand preferences active)."

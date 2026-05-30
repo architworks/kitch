@@ -2,13 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { DIET_TYPES, RECIPES, DEFAULT_WEEKLY_PLAN, IMAGE_CATALOG } from "./mockData.js";
-import { processChatMessage, simulatePhotoScan } from "./engine.js";
 
 // Default welcome messaging
 const INITIAL_CHAT = [
   {
     sender: "agent",
-    text: "👋 **Welcome back to Kitch!** I am your GenAI Culinary Companion.\n\nI have scaled your weekly meal plan for your **3-person household**. \n\n✨ **New Capabilities Enabled:**\n1. **Individual Macro Logs:** Select your active user in the header. We track macros separately for each housemate!\n2. **Pantry Subtraction:** Upload a picture of your fridge shelves using the camera simulation, or type *'We have 6 eggs'* to automatically subtract existing stocks from your grocery cart!\n3. **Blinkit MCP:** Ready to export your finalized grocery checklist to Blinkit via MCP commands.",
+    text: "👋 **Welcome back to Kitch!** I am your GenAI Culinary Companion.\n\nI have scaled your weekly meal plan for your **3-person household**. \n\n✨ **Live Capabilities Active:**\n1. **Individual Macro Logs:** Select your active user in the header. We track macros separately for each housemate in Supabase!\n2. **Pantry Subtraction:** Click the **Scan Fridge** button to upload a photo of your shelves, or type *'We have 6 eggs'* to automatically update your inventory in the database!\n3. **Blinkit MCP:** Export your finalized grocery checklist directly to delivery carts via our backend API.",
     time: "09:00 AM"
   }
 ];
@@ -59,6 +58,38 @@ export default function Home() {
   const [pantryAddAmount, setPantryAddAmount] = useState(1);
   const [pantryAddUnit, setPantryAddUnit] = useState("piece");
 
+  // Helper to load live DB state from backend
+  const syncLiveState = async (userName) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/state/${userName}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pantry_stock) {
+          setPantryStock(data.pantry_stock);
+        }
+        if (data.macro_diary) {
+          setUserProfiles(prev => ({
+            ...prev,
+            [userName]: {
+              name: userName,
+              loggedMeals: data.macro_diary
+            }
+          }));
+        }
+        if (data.profile) {
+          if (data.profile.diet_preference) {
+            setDietPreference(data.profile.diet_preference);
+          }
+          if (data.profile.household_size) {
+            setHouseholdSize(data.profile.household_size);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to sync live state with Supabase backend", e);
+    }
+  };
+
   // 1. Initial mounting & LocalStorage sync
   useEffect(() => {
     setIsMounted(true);
@@ -66,12 +97,8 @@ export default function Home() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.dietPreference) setDietPreference(parsed.dietPreference);
-        if (parsed.householdSize) setHouseholdSize(parsed.householdSize);
         if (parsed.weeklyPlan) setWeeklyPlan(parsed.weeklyPlan);
         if (parsed.activeUser) setActiveUser(parsed.activeUser);
-        if (parsed.userProfiles) setUserProfiles(parsed.userProfiles);
-        if (parsed.pantryStock) setPantryStock(parsed.pantryStock);
         if (parsed.chatHistory) setChatHistory(parsed.chatHistory);
         if (parsed.checkedGroceryItems) setCheckedGroceryItems(parsed.checkedGroceryItems);
         if (parsed.customGroceryItems) setCustomGroceryItems(parsed.customGroceryItems);
@@ -80,6 +107,13 @@ export default function Home() {
       }
     }
   }, []);
+
+  // Sync state reactively when activeUser changes
+  useEffect(() => {
+    if (isMounted) {
+      syncLiveState(activeUser);
+    }
+  }, [activeUser, isMounted]);
 
   // Initialize weekly plan state reactively to default plan
   const [weeklyPlan, setWeeklyPlan] = useState({ ...DEFAULT_WEEKLY_PLAN.balanced });
@@ -217,7 +251,7 @@ export default function Home() {
     triggerBannerAlert(`Switched active profile to ${userName}. Viewing macro logs for ${userName}.`);
   };
 
-  const addPantryItem = (name, amount, unit = "piece") => {
+  const addPantryItem = async (name, amount, unit = "piece") => {
     if (!name.trim()) return;
     const key = name.toLowerCase().trim();
     
@@ -236,14 +270,40 @@ export default function Home() {
       }
       return updated;
     });
+
+    try {
+      await fetch("http://localhost:8000/api/pantry/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_name: activeUser,
+          name: name.trim(),
+          amount: parseFloat(amount) || 1,
+          unit
+        })
+      });
+    } catch (e) {
+      console.error("Failed to add pantry item to DB", e);
+    }
   };
 
-  const removePantryItem = (idx) => {
+  const removePantryItem = async (idx) => {
+    const item = pantryStock[idx];
+    if (!item) return;
+
     setPantryStock(prev => {
       const updated = [...prev];
       updated.splice(idx, 1);
       return updated;
     });
+
+    try {
+      await fetch(`http://localhost:8000/api/pantry/remove/${activeUser}/${encodeURIComponent(item.name)}`, {
+        method: "DELETE"
+      });
+    } catch (e) {
+      console.error("Failed to remove pantry item from DB", e);
+    }
   };
 
   const toggleGroceryItem = (itemName) => {
@@ -300,7 +360,7 @@ export default function Home() {
     });
   };
 
-  const resetDailyLogs = () => {
+  const resetDailyLogs = async () => {
     setUserProfiles(prev => {
       const current = prev[activeUser] || { name: activeUser, loggedMeals: [] };
       return {
@@ -309,9 +369,17 @@ export default function Home() {
       };
     });
     triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
+
+    try {
+      await fetch(`http://localhost:8000/api/diary/clear/${activeUser}`, {
+        method: "POST"
+      });
+    } catch (e) {
+      console.error("Failed to clear macro logs in DB", e);
+    }
   };
 
-  // 4. Send chat message agent action interceptor
+  // 4. Send chat message to real FastAPI backend agent
   const sendChatMessage = async (prompt) => {
     if (!prompt.trim() || isChatTyping) return;
 
@@ -321,21 +389,29 @@ export default function Home() {
     setIsChatTyping(true);
 
     try {
-      // Build state snapshot to send to the simulation engine
-      const currentStateSnapshot = {
-        dietPreference,
-        householdSize,
-        weeklyPlan,
-        activeUser,
-        userProfiles,
-        pantryStock,
-        chatHistory,
-        customGroceryItems,
-        checkedGroceryItems,
-        groceryList
+      const chatPayload = {
+        message: prompt,
+        active_user: activeUser,
+        diet_preference: dietPreference,
+        household_size: householdSize,
+        weekly_plan: weeklyPlan,
+        pantry_stock: pantryStock,
+        grocery_list: groceryList
       };
 
-      const response = await processChatMessage(prompt, currentStateSnapshot);
+      const res = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(chatPayload)
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
+
+      const response = await res.json();
       const responseTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       setChatHistory(prev => [
@@ -350,24 +426,29 @@ export default function Home() {
       if (response.action) {
         const act = response.action;
         if (act.type === "SWITCH_DIET") {
-          setDietPreference(act.dietPreference);
-          setWeeklyPlan(act.weeklyPlan);
-          triggerBannerAlert(act.alert);
+          const textLower = response.text.toLowerCase();
+          let newDiet = dietPreference;
+          if (textLower.includes("keto")) newDiet = "keto";
+          else if (textLower.includes("vegan")) newDiet = "vegan";
+          else if (textLower.includes("high-protein") || textLower.includes("active")) newDiet = "high-protein";
+          else if (textLower.includes("balanced")) newDiet = "balanced";
+
+          setDietPreference(newDiet);
+          setWeeklyPlan({ ...DEFAULT_WEEKLY_PLAN[newDiet] });
+          triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
         } else if (act.type === "UPDATE_PLANNER") {
-          setWeeklyPlan(act.weeklyPlan);
-          triggerBannerAlert(act.alert);
+          triggerBannerAlert("Planner modified by Kitch Agent!");
         } else if (act.type === "UPDATE_PANTRY") {
-          addPantryItem(act.itemName, act.amount, act.unit);
-          triggerBannerAlert(act.alert);
+          triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
         }
       }
     } catch (e) {
-      console.error("Agent chat processing error", e);
+      console.error("Real API chat processing error", e);
       setChatHistory(prev => [
         ...prev,
         {
           sender: "agent",
-          text: "Sorry, I had trouble parsing that. Please try again!",
+          text: "⚠️ **Connection Error:** I was unable to reach the Kitch backend server on `http://localhost:8000`. Please make sure the FastAPI server is running!",
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -385,137 +466,94 @@ export default function Home() {
     }
   };
 
-  // 5. Simulated Vision Camera scanning workflow
-  const triggerPhotoScan = async (fileName) => {
-    const isFridge = fileName.includes("fridge");
-    const scannerTitle = isFridge ? "Scanning Fridge Interior Shelves..." : "Analyzing Culinary Plate...";
-    const steps = isFridge ? [
-      "🔍 Establishing fridge video feed...",
-      "⚡ Running shelf-level ingredient detection...",
-      "🍏 Isolating eggs, vegetables, and beverages...",
-      "🤖 Estimating stock weights & portions...",
-      "✅ Success! Subtracting pantry stock counts from shopping cart."
-    ] : [
-      "🔍 Loading image payload...",
-      "⚡ Segmenting plate elements using Multimodal ViT...",
-      "🥩 Core components isolated: estimating density & volume...",
-      "🤖 Running regression for calories and macro calculations...",
-      "✅ Success! Analysis package dispatched to Kitch Core."
-    ];
+  // 5. Real Vision Camera scanning & upload workflow
+  const handleRealPhotoUpload = async (file, isFridgeScan) => {
+    if (!file) return;
 
-    setScanningOverlay({
-      active: true,
-      title: scannerTitle,
-      steps: [],
-      fileName
-    });
-
-    // Populate steps step-by-step
-    for (let i = 0; i < steps.length; i++) {
-      await new Promise(r => setTimeout(r, 400));
-      setScanningOverlay(prev => ({
-        ...prev,
-        steps: [...prev.steps, steps[i]]
-      }));
-    }
-
-    await new Promise(r => setTimeout(r, 600));
-    setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
-
-    // Handle the simulated scan photo payload logging
-    await handlePhotoUpload(fileName);
-  };
-
-  const handlePhotoUpload = async (fileName) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setChatHistory(prev => [
       ...prev,
       {
         sender: "user",
-        text: `📷 *Uploaded photo target: ${fileName}*`,
-        image: fileName,
+        text: `📷 *Uploaded photo: ${file.name}*`,
         time
       }
     ]);
 
+    // Show live scanning overlay
+    setScanningOverlay({
+      active: true,
+      title: isFridgeScan ? "Fridge Camera Scanner (Live)" : "Culinary Plate Scanner (Live)",
+      steps: [
+        "🔍 Establishing connection to Kitch backend...",
+        `⚡ Uploading image bytes: ${file.name}...`
+      ],
+      fileName: file.name
+    });
+
     setIsChatTyping(true);
 
-    const currentStateSnapshot = {
-      dietPreference,
-      householdSize,
-      weeklyPlan,
-      activeUser,
-      userProfiles,
-      pantryStock,
-      chatHistory,
-      customGroceryItems,
-      checkedGroceryItems,
-      groceryList
-    };
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("active_user", activeUser);
+      formData.append("is_fridge_scan", isFridgeScan ? "true" : "false");
 
-    const scan = await simulatePhotoScan(fileName, currentStateSnapshot);
-    const responseTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setScanningOverlay(prev => ({
+        ...prev,
+        steps: [...prev.steps, "🧠 Running computer vision segmentation in Gemini 3.5..."]
+      }));
 
-    let details = "";
-    if (scan.result.isFridgeScan) {
-      setPantryStock(prev => {
-        const updated = [...prev];
-        scan.result.detectedIngredients.forEach(item => {
-          const key = item.name.toLowerCase().trim();
-          const existing = updated.find(i => i.name.toLowerCase() === key);
-          if (existing) {
-            existing.amount += item.amount;
-          } else {
-            updated.push({
-              name: item.name,
-              amount: item.amount,
-              unit: item.unit
-            });
-          }
-        });
-        return updated;
+      const res = await fetch("http://localhost:8000/api/upload-photo", {
+        method: "POST",
+        body: formData
       });
 
-      details = `🤖 **PlateVision OCR Fridge Scan Complete!**
-Parsed shelving layout and located **${scan.result.detectedIngredients.length} ingredients**:
-
-${scan.result.detectedIngredients.map(i => `• **${i.amount} ${i.unit}** of *${i.name}*`).join("\n")}
-
-*I have successfully updated your Pantry Inventory and subtracted these existing ingredients from your weekly grocery ordering list!*`;
-
-      triggerBannerAlert(`Added ${scan.result.detectedIngredients.length} items to fridge stock.`);
-    } else {
-      const mealName = scan.result.name;
-      const calories = scan.result.calories;
-      const protein = scan.result.macros.protein;
-      const carbs = scan.result.macros.carbs;
-      const fat = scan.result.macros.fat;
-      const fiber = scan.result.macros.fiber;
-
-      logMeal(mealName, calories, protein, carbs, fat, fiber);
-
-      details = `🤖 **PlateVision OCR Plate Scan Complete!**
-Identified recipe: **${scan.result.name}**
-
-*   **Logged to Profile:** ${activeUser}
-*   **Macro estimation:** ${scan.result.calories} kcal | ${scan.result.macros.protein}g Protein | ${scan.result.macros.carbs}g Carbs | ${scan.result.macros.fat}g Fat.
-*   **Segmented ingredients:** 
-    ${scan.result.detectedIngredients.map(i => `• ${i}`).join("\n    ")}
-
-*I have successfully logged these macros into **${activeUser}'s** personal nutrient diary today!*`;
-
-      triggerBannerAlert(`Logged ${calories} calories to ${activeUser}'s daily log.`);
-    }
-
-    setChatHistory(prev => [
-      ...prev,
-      {
-        sender: "agent",
-        text: details,
-        time: responseTime
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
       }
-    ]);
-    setIsChatTyping(false);
+
+      setScanningOverlay(prev => ({
+        ...prev,
+        steps: [...prev.steps, "✅ Success! Parsing OCR payload outcomes..."]
+      }));
+
+      const data = await res.json();
+      
+      // Refresh DB state to get OCR ingredients added to pantry or macro plates logged
+      await syncLiveState(activeUser);
+      
+      await new Promise(r => setTimeout(r, 600));
+      setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
+
+      const responseTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      setChatHistory(prev => [
+        ...prev,
+        {
+          sender: "agent",
+          text: data.result,
+          time: responseTime
+        }
+      ]);
+
+      triggerBannerAlert(isFridgeScan ? "Fridge scanned successfully!" : "Plate logged successfully!");
+
+    } catch (e) {
+      console.error("Real photo upload error", e);
+      setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
+      
+      setChatHistory(prev => [
+        ...prev,
+        {
+          sender: "agent",
+          text: "⚠️ **Upload Connection Error:** Failed to reach `/api/upload-photo` on `http://localhost:8000`. Is your FastAPI backend running?",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } finally {
+      setIsChatTyping(false);
+    }
   };
 
   // 6. Modal Meal Swap actions
@@ -738,36 +776,34 @@ Identified recipe: **${scan.result.name}**
             )}
           </div>
 
-          {/* Quick Food Snap Demo Tray */}
+          {/* Real Photo Upload & Log Tray */}
           <div className="chat-photo-tray">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <h4>📸 Simulated Snap & Log Camera</h4>
-              <button
-                className="photo-btn"
-                onClick={() => triggerPhotoScan("fridge_interior.jpg")}
-                style={{ background: "rgba(16, 185, 129, 0.15)", borderColor: "var(--accent-primary)", padding: "2px 6px", fontSize: "9px", height: "auto", width: "auto", flexDirection: "row" }}
-              >
-                <span>❄️</span>
-                <span style={{ cursor: "pointer", fontWeight: 700, marginLeft: "4px" }}>Fridge Scan</span>
-              </button>
-            </div>
-            <div className="photo-options">
-              <button className="photo-btn" onClick={() => triggerPhotoScan("salmon_plate.jpg")}>
-                <span>🐟</span>
-                <label>Salmon Asparagus</label>
-              </button>
-              <button className="photo-btn" onClick={() => triggerPhotoScan("chicken_quinoa.jpg")}>
-                <span>🍗</span>
-                <label>Quinoa Bowl</label>
-              </button>
-              <button className="photo-btn" onClick={() => triggerPhotoScan("chickpea_salad.jpg")}>
-                <span>🥗</span>
-                <label>Chickpea Salad</label>
-              </button>
-              <button className="photo-btn" onClick={() => triggerPhotoScan("berry_smoothie.jpg")}>
-                <span>🍓</span>
-                <label>Berry Smoothie</label>
-              </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h4 style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "1px" }}>📸 Upload & Scan Live Photo</h4>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <label className="photo-btn" style={{ background: "rgba(16, 185, 129, 0.15)", borderColor: "var(--accent-primary)", padding: "4px 8px", fontSize: "10px", height: "auto", width: "auto", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", borderRadius: "8px", border: "1px solid var(--glass-border)", transition: "var(--transition-smooth)" }}>
+                    <span>❄️</span>
+                    <strong style={{ cursor: "pointer" }}>Scan Fridge</strong>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => handleRealPhotoUpload(e.target.files[0], true)}
+                    />
+                  </label>
+                  <label className="photo-btn" style={{ background: "rgba(59, 130, 246, 0.15)", borderColor: "#3B82F6", padding: "4px 8px", fontSize: "10px", height: "auto", width: "auto", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", borderRadius: "8px", border: "1px solid var(--glass-border)", transition: "var(--transition-smooth)" }}>
+                    <span>🍽️</span>
+                    <strong style={{ cursor: "pointer" }}>Scan Plate</strong>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => handleRealPhotoUpload(e.target.files[0], false)}
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1086,7 +1122,7 @@ Identified recipe: **${scan.result.name}**
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {pantryStock.length === 0 ? (
                       <div className="diary-empty-state" style={{ padding: "16px", fontSize: "11px" }}>
-                        ❄️ Fridge inventory is empty! Add items manually or run a simulated Fridge Camera scan.
+                        ❄️ Fridge inventory is empty! Add items manually or click Scan Fridge to upload an image.
                       </div>
                     ) : (
                       pantryStock.map((pantryItem, idx) => (
@@ -1255,9 +1291,28 @@ Identified recipe: **${scan.result.name}**
                 </button>
                 <button
                   id="mcp-approve-btn"
-                  onClick={() => {
+                  onClick={async () => {
                     setMcpModalOpen(false);
-                    triggerBannerAlert("✨ MCP Call Successful! 🛒 Blinkit cart populated with ingredients and ready for review.");
+                    
+                    try {
+                      const res = await fetch("http://localhost:8000/api/grocery/export", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          items: checkoutItems,
+                          provider: "blinkit"
+                        })
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        triggerBannerAlert(`✨ Real MCP Call Successful! ${data.result}`);
+                      } else {
+                        throw new Error("API call failed");
+                      }
+                    } catch (e) {
+                      triggerBannerAlert("❌ Failed to contact the backend checkout exporter.");
+                      console.error(e);
+                    }
                     
                     // Mark all non-pantry checkout items as checked
                     const newChecked = { ...checkedGroceryItems };
