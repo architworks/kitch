@@ -164,13 +164,40 @@ Prototype identity:
 
 ## 6. LLM and Environment Configuration
 
-Current LLM configuration is loaded from environment variables:
+Current LLM configuration is loaded from environment variables. The backend uses a provider selector so local testing and production do not need the same model provider.
+
+Provider selector:
+
+| Variable | Purpose |
+| :--- | :--- |
+| `KITCH_LLM_PROVIDER` | Selects the model adapter. Use `openai_compatible` for LiteLLM/OpenAI-compatible gateways or `gemini` for native ADK Gemini. Defaults to `openai_compatible` for local backward compatibility. |
+| `KITCH_LLM_MODEL` | Selects the model name for the configured provider. |
+| `KITCH_LLM_API_KEY` | Optional generic API key for OpenAI-compatible LiteLLM mode. |
+| `KITCH_LLM_API_BASE` | Optional generic base URL for OpenAI-compatible LiteLLM mode or Gemini custom base URL. |
+| `KITCH_LLM_LITELLM_PREFIX` | Optional LiteLLM model prefix. Defaults to `openai`. |
+| `KITCH_LLM_CUSTOM_PROVIDER` | Optional LiteLLM custom provider. Defaults to `openai`. |
+
+Local OpenAI-compatible fallback variables:
 
 | Variable | Purpose |
 | :--- | :--- |
 | `OPENAI_MODEL_NAME` | Selects the model name passed through ADK `LiteLlm`. |
 | `OPENAI_API_KEY` | Authenticates model calls. |
 | `OPENAI_API_BASE` | Points to the OpenAI-compatible gateway base URL. |
+
+Production Gemini variables:
+
+| Variable | Purpose |
+| :--- | :--- |
+| `GOOGLE_API_KEY` | Google AI Studio key for native Gemini. |
+| `GOOGLE_GENAI_USE_VERTEXAI` | Set to `FALSE` for Google AI Studio API-key mode, or `TRUE` for Vertex AI / Agent Platform mode. |
+| `GOOGLE_CLOUD_PROJECT` | Required for Vertex AI / Agent Platform mode. |
+| `GOOGLE_CLOUD_LOCATION` | Required for Vertex AI / Agent Platform mode. |
+
+Other backend variables:
+
+| Variable | Purpose |
+| :--- | :--- |
 | `SUPABASE_URL` | Supabase project URL. |
 | `SUPABASE_KEY` | Supabase API key used by the backend. |
 

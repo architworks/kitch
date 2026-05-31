@@ -7,6 +7,7 @@ from google.adk.sessions import InMemorySessionService
 from google.adk.memory import InMemoryMemoryService
 from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+from google.adk.models.google_llm import Gemini
 from google.adk.models.lite_llm import LiteLlm
 from google.genai.types import Content, Part
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, household_members_text
@@ -29,18 +30,46 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-# 0. Load Azure OpenAI Credentials dynamically from gitignored .env file (OpenAI Compatibility Mode)
+# 0. Load model provider credentials dynamically from gitignored .env file
 load_dotenv()
 
-AZURE_MODEL = os.environ.get("OPENAI_MODEL_NAME", "gpt-5.5")
-model_identifier = f"openai/{AZURE_MODEL}"
+def build_llm_model():
+    """
+    Builds the model adapter from environment configuration.
 
-azure_llm = LiteLlm(
-    model=model_identifier,
-    api_key=os.environ.get("OPENAI_API_KEY"),
-    api_base=os.environ.get("OPENAI_API_BASE"),
-    custom_llm_provider="openai"
-)
+    Production can use native ADK Gemini by setting:
+    - KITCH_LLM_PROVIDER=gemini
+    - KITCH_LLM_MODEL=gemini-flash-latest
+    - GOOGLE_API_KEY=...
+    - GOOGLE_GENAI_USE_VERTEXAI=FALSE
+
+    Local OpenAI-compatible testing remains supported through:
+    - KITCH_LLM_PROVIDER=openai_compatible, or omitted
+    - OPENAI_MODEL_NAME / OPENAI_API_KEY / OPENAI_API_BASE
+    """
+    provider = os.environ.get("KITCH_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "openai_compatible")).strip().lower()
+
+    if provider in {"gemini", "google", "google_ai_studio", "vertexai"}:
+        return Gemini(
+            model=os.environ.get("KITCH_LLM_MODEL", os.environ.get("GOOGLE_MODEL_NAME", "gemini-flash-latest")),
+            base_url=os.environ.get("KITCH_LLM_API_BASE", os.environ.get("GOOGLE_API_BASE"))
+        )
+
+    model_name = os.environ.get("KITCH_LLM_MODEL", os.environ.get("OPENAI_MODEL_NAME", "gpt-5.5")).strip()
+    model_identifier = (
+        model_name
+        if "/" in model_name
+        else f"{os.environ.get('KITCH_LLM_LITELLM_PREFIX', 'openai')}/{model_name}"
+    )
+
+    return LiteLlm(
+        model=model_identifier,
+        api_key=os.environ.get("KITCH_LLM_API_KEY", os.environ.get("OPENAI_API_KEY")),
+        api_base=os.environ.get("KITCH_LLM_API_BASE", os.environ.get("OPENAI_API_BASE")),
+        custom_llm_provider=os.environ.get("KITCH_LLM_CUSTOM_PROVIDER", "openai")
+    )
+
+configured_llm = build_llm_model()
 
 # 1. Initialize modern, high-performance in-memory prototyping services
 session_service = InMemorySessionService()
@@ -73,7 +102,7 @@ def inject_datetime_callback(callback_context: CallbackContext) -> Optional[Cont
 
 # 3. Assemble the 3-Spoke Specialized Spoke Sub-Agents
 chef_planner = LlmAgent(
-    model=azure_llm,
+    model=configured_llm,
     name="chef_planner",
     description=(
         "Handles all requests related to food planning, cooking, and meals: "
@@ -110,7 +139,7 @@ chef_planner = LlmAgent(
 )
 
 vision_scanner = LlmAgent(
-    model=azure_llm,
+    model=configured_llm,
     name="vision_scanner",
     description=(
         "Handles all requests related to food intake logging and pantry management: "
@@ -143,7 +172,7 @@ vision_scanner = LlmAgent(
 )
 
 checkout_exporter = LlmAgent(
-    model=azure_llm,
+    model=configured_llm,
     name="checkout_exporter",
     description=(
         "Handles all requests related to grocery shopping and delivery: "
@@ -184,7 +213,7 @@ checkout_exporter = LlmAgent(
 
 # 4. Construct the Central Coordinator Agent (Parent Orchestrator Hub)
 kitch_coordinator = LlmAgent(
-    model=azure_llm,
+    model=configured_llm,
     name="kitch_coordinator",
     description="Central parent Coordinator agent managing triage and sub-agent routing.",
     instruction=(
@@ -217,7 +246,7 @@ kitch_coordinator = LlmAgent(
 )
 
 # 5. Define background context compactor on the App wrapper (interval: 4 turns, overlap: 1)
-my_summarizer = LlmEventSummarizer(llm=azure_llm)
+my_summarizer = LlmEventSummarizer(llm=configured_llm)
 
 app_instance = App(
     name="kitch",

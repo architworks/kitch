@@ -30,6 +30,9 @@ const getTimeBasedMealSlot = (date = new Date()) => {
   return "dinner";
 };
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const apiUrl = (path) => `${API_BASE_URL}${path}`;
+
 const getMealTitle = (meal, fallback = "No recipe set") => {
   if (!meal) return fallback;
   if (typeof meal === "string") return meal || fallback;
@@ -119,7 +122,7 @@ export default function Home() {
   };
 
   const fetchLiveState = async (userName) => {
-    const res = await fetch(`http://localhost:8000/api/state/${userName}`);
+    const res = await fetch(apiUrl(`/api/state/${userName}`));
     if (!res.ok) {
       throw new Error(`State sync failed with status ${res.status}`);
     }
@@ -248,7 +251,7 @@ export default function Home() {
     });
 
     try {
-      await fetch("http://localhost:8000/api/pantry/add", {
+      await fetch(apiUrl("/api/pantry/add"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -274,7 +277,7 @@ export default function Home() {
     });
 
     try {
-      await fetch(`http://localhost:8000/api/pantry/remove/${activeUser}/${encodeURIComponent(item.name)}`, {
+      await fetch(apiUrl(`/api/pantry/remove/${activeUser}/${encodeURIComponent(item.name)}`), {
         method: "DELETE"
       });
     } catch (e) {
@@ -341,7 +344,7 @@ export default function Home() {
     triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
 
     try {
-      await fetch(`http://localhost:8000/api/diary/clear/${activeUser}`, {
+      await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
         method: "POST"
       });
     } catch (e) {
@@ -384,7 +387,7 @@ export default function Home() {
         grocery_list: groceryList
       };
 
-      const res = await fetch("http://localhost:8000/api/chat", {
+      const res = await fetch(apiUrl("/api/chat"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -434,7 +437,7 @@ export default function Home() {
         ...prev,
         {
           sender: "agent",
-          text: "⚠️ **Connection Error:** I was unable to reach the Kitch backend server on `http://localhost:8000`. Please make sure the FastAPI server is running!",
+          text: `⚠️ **Connection Error:** I was unable to reach the Kitch backend server on \`${API_BASE_URL}\`. Please make sure the FastAPI server is running!`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -506,7 +509,7 @@ export default function Home() {
         steps: [...prev.steps, "🧠 Running ADK multimodal vision analysis..."]
       }));
 
-      const res = await fetch("http://localhost:8000/api/upload-photo", {
+      const res = await fetch(apiUrl("/api/upload-photo"), {
         method: "POST",
         body: formData
       });
@@ -549,7 +552,7 @@ export default function Home() {
         ...prev,
         {
           sender: "agent",
-          text: "⚠️ **Upload Connection Error:** Failed to reach `/api/upload-photo` on `http://localhost:8000`. Is your FastAPI backend running?",
+          text: `⚠️ **Upload Connection Error:** Failed to reach \`/api/upload-photo\` on \`${API_BASE_URL}\`. Is your FastAPI backend running?`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -1222,7 +1225,7 @@ export default function Home() {
                     setMcpModalOpen(false);
                     
                     try {
-                      const res = await fetch("http://localhost:8000/api/grocery/export", {
+                      const res = await fetch(apiUrl("/api/grocery/export"), {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({

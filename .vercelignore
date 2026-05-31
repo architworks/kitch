@@ -1,0 +1,11 @@
+.DS_Store
+.agents/
+.git/
+.vercel/
+backend/.env
+backend/venv/
+**/__pycache__/
+frontend/.next/
+frontend/node_modules/
+kitch_sessions.db
+test/
