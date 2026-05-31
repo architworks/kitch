@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { DIET_TYPES } from "./mockData.js";
 import {
@@ -22,6 +22,8 @@ const MEAL_SLOT_LABELS = {
 };
 
 const DEFAULT_MEAL_SLOT = "breakfast";
+const INITIAL_VISIBLE_CHAT_COUNT = 6;
+const CHAT_HISTORY_BATCH_SIZE = 6;
 
 const getTimeBasedMealSlot = (date = new Date()) => {
   const hour = date.getHours();
@@ -46,14 +48,7 @@ const getMealTitle = (meal, fallback = "No recipe set") => {
   return meal.name || meal.title || meal.recipe_name || fallback;
 };
 
-// Default welcome messaging
-const INITIAL_CHAT = [
-  {
-    sender: "agent",
-    text: `👋 **Welcome back to Kitch!** I am your GenAI Culinary Companion.\n\nI am synced to your **${DEFAULT_HOUSEHOLD_SIZE}-person household**. \n\n✨ **Live Capabilities Active:**\n1. **Individual Macro Logs:** Select your active user in the header. We track macros separately for each housemate in Supabase!\n2. **Shared Pantry:** Click **Scan Fridge** to upload a photo, or type *'We have 6 eggs'* to update the household inventory.\n3. **Grocery Prep:** Ask me to compile the grocery list. Blinkit MCP cart insertion is intentionally pending until the provider connection is configured.`,
-    time: "09:00 AM"
-  }
-];
+const INITIAL_CHAT = [];
 
 export default function Home() {
   // Application core state variables
@@ -68,6 +63,8 @@ export default function Home() {
   const [pantryStock, setPantryStock] = useState([]);
   const [weeklyPlan, setWeeklyPlan] = useState(createEmptyWeeklyPlan);
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
+  const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
+  const chatMessagesRef = useRef(null);
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
   const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
@@ -187,6 +184,19 @@ export default function Home() {
     const interval = window.setInterval(syncMealFocus, 60 * 1000);
     return () => window.clearInterval(interval);
   }, [selectedPlannerDay]);
+
+  useEffect(() => {
+    if (!smartDockExpanded || !chatMessagesRef.current) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      const messages = chatMessagesRef.current;
+      if (messages) {
+        messages.scrollTop = messages.scrollHeight;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatHistory.length, isChatTyping, smartDockExpanded]);
 
   // Sync alert auto-dismiss timer
   useEffect(() => {
@@ -653,6 +663,17 @@ export default function Home() {
     "What groceries should I order for tomorrow?"
   ];
   const hasStartedConversation = chatHistory.some(msg => msg.sender === "user");
+  const visibleChatStartIndex = Math.max(0, chatHistory.length - visibleChatCount);
+  const visibleChatMessages = chatHistory.slice(visibleChatStartIndex);
+  const hasOlderChatMessages = visibleChatStartIndex > 0;
+  const revealEarlierMessages = () => {
+    setVisibleChatCount(prev => Math.min(chatHistory.length, prev + CHAT_HISTORY_BATCH_SIZE));
+  };
+  const handleChatScroll = (event) => {
+    if (event.currentTarget.scrollTop <= 16 && hasOlderChatMessages) {
+      revealEarlierMessages();
+    }
+  };
 
   return (
     <div id="app">
@@ -1070,9 +1091,14 @@ export default function Home() {
           <div className="smart-chat-header">
             <button type="button" aria-label="Close chat panel" onClick={() => setSmartDockExpanded(false)}>×</button>
           </div>
-          <div className="smart-chat-messages">
-            {chatHistory.slice(-2).map((msg, index) => (
-              <div key={`${msg.time}-${index}`} className={`smart-chat-bubble ${msg.sender}`}>
+          <div className="smart-chat-messages" ref={chatMessagesRef} onScroll={handleChatScroll}>
+            {hasOlderChatMessages && (
+              <button type="button" className="load-earlier-chat" onClick={revealEarlierMessages}>
+                Show earlier messages
+              </button>
+            )}
+            {visibleChatMessages.map((msg, index) => (
+              <div key={`${visibleChatStartIndex + index}-${msg.sender}-${msg.time}`} className={`smart-chat-bubble ${msg.sender}`}>
                 <div className="message-markdown">
                   {msg.text.split("\n").slice(0, 6).map((line, lidx) => {
                     const boldRegex = /\*\*(.*?)\*\*/g;
@@ -1128,6 +1154,18 @@ export default function Home() {
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
           />
+          <button
+            type="button"
+            className={`chat-expand-btn ${smartDockExpanded ? "active" : ""}`}
+            aria-label={smartDockExpanded ? "Collapse conversation" : "Expand conversation"}
+            onClick={() => setSmartDockExpanded(prev => !prev)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7.5a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v5.5a3 3 0 0 1-3 3h-4l-4 3v-3a3 3 0 0 1-3-3V7.5Z" />
+              <path d="M9 9h6" />
+              <path d="M9 12h4" />
+            </svg>
+          </button>
           <label className="input-icon-btn" aria-label="Attach plate image">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <rect x="4" y="5" width="16" height="14" rx="2" />

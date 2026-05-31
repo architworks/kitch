@@ -2998,6 +2998,24 @@ button {
   gap: 10px;
 }
 
+.load-earlier-chat {
+  align-self: center;
+  min-height: 30px;
+  padding: 0 13px;
+  color: var(--sage-deep);
+  background: rgba(202, 236, 188, 0.24);
+  border: 1px solid rgba(74, 103, 65, 0.16);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.load-earlier-chat:hover {
+  background: rgba(202, 236, 188, 0.38);
+  border-color: rgba(74, 103, 65, 0.28);
+}
+
 .smart-chat-bubble {
   width: fit-content;
   max-width: min(560px, 86vw);
@@ -3171,6 +3189,7 @@ button {
 }
 
 .smart-prompt-mark,
+.chat-expand-btn,
 .input-icon-btn,
 .smart-send-btn {
   width: 48px;
@@ -3223,11 +3242,23 @@ button {
   bottom: 12px;
 }
 
+.chat-expand-btn {
+  color: var(--ink-soft);
+  background: transparent;
+}
+
+.chat-expand-btn.active,
+.chat-expand-btn:hover {
+  color: var(--sage-deep);
+  background: var(--surface-low);
+}
+
 .input-icon-btn {
   color: var(--ink-soft);
   background: transparent;
 }
 
+.chat-expand-btn svg,
 .input-icon-btn svg {
   width: 21px;
   height: 21px;
@@ -3492,6 +3523,7 @@ button {
     font-size: 14px;
   }
 
+  .chat-expand-btn,
   .input-icon-btn,
   .smart-send-btn {
     width: 42px;
