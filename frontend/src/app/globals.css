@@ -186,7 +186,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -194,8 +194,8 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 54px;
-  padding: 7px 12px;
+  min-height: 48px;
+  padding: 6px 11px;
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(195, 200, 189, 0.72);
   border-radius: 18px;
@@ -234,7 +234,7 @@ button {
   cursor: pointer;
   min-width: 140px;
   max-width: 210px;
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 26px 0 0;
 }
 
@@ -1808,15 +1808,16 @@ button {
 .kitch-workspace {
   min-height: 100vh;
   margin-left: 236px;
-  padding: 24px 32px 180px;
+  padding: 18px 32px 180px;
 }
 
 .kitch-workspace .app-header {
   position: sticky;
-  top: 20px;
+  top: 14px;
   z-index: 20;
-  margin: 0 auto 24px;
+  margin: 0 auto 18px;
   max-width: 1280px;
+  padding: 10px 14px;
   justify-content: flex-end;
   border-radius: 24px;
 }
@@ -1833,7 +1834,7 @@ button {
 .page-view {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 22px;
   animation: fade-in 220ms ease-out;
 }
 
@@ -1867,7 +1868,8 @@ button {
 }
 
 .dinner-hero-card {
-  min-height: 360px;
+  height: clamp(278px, 34vh, 318px);
+  min-height: 0;
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(360px, 44%) minmax(0, 1fr);
@@ -1878,7 +1880,8 @@ button {
 
 .meal-hero-art {
   position: relative;
-  min-height: 360px;
+  min-height: 100%;
+  height: 100%;
   overflow: hidden;
   background:
     linear-gradient(90deg, rgba(255, 248, 244, 0), rgba(255, 248, 244, 0.28)),
@@ -1887,7 +1890,7 @@ button {
 
 .meal-hero-art img {
   object-fit: cover;
-  object-position: center;
+  object-position: center bottom;
   transition: transform 700ms ease;
 }
 
@@ -1940,7 +1943,10 @@ button {
 
 .meal-hero-copy {
   min-width: 0;
-  padding: clamp(28px, 4vw, 50px);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: clamp(18px, 2vw, 24px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1969,23 +1975,23 @@ button {
 .meal-hero-copy h2 {
   margin-top: 8px;
   color: var(--sage-deep);
-  font-size: clamp(32px, 4vw, 54px);
+  font-size: clamp(28px, 2.7vw, 38px);
   line-height: 1.08;
 }
 
 .meal-hero-copy p {
-  margin: 12px 0 18px;
+  margin: 8px 0 12px;
   color: var(--ink-soft);
-  font-size: 16px;
+  font-size: 14px;
   max-width: 560px;
 }
 
 .hero-meal-card {
-  margin: 8px 0 22px;
-  padding: 18px;
+  margin: 2px 0 14px;
+  padding: 12px 14px;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(195, 200, 189, 0.82);
@@ -2007,7 +2013,7 @@ button {
   display: block;
   color: var(--ink);
   font-family: var(--font-head);
-  font-size: clamp(18px, 2vw, 25px);
+  font-size: clamp(17px, 1.45vw, 20px);
   line-height: 1.15;
 }
 
@@ -2018,8 +2024,8 @@ button {
 }
 
 .hero-actions button {
-  min-height: 44px;
-  padding: 0 18px;
+  min-height: 36px;
+  padding: 0 14px;
   color: var(--ink-soft);
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(115, 121, 111, 0.22);
@@ -2095,7 +2101,7 @@ button {
 .weekly-side-rail {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   position: sticky;
   top: 112px;
 }
@@ -2110,10 +2116,10 @@ button {
 }
 
 .nutrition-widget {
-  padding: 22px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 .widget-title-row,
@@ -2162,7 +2168,7 @@ button {
 .nutrition-stat strong {
   color: var(--ink);
   font-family: var(--font-head);
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .nutrition-stat small {
@@ -2174,7 +2180,7 @@ button {
 .mini-macros {
   display: flex;
   flex-direction: column;
-  gap: 17px;
+  gap: 10px;
 }
 
 .mini-macros div div {
@@ -2196,7 +2202,7 @@ button {
 .mini-macros div:nth-child(2) b { background: var(--sage-pale); }
 
 .nutrition-widget > p {
-  margin: -4px 0 0;
+  margin: -2px 0 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
@@ -2204,7 +2210,7 @@ button {
 
 .side-status-card {
   position: relative;
-  padding: 18px;
+  padding: 15px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(195, 200, 189, 0.7);
@@ -2255,8 +2261,8 @@ button {
 }
 
 .side-card-icon {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2275,7 +2281,7 @@ button {
 }
 
 .weekly-calendar-feature {
-  padding: clamp(22px, 3vw, 32px);
+  padding: clamp(18px, 2.2vw, 26px);
   background:
     radial-gradient(circle at 82% 12%, rgba(202, 236, 188, 0.25), transparent 22%),
     rgba(255, 255, 255, 0.94);
@@ -2483,8 +2489,8 @@ button {
 }
 
 .meal-orb {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -3034,13 +3040,17 @@ button {
   .dinner-hero-card {
     grid-template-columns: 1fr;
     min-height: 0;
+    height: auto;
   }
 
   .meal-hero-art {
     min-height: 210px;
+    height: 210px;
   }
 
   .meal-hero-copy {
+    height: auto;
+    overflow: visible;
     padding: 18px;
   }
 

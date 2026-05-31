@@ -806,8 +806,8 @@ export default function Home() {
                 <article className="dinner-hero-card">
                   <div className="meal-hero-copy">
                     <span className="eyebrow">Up next</span>
-                    <h2>What&apos;s for {currentMealLabel.toLowerCase()}?</h2>
-                    <p>Shared household plan for {householdSize} {householdSize === 1 ? "person" : "people"}. Kitch keeps the week aligned while each member can still track nutrition separately.</p>
+                    <h2>{currentMealLabel} is up next</h2>
+                    <p>Shared plan for {householdSize} {householdSize === 1 ? "person" : "people"}. Each member can still track nutrition separately.</p>
                     <div className="hero-meal-card">
                       <span className={`meal-orb ${currentMealSlot}`} aria-hidden="true"></span>
                       <div>
