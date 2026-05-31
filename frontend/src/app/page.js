@@ -30,6 +30,13 @@ const getTimeBasedMealSlot = (date = new Date()) => {
   return "dinner";
 };
 
+const getTimeBasedGreeting = (date = new Date()) => {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const apiUrl = (path) => `${API_BASE_URL}${path}`;
 
@@ -635,14 +642,15 @@ export default function Home() {
   }));
   const focusMealDateText = firstPlannedFocusMeal.date.longLabel || firstPlannedFocusMeal.date.label || "Upcoming week";
   const focusMealTitle = firstPlannedFocusMeal.title;
+  const heroGreeting = `${getTimeBasedGreeting()}, ${activeUser}!`;
+  const focusMealContext = `${currentMealLabel} for ${focusMealDateText}`;
   const nutritionSummary = loggedCal > 0
     ? `${calPercentage}% of daily target`
     : "No meals logged yet";
   const quickPrompts = [
     "Plan next week for the whole household",
     "What are we cooking tomorrow?",
-    "What groceries should I order for tomorrow?",
-    "Log what I just ate"
+    "What groceries should I order for tomorrow?"
   ];
   const hasStartedConversation = chatHistory.some(msg => msg.sender === "user");
 
@@ -789,13 +797,12 @@ export default function Home() {
               <section className="meal-landing-hero">
                 <article className="dinner-hero-card">
                   <div className="meal-hero-copy">
-                    <span className="eyebrow">Up next</span>
-                    <h2>{currentMealLabel} is up next</h2>
-                    <p>Shared plan for {householdSize} {householdSize === 1 ? "person" : "people"}. Each member can still track nutrition separately.</p>
+                    <h2>{heroGreeting}</h2>
+                    <p>{"I'm here to help you plan meals, groceries, pantry, and kitchen needs."}</p>
                     <div className="hero-meal-card">
                       <span className={`meal-time-icon ${currentMealSlot}`} aria-hidden="true"><span></span></span>
                       <div>
-                        <small>{currentMealLabel} · {focusMealDateText}</small>
+                        <small>{focusMealContext}</small>
                         <strong>{focusMealTitle}</strong>
                       </div>
                     </div>
@@ -813,9 +820,7 @@ export default function Home() {
                   </div>
                   <div className="meal-hero-art">
                     <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 60vw" priority unoptimized />
-                    <span className="hero-date-pill">{firstPlannedFocusMeal.date.label || "Next week"}</span>
                     <div className="chip-row">
-                      <span>Household</span>
                       <span>{householdSize} people</span>
                       <span>{dietMeta.name}</span>
                     </div>
@@ -866,9 +871,7 @@ export default function Home() {
                     <article className="selected-week-meals">
                       <div className="selected-week-heading">
                         <div>
-                          <span className="eyebrow">Meals for {selectedDayDate.label || selectedPlannerDay}</span>
-                          <h3>{selectedPlannerDay}</h3>
-                          <p>{selectedDayDate.longLabel || "Upcoming planning week"}</p>
+                          <h3>{selectedDayDate.longLabel || selectedPlannerDay}</h3>
                         </div>
                       </div>
 
@@ -1065,15 +1068,6 @@ export default function Home() {
       <form id="chat-input-form" className={`smart-input-dock ${smartDockExpanded ? "expanded" : ""}`} onSubmit={handleChatSubmit}>
         <div className="smart-chat-thread" aria-live="polite">
           <div className="smart-chat-header">
-            <div>
-              <span className="smart-agent-avatar">
-                <Image src="/kitch-chef-hat.svg" alt="" width={40} height={40} aria-hidden="true" />
-              </span>
-              <div>
-                <strong>Kitch</strong>
-                <small>Household meal agent</small>
-              </div>
-            </div>
             <button type="button" aria-label="Close chat panel" onClick={() => setSmartDockExpanded(false)}>×</button>
           </div>
           <div className="smart-chat-messages">
@@ -1110,7 +1104,9 @@ export default function Home() {
           </div>
         )}
         <div className="smart-input-shell">
-          <button type="button" className="input-icon-btn" aria-label="Voice input">🎙️</button>
+          <span className="smart-prompt-mark" aria-hidden="true">
+            <span></span>
+          </span>
           {pendingPhoto && (
             <div className="pending-attachment-chip">
               <span className="pending-attachment-preview" aria-hidden="true">
@@ -1133,7 +1129,11 @@ export default function Home() {
             onChange={(e) => setChatInput(e.target.value)}
           />
           <label className="input-icon-btn" aria-label="Attach plate image">
-            🖼️
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="14" rx="2" />
+              <circle cx="9" cy="10" r="1.5" />
+              <path d="m5 17 5-5 4 4 2-2 3 3" />
+            </svg>
             <input
               name="plate-image-upload"
               type="file"
@@ -1146,7 +1146,10 @@ export default function Home() {
             />
           </label>
           <label className="input-icon-btn" aria-label="Attach fridge scan image">
-            📷
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7.5 8.4 5h7.2L17 7.5h2a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2h2Z" />
+              <circle cx="12" cy="13" r="3.25" />
+            </svg>
             <input
               name="camera-fridge-upload"
               type="file"
