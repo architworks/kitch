@@ -644,6 +644,11 @@ export default function Home() {
     ingredients: getMealIngredients(selectedDayMeals[slot])
   }));
   const pantryPreview = pantryStock.slice(0, 3);
+  const focusMealDateText = firstPlannedFocusMeal.date.longLabel || firstPlannedFocusMeal.date.label || "Upcoming week";
+  const focusMealTitle = firstPlannedFocusMeal.title;
+  const nutritionSummary = loggedCal > 0
+    ? `${calPercentage}% of daily target`
+    : "No meals logged yet";
   const recentActivity = [
     `${activeUser} is viewing personal macro logs`,
     weeklyPlan.Monday?.dinner ? "Weekly plan is ready for the household" : "Weekly plan is waiting for Kitch",
@@ -797,16 +802,34 @@ export default function Home() {
         <main className="page-canvas">
           {activeTab === "planner" && (
             <section className="page-view planner-page" aria-label="Weekly meal planner">
-              <div className="planner-hero-grid">
+              <section className="meal-landing-hero">
                 <article className="dinner-hero-card">
-                  <div className="meal-hero-art">
-                    <div className="meal-hero-illustration" aria-hidden="true"></div>
-                    <span>{firstPlannedFocusMeal.date.label || "Next week"}</span>
-                  </div>
                   <div className="meal-hero-copy">
-                    <span className="eyebrow">What&apos;s for {currentMealLabel.toLowerCase()}?</span>
-                    <h2>{firstPlannedFocusMeal.title}</h2>
-                    <p>{firstPlannedFocusMeal.day} {currentMealLabel.toLowerCase()} for the shared household plan. Tap a meal in the calendar to ask Kitch for swaps.</p>
+                    <span className="eyebrow">Up next</span>
+                    <h2>What&apos;s for {currentMealLabel.toLowerCase()}?</h2>
+                    <p>Shared household plan for {householdSize} {householdSize === 1 ? "person" : "people"}. Kitch keeps the week aligned while each member can still track nutrition separately.</p>
+                    <div className="hero-meal-card">
+                      <span className={`meal-orb ${currentMealSlot}`} aria-hidden="true"></span>
+                      <div>
+                        <small>{currentMealLabel} · {focusMealDateText}</small>
+                        <strong>{focusMealTitle}</strong>
+                      </div>
+                    </div>
+                    <div className="hero-actions">
+                      <button type="button" className="primary-action" onClick={() => setChatInput(`Show me the recipe for ${focusMealTitle}`)}>
+                        View details →
+                      </button>
+                      <button type="button" onClick={() => draftMealSwapPrompt(firstPlannedFocusMeal.day, currentMealSlot)}>
+                        Swap meal
+                      </button>
+                      <button type="button" onClick={() => setChatInput(`Log ${focusMealTitle} for ${activeUser}`)}>
+                        Log meal
+                      </button>
+                    </div>
+                  </div>
+                  <div className="meal-hero-art">
+                    <Image src="/countertop.png" alt="" fill sizes="(max-width: 900px) 100vw, 52vw" priority />
+                    <span className="hero-date-pill">{firstPlannedFocusMeal.date.label || "Next week"}</span>
                     <div className="chip-row">
                       <span>Household</span>
                       <span>{householdSize} people</span>
@@ -818,142 +841,142 @@ export default function Home() {
                           <span key={member.value}>{member.value[0]}</span>
                         ))}
                       </div>
-                      <button type="button" onClick={() => setChatInput(`Show me the recipe for ${firstPlannedFocusMeal.title}`)}>
-                        View recipe →
-                      </button>
                     </div>
                   </div>
                 </article>
+              </section>
 
-                <article className="nutrition-widget">
-                  <div className="widget-title-row">
-                    <h3>Your Nutrition</h3>
-                    <button type="button" onClick={() => setActiveTab("analytics")}>⋮</button>
-                  </div>
-                  <div className="nutrition-stat">
+              <div className="planner-main-grid">
+                <section className="weekly-calendar-feature">
+                  <div className="section-heading">
                     <div>
-                      <span>Calories</span>
-                      <strong>{loggedCal} <small>/ {targetCalories} kcal</small></strong>
+                      <span className="eyebrow">Your household plan</span>
+                      <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
                     </div>
-                    <div className="progress-track"><div className="progress-fill protein" style={{ width: `${calPercentage}%` }}></div></div>
+                    <p>{planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label ? `${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}` : "Upcoming Monday - Sunday"}</p>
                   </div>
-                  <div className="mini-macros">
-                    <div><span>Protein ({loggedProt}g / {targetProtein}g)</span><div><b style={{ width: `${protPerc}%` }}></b></div></div>
-                    <div><span>Carbs ({loggedCarb}g / {targetCarbs}g)</span><div><b style={{ width: `${carbPerc}%` }}></b></div></div>
-                    <div><span>Fats ({loggedFat}g / {targetFat}g)</span><div><b style={{ width: `${fatPerc}%` }}></b></div></div>
-                  </div>
-                </article>
-              </div>
-
-              <section className="weekly-calendar-feature">
-                <div className="section-heading">
-                  <div>
-                    <span className="eyebrow">Upcoming household week</span>
-                    <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
-                  </div>
-                  <p>{planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label ? `${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}` : "Upcoming Monday - Sunday"}</p>
-                </div>
-                <div id="weekly-plan-grid" className="calendar-board">
-                  <div className="week-selector-strip">
-                    {WEEK_DAYS.map(day => {
-                      const dateMeta = planningWeekDates[day] || {};
-                      const focusMealTitle = getMealTitle(weeklyPlan[day]?.[currentMealSlot], `${currentMealLabel} not set`);
-                      return (
-                        <button
-                          key={day}
-                          type="button"
-                          className={`week-selector-card ${selectedPlannerDay === day ? "active" : ""}`}
-                          onClick={() => {
-                            setSelectedPlannerDay(day);
-                            setExpandedMealKey(`${day}-${currentMealSlot}`);
-                          }}
-                        >
-                          <span>{day.slice(0, 3)}</span>
-                          <strong>{dateMeta.label || "Soon"}</strong>
-                          <em>{focusMealTitle}</em>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <article className="selected-day-planner">
-                    <div className="selected-day-glance">
-                      <div>
-                        <span className="eyebrow">{selectedDayDate.label || "Selected day"} meal plan</span>
-                        <h3>{selectedPlannerDay}</h3>
-                        <p>{selectedDayDate.longLabel || "Upcoming planning week"}</p>
-                      </div>
-                    </div>
-
-                    <div className="meal-accordion-list">
-                      {selectedDayMealList.map(({ slot, key, title, ingredients }) => {
-                        const isExpanded = expandedMealKey === key;
+                  <div id="weekly-plan-grid" className="calendar-board">
+                    <div className="week-selector-strip">
+                      {WEEK_DAYS.map(day => {
+                        const dateMeta = planningWeekDates[day] || {};
+                        const focusMealTitle = getMealTitle(weeklyPlan[day]?.[currentMealSlot], `${currentMealLabel} not set`);
                         return (
-                          <div key={key} className={`meal-accordion ${isExpanded ? "expanded" : ""}`}>
-                            <button
-                              type="button"
-                              className="meal-accordion-trigger"
-                              onClick={() => setExpandedMealKey(isExpanded ? "" : key)}
-                            >
-                              <span className={`meal-label ${slot}`}>{slot}</span>
-                              <strong>{title}</strong>
-                              <em>{isExpanded ? "−" : "+"}</em>
-                            </button>
-                            {isExpanded && (
-                              <div className="meal-accordion-body">
-                                {ingredients.length > 0 ? (
-                                  <ul>
-                                    {ingredients.map((ingredient, idx) => (
-                                      <li key={`${key}-${idx}`}>{typeof ingredient === "string" ? ingredient : `${ingredient.amount || ""} ${ingredient.unit || ""} ${ingredient.name || ""}`.trim()}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p>Kitch has the meal name saved, but ingredients are not attached to this structured plan yet.</p>
-                                )}
-                                <div className="meal-detail-actions">
-                                  <button type="button" onClick={() => setChatInput(`Show full ingredients for ${title} on ${selectedPlannerDay}`)}>Get ingredients</button>
-                                  <button type="button" onClick={() => draftMealSwapPrompt(selectedPlannerDay, slot)}>Swap this meal</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            key={day}
+                            type="button"
+                            className={`week-selector-card ${selectedPlannerDay === day ? "active" : ""}`}
+                            onClick={() => {
+                              setSelectedPlannerDay(day);
+                              setExpandedMealKey(`${day}-${currentMealSlot}`);
+                            }}
+                          >
+                            <span>{day.slice(0, 3)}</span>
+                            <strong>{dateMeta.label || "Soon"}</strong>
+                            <em>{focusMealTitle}</em>
+                          </button>
                         );
                       })}
                     </div>
-                  </article>
-                </div>
-              </section>
 
-              <div className="planner-bottom-grid">
-                <section className="snapshot-panel">
-                  <h3>Household Snapshot</h3>
-                  <div className="snapshot-grid">
-                    <div className="snapshot-card">
-                      <span className="snapshot-icon">⚠️</span>
-                      <h4>Pantry status</h4>
-                      {pantryPreview.length ? pantryPreview.map(item => (
-                        <p key={item.name}>{item.name} <b>{item.amount} {item.unit}</b></p>
-                      )) : <p>Scan the fridge to understand what is already available.</p>}
-                    </div>
-                    <div className="snapshot-card">
-                      <span className="snapshot-icon">🛒</span>
-                      <h4>Grocery list</h4>
-                      <p><b>{totalCount}</b> required items</p>
-                      <button type="button" onClick={() => setActiveTab("groceries")}>View full list</button>
-                    </div>
-                  </div>
-                </section>
-                <section className="activity-panel">
-                  <h3>Recent Activity</h3>
-                  <div className="activity-timeline">
-                    {recentActivity.map((item, idx) => (
-                      <div key={item} className="activity-item">
-                        <span>{idx + 1}</span>
-                        <p>{item}</p>
+                    <article className="selected-day-planner">
+                      <div className="selected-day-glance">
+                        <div>
+                          <span className="eyebrow">Meals for {selectedDayDate.label || selectedPlannerDay}</span>
+                          <h3>{selectedPlannerDay}</h3>
+                          <p>{selectedDayDate.longLabel || "Upcoming planning week"}</p>
+                        </div>
                       </div>
-                    ))}
+
+                      <div className="meal-accordion-list">
+                        {selectedDayMealList.map(({ slot, key, title, ingredients }) => {
+                          const isExpanded = expandedMealKey === key;
+                          return (
+                            <div key={key} className={`meal-accordion ${isExpanded ? "expanded" : ""}`}>
+                              <button
+                                type="button"
+                                className="meal-accordion-trigger"
+                                onClick={() => setExpandedMealKey(isExpanded ? "" : key)}
+                              >
+                                <span className={`meal-orb ${slot}`} aria-hidden="true"></span>
+                                <span className="meal-row-label">{MEAL_SLOT_LABELS[slot]}</span>
+                                <strong>{title}</strong>
+                                <em>{isExpanded ? "−" : "+"}</em>
+                              </button>
+                              {isExpanded && (
+                                <div className="meal-accordion-body">
+                                  {ingredients.length > 0 ? (
+                                    <ul>
+                                      {ingredients.map((ingredient, idx) => (
+                                        <li key={`${key}-${idx}`}>{typeof ingredient === "string" ? ingredient : `${ingredient.amount || ""} ${ingredient.unit || ""} ${ingredient.name || ""}`.trim()}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p>Kitch has the meal name saved, but ingredients are not attached to this structured plan yet.</p>
+                                  )}
+                                  <div className="meal-detail-actions">
+                                    <button type="button" onClick={() => setChatInput(`Show full ingredients for ${title} on ${selectedPlannerDay}`)}>Get ingredients</button>
+                                    <button type="button" onClick={() => draftMealSwapPrompt(selectedPlannerDay, slot)}>Swap this meal</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
                   </div>
                 </section>
+
+                <aside className="weekly-side-rail" aria-label="Household planning status">
+                  <article className="nutrition-widget">
+                    <div className="widget-title-row">
+                      <h3>Your Nutrition</h3>
+                      <button type="button" onClick={() => setActiveTab("analytics")} aria-label="Open nutrition logs">›</button>
+                    </div>
+                    <div className="nutrition-stat">
+                      <div>
+                        <span>Calories</span>
+                        <strong>{loggedCal} <small>/ {targetCalories} kcal</small></strong>
+                      </div>
+                      <div className="progress-track"><div className="progress-fill protein" style={{ width: `${calPercentage}%` }}></div></div>
+                    </div>
+                    <div className="mini-macros">
+                      <div><span>Protein ({loggedProt}g / {targetProtein}g)</span><div><b style={{ width: `${protPerc}%` }}></b></div></div>
+                      <div><span>Carbs ({loggedCarb}g / {targetCarbs}g)</span><div><b style={{ width: `${carbPerc}%` }}></b></div></div>
+                      <div><span>Fats ({loggedFat}g / {targetFat}g)</span><div><b style={{ width: `${fatPerc}%` }}></b></div></div>
+                    </div>
+                    <p>{nutritionSummary}</p>
+                  </article>
+
+                  <article className="side-status-card pantry-status-card">
+                    <button type="button" onClick={() => setActiveTab("groceries")} aria-label="Open groceries">›</button>
+                    <span className="side-card-icon">▣</span>
+                    <h3>Pantry Update</h3>
+                    {pantryPreview.length ? pantryPreview.map(item => (
+                      <p key={item.name}>{item.name} <b>{item.amount} {item.unit}</b></p>
+                    )) : <p>Scan the fridge to understand what is already available.</p>}
+                  </article>
+
+                  <article className="side-status-card grocery-status-card">
+                    <button type="button" onClick={() => setActiveTab("groceries")} aria-label="Open grocery list">›</button>
+                    <span className="side-card-icon">□</span>
+                    <h3>Grocery List</h3>
+                    <p><strong>{totalCount}</strong> required items</p>
+                    <small>{checkedCount} already stocked or marked complete</small>
+                  </article>
+
+                  <article className="side-status-card activity-status-card">
+                    <h3>Recent Activity</h3>
+                    <div className="activity-timeline">
+                      {recentActivity.map((item, idx) => (
+                        <div key={item} className="activity-item">
+                          <span>{idx + 1}</span>
+                          <p>{item}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </aside>
               </div>
             </section>
           )}
