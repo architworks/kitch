@@ -9,8 +9,12 @@ from app.supabase_client import (
     add_to_pantry as db_add_to_pantry,
     log_macros as db_log_macros,
     get_macro_diary as db_get_macro_diary,
+    get_grocery_cart as db_get_grocery_cart,
+    replace_planned_grocery_cart as db_replace_planned_grocery_cart,
+    clear_planned_grocery_cart as db_clear_planned_grocery_cart,
     supabase
 )
+from app.providers.zepto import ZeptoProviderAdapter
 
 # --- Safety Parsing Helper ---
 def _ensure_dict(val):
@@ -184,6 +188,68 @@ def get_pantry_stock_tool(user_name: str = "") -> List[Dict[str, Any]]:
   """
   return db_get_pantry_stock()
 
+def get_grocery_cart_tool(user_name: str = "") -> List[Dict[str, Any]]:
+  """
+  Fetch the current provider-agnostic shared household grocery cart.
+  """
+  return db_get_grocery_cart()
+
+def save_grocery_cart_tool(items: List[Dict[str, Any]], user_name: str = "") -> Dict[str, Any]:
+  """
+  Replace the shared household grocery cart with a structured provider-agnostic list.
+  Call this after compiling groceries so the Pantry/Grocery page updates.
+
+  Args:
+      items: List of grocery item dictionaries. Each item should include name,
+             amount, unit, and category. Optional flags: checked, alreadyStocked.
+      user_name: Ignored for now. Grocery cart is shared by the configured household.
+  """
+  items = _ensure_dict(items)
+  if not isinstance(items, list):
+    return {"status": "error", "message": f"Expected a list of grocery items, got {type(items).__name__}"}
+
+  saved = db_replace_planned_grocery_cart(items)
+  return {
+    "status": "success",
+    "message": f"Saved {len(saved)} grocery cart items for the shared household.",
+    "items": saved
+  }
+
+def clear_planned_grocery_cart_tool(user_name: str = "") -> Dict[str, Any]:
+  """
+  Clear only agent-generated grocery rows. Manual user-added rows remain.
+  """
+  ok = db_clear_planned_grocery_cart()
+  return {"status": "success" if ok else "error"}
+
+async def sync_native_cart_to_zepto_tool(tool_context: ToolContext = None) -> Dict[str, Any]:
+  """
+  Replace the user's Zepto cart with unchecked, non-stocked items from Kitch's
+  native household grocery cart. This does not place an order.
+  """
+  cart_items = [
+    item for item in db_get_grocery_cart()
+    if not item.get("checked") and not item.get("alreadyStocked")
+  ]
+  mapped_items = await _apply_brand_memory_to_items(cart_items, tool_context)
+  return await ZeptoProviderAdapter().sync_cart(mapped_items)
+
+async def get_zepto_cart_tool() -> Dict[str, Any]:
+  """
+  Fetch the current Zepto cart through the configured Zepto MCP connection.
+  """
+  return await ZeptoProviderAdapter().get_cart()
+
+async def place_zepto_order_tool(confirmation_token: str = "") -> Dict[str, Any]:
+  """
+  Agents cannot place real Zepto orders from chat. The backend HTTP endpoint
+  owns final approval token validation after the frontend approval button.
+  """
+  return {
+    "status": "error",
+    "message": "Final frontend approval is required before placing a real Zepto order. Use the Zepto review button in the app."
+  }
+
 def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:
   """
   Add or update an ingredient in the shared household pantry/fridge stock database on Supabase.
@@ -222,6 +288,62 @@ def get_brand_preference(ingredient: str) -> Dict[str, Any]:
   Factual verification tool helper representing brand lookup confirmations.
   """
   return {"status": "query_completed", "ingredient": ingredient}
+
+async def _apply_brand_memory_to_items(items: List[Dict[str, Any]], tool_context: ToolContext = None) -> List[Dict[str, Any]]:
+  """
+  Adds a provider search name to each native cart row using household brand memory.
+  The native item name remains generic.
+  """
+  mem_svc = None
+  if tool_context:
+    if hasattr(tool_context, "get_invocation_context"):
+      try:
+        mem_svc = tool_context.get_invocation_context().memory_service
+      except Exception:
+        pass
+    elif hasattr(tool_context, "_invocation_context"):
+      try:
+        mem_svc = tool_context._invocation_context.memory_service
+      except Exception:
+        pass
+
+  if not mem_svc:
+    try:
+      from app.agent.core import memory_service as fallback_mem_svc
+      mem_svc = fallback_mem_svc
+    except ImportError:
+      pass
+
+  mapped_items = []
+  for item in items:
+    item_name = str(item.get("name") or item.get("item") or "").strip()
+    mapped = dict(item)
+    mapped["search_name"] = item_name
+
+    if mem_svc and item_name:
+      try:
+        memory_result = await mem_svc.search_memory(
+            app_name="kitch",
+            user_id="shared_household",
+            query=f"preferred brand for {item_name.lower()}"
+        )
+        if memory_result.memories:
+          text_match = memory_result.memories[0].content.parts[0].text
+          if text_match and len(text_match) < 100:
+            mapped["search_name"] = text_match.split(":", 1)[1].strip() if ":" in text_match else text_match.strip()
+      except Exception:
+        pass
+
+    mapped_items.append(mapped)
+
+  return mapped_items
+
+async def apply_brand_memory_to_cart_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+  """
+  Public helper for non-agent API routes that need provider search terms with
+  household brand preferences applied.
+  """
+  return await _apply_brand_memory_to_items(items, None)
 
 async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: ToolContext = None) -> Dict[str, Any]:
   """
@@ -352,4 +474,8 @@ async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_co
       "unit": unit
     })
     
-  return f"Prepared {len(payload)} {provider_clean.capitalize()} payload items with ADK native brand memory active. MCP cart connection is not configured yet. Mapped items: {payload}"
+  return (
+    f"Prepared {len(payload)} legacy {provider_clean.capitalize()} preview items with ADK native brand memory active. "
+    f"This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. "
+    f"Mapped items: {payload}"
+  )

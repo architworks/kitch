@@ -1,6 +1,7 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
 import time
+from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
@@ -9,7 +10,8 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
-from app.agent.tools import get_weekly_schedule_dict, export_to_delivery
+from app.agent.tools import get_weekly_schedule_dict, export_to_delivery, apply_brand_memory_to_cart_items
+from app.providers.zepto import ZeptoProviderAdapter
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, canonical_user_name, household_members_text
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
@@ -21,11 +23,37 @@ from app.supabase_client import (
     clear_macro_diary,
     add_to_pantry,
     remove_from_pantry,
+    get_grocery_cart,
+    add_grocery_cart_item,
+    update_grocery_cart_item,
+    delete_grocery_cart_item,
+    clear_planned_grocery_cart,
     get_household_profile,
     update_household_profile
 )
 
 load_dotenv()
+
+ZEPTO_ORDER_CONFIRMATIONS: Dict[str, Dict[str, Any]] = {}
+
+def looks_like_grocery_request(text: str) -> bool:
+    """Detects fridge-photo follow-ups that need grocery planning after pantry update."""
+    text_lower = (text or "").lower()
+    grocery_terms = (
+        "grocery",
+        "groceries",
+        "shopping list",
+        "what do i need",
+        "need to buy",
+        "order for",
+        "buy for",
+        "add to zepto",
+        "zepto",
+        "cart",
+        "tonight",
+        "tomorrow",
+    )
+    return any(term in text_lower for term in grocery_terms)
 
 # Helper: Ensure the ADK session exists and the user: and app: states are fully synchronized
 async def get_or_create_session(user_name: str, session_id: str, diet_preference: str, household_size: int):
@@ -119,6 +147,7 @@ async def chat_endpoint(payload: ChatRequest):
 
         weekly_plan_before = get_weekly_schedule_dict()
         pantry_before = get_pantry_stock()
+        grocery_cart_before = get_grocery_cart()
         
         # 3. Construct a standard Content message for the ADK runner
         user_message = Content(
@@ -138,6 +167,7 @@ async def chat_endpoint(payload: ChatRequest):
                 
         weekly_plan_after = get_weekly_schedule_dict()
         pantry_after = get_pantry_stock()
+        grocery_cart_after = get_grocery_cart()
 
         # Detect persisted state changes first; text phrasing is only a fallback.
         action = None
@@ -147,6 +177,8 @@ async def chat_endpoint(payload: ChatRequest):
             action = {"type": "UPDATE_PLANNER"}
         elif pantry_after != pantry_before:
             action = {"type": "UPDATE_PANTRY"}
+        elif grocery_cart_after != grocery_cart_before:
+            action = {"type": "UPDATE_GROCERY_CART"}
         elif (
             "swapped" in text_lower
             or "modified your meal plan" in text_lower
@@ -244,6 +276,29 @@ async def upload_photo_endpoint(
         ):
             if event.is_final_response() and event.content and event.content.parts:
                 text_reply = event.content.parts[0].text
+
+        if is_fridge_scan and looks_like_grocery_request(user_context):
+            grocery_followup = Content(
+                parts=[Part(text=(
+                    "The user's fridge/pantry photo has just been processed and pantry stock has been updated. "
+                    f"Now answer this grocery request using the updated pantry state: {user_context}\n\n"
+                    "Route to grocery management. Compile the grocery requirements, account for pantry-covered items, "
+                    "save structured native grocery cart rows, and sync to Zepto only if the user explicitly asked for Zepto."
+                ))],
+                role="user"
+            )
+
+            grocery_reply = ""
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=grocery_followup
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    grocery_reply = event.content.parts[0].text
+
+            if grocery_reply:
+                text_reply = f"{text_reply}\n\n---\n\n{grocery_reply}"
                 
         return {
             "result": text_reply,
@@ -268,12 +323,14 @@ async def get_state_endpoint(user_name: str):
         pantry = get_pantry_stock()
         diary = get_macro_diary(active_user)
         weekly_plan = get_weekly_schedule_dict()
+        grocery_cart = get_grocery_cart()
         
         return {
             "profile": profile,
             "pantry_stock": pantry,
             "macro_diary": diary,
-            "weekly_plan": weekly_plan
+            "weekly_plan": weekly_plan,
+            "grocery_cart": grocery_cart
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -310,7 +367,61 @@ async def clear_diary_endpoint(user_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 4. Dynamic Pantry Calculations Route
+# 4. Native Grocery Cart Routes
+@app.get("/api/grocery/cart")
+async def get_grocery_cart_endpoint():
+    """Returns the shared household native grocery cart."""
+    try:
+        return {"grocery_cart": get_grocery_cart()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/grocery/cart/items")
+async def add_grocery_cart_item_endpoint(payload: Dict[str, Any]):
+    """Adds a manual item to the native grocery cart."""
+    try:
+        item = add_grocery_cart_item({
+            "name": payload.get("name", ""),
+            "amount": payload.get("amount", 1),
+            "unit": payload.get("unit", "piece"),
+            "category": payload.get("category", "General"),
+            "source": payload.get("source", "manual"),
+            "checked": payload.get("checked", False),
+            "alreadyStocked": payload.get("alreadyStocked", False),
+            "stockNote": payload.get("stockNote", ""),
+        })
+        return {"status": "success", "item": item, "grocery_cart": get_grocery_cart()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/grocery/cart/items/{item_id}")
+async def update_grocery_cart_item_endpoint(item_id: str, payload: Dict[str, Any]):
+    """Updates checked/status/details for one native grocery cart row."""
+    try:
+        item = update_grocery_cart_item(item_id, payload)
+        return {"status": "success", "item": item, "grocery_cart": get_grocery_cart()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/grocery/cart/items/{item_id}")
+async def delete_grocery_cart_item_endpoint(item_id: str):
+    """Deletes one native grocery cart row."""
+    try:
+        res = delete_grocery_cart_item(item_id)
+        return {"status": "success" if res else "failed", "grocery_cart": get_grocery_cart()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/grocery/cart/planned")
+async def clear_planned_grocery_cart_endpoint():
+    """Clears only agent-planned native grocery cart rows."""
+    try:
+        res = clear_planned_grocery_cart()
+        return {"status": "success" if res else "failed", "grocery_cart": get_grocery_cart()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 5. Dynamic Pantry Calculations Route
 @app.post("/api/grocery/calculate")
 async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     """
@@ -323,12 +434,12 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 5. Blinkit / Zepto Brand-Mapped Exporter Route
+# 6. Blinkit / Zepto Brand-Mapped Exporter Route
 @app.post("/api/grocery/export")
 async def export_grocery_endpoint(payload: Dict[str, Any]):
     """
-    Decoupled checkout preview: maps required items to chosen delivery merchant
-    using ADK native brand preference memory. Real MCP cart connection is deferred.
+    Legacy checkout preview: maps required items to a provider-shaped payload
+    using ADK native brand preference memory. Live Zepto sync uses /api/grocery/zepto/sync-cart.
     """
     try:
         items = payload.get("items", [])
@@ -339,6 +450,82 @@ async def export_grocery_endpoint(payload: Dict[str, Any]):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/grocery/zepto/sync-cart")
+async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
+    """
+    Replaces the user's Zepto cart with approved native Kitch cart rows.
+    This does not place an order.
+    """
+    try:
+        payload = payload or {}
+        selected_ids = {str(i) for i in payload.get("cart_item_ids", [])}
+        cart_items = get_grocery_cart()
+        export_items = [
+            item for item in cart_items
+            if not item.get("checked")
+            and not item.get("alreadyStocked")
+            and (not selected_ids or str(item.get("id")) in selected_ids)
+        ]
+
+        mapped_items = await apply_brand_memory_to_cart_items(export_items)
+        result = await ZeptoProviderAdapter().sync_cart(mapped_items)
+        can_place_order = result.get("status") == "success" and len(result.get("items") or []) > 0
+        confirmation_token = f"kitch_confirm_{uuid4()}" if can_place_order else None
+        if confirmation_token:
+            ZEPTO_ORDER_CONFIRMATIONS[confirmation_token] = {
+                "provider": "zepto",
+                "sync_result": result,
+                "created_at": time.time()
+            }
+        return {
+            "status": result.get("status", "error"),
+            "provider": "zepto",
+            "result": result,
+            "confirmation_token": confirmation_token
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "zepto",
+            "result": {
+                "status": "error",
+                "provider": "zepto",
+                "code": "mcp_sync_failed",
+                "message": str(e)
+            },
+            "confirmation_token": None
+        }
+
+@app.post("/api/grocery/zepto/place-order")
+async def place_zepto_order_endpoint(payload: Dict[str, Any]):
+    """
+    Places the reviewed Zepto cart order. Requires explicit frontend approval
+    through a confirmation token returned by /sync-cart.
+    """
+    try:
+        confirmation_token = payload.get("confirmation_token", "")
+        confirmation = ZEPTO_ORDER_CONFIRMATIONS.get(confirmation_token)
+        if not confirmation:
+            raise HTTPException(status_code=403, detail="Final frontend approval token is missing or expired.")
+
+        result = await ZeptoProviderAdapter().place_order()
+        if result.get("status") == "success":
+            ZEPTO_ORDER_CONFIRMATIONS.pop(confirmation_token, None)
+        return {"status": result.get("status", "error"), "provider": "zepto", "result": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "zepto",
+            "result": {
+                "status": "error",
+                "provider": "zepto",
+                "code": "mcp_order_failed",
+                "message": str(e)
+            }
+        }
 
 @app.get("/api/health")
 async def health_check():

@@ -57,9 +57,9 @@ Common actions should work through short, casual language:
 - "I ate dal and rice."
 - "Add Amul butter as my preference."
 
-### Review Before External Action
+### Review Before External Order
 
-Anything that prepares a provider checkout payload should be reviewable before any future provider automation happens. Current behavior prepares payloads only; real cart insertion is deferred.
+Provider cart sync and order placement are separate. If the user asks Kitch to add groceries to Zepto, Kitch may sync the native cart into Zepto. Placing the order still requires a final explicit UI approval.
 
 ---
 
@@ -103,7 +103,7 @@ Users should be able to:
 3. Modify one meal without damaging the rest of the plan.
 4. Update pantry stock manually, conversationally, or from a fridge photo.
 5. Generate a grocery list from the current plan and pantry.
-6. Prepare a provider-specific grocery payload for review.
+6. Sync eligible grocery rows to Zepto for review.
 7. Save brand preferences for future grocery preparation.
 8. Log personal food intake from text or a plate photo.
 9. See personal daily nutrition progress.
@@ -278,52 +278,57 @@ Example prompts:
 4. Kitch scales quantities for household size.
 5. Kitch subtracts what is already available.
 6. Kitch presents a categorized grocery requirement list.
+7. Kitch saves the native household grocery cart so the Pantry/Grocery page reflects the plan.
 
 ### Functional UX Requirements
 
 - Grocery requirements should be derived from the saved plan, not a static recipe database.
 - Pantry stock should visibly affect what is needed.
-- Items already available should not be treated as items to buy.
+- Items already available should be shown as pantry-covered, not treated as items to buy.
 - Users should understand why an item is or is not included.
 - The result should support review and adjustment before checkout preparation.
 
 ### Current Product Boundary
 
-The agent can compile grocery lists conversationally. A fully structured grocery-list experience is still a product gap to be designed and implemented.
+The native grocery cart is now structured backend state. The product still needs refinement around item editing, quantities, substitutions, and partial provider sync.
 
 ---
 
-## 10. Flow: Prepare Provider Checkout Payload
+## 10. Flow: Sync Groceries to Zepto
 
 ### User Intent
 
-The user wants to prepare the grocery list for a delivery provider.
+The user wants to move the native Kitch grocery cart into Zepto.
 
 Example prompts:
 
-- "Prepare this for Blinkit."
-- "Export the grocery list to Blinkit."
-- "Map this to Zepto."
+- "Add this to Zepto."
+- "Put tomorrow's groceries in Zepto."
+- "Plan grocery for the next two days and add it to Zepto."
 
 ### Expected Experience
 
 1. User requests provider preparation.
-2. Kitch applies brand preferences where known.
-3. Kitch prepares a provider-shaped payload.
-4. User reviews the mapped items.
-5. The app makes clear that live provider cart insertion is not configured yet.
+2. Kitch uses the native cart as the source of truth.
+3. Kitch excludes checked and pantry-covered rows.
+4. Kitch applies brand preferences where known.
+5. Kitch clears/replaces the Zepto cart.
+6. Kitch auto-matches Zepto products and adds best matches.
+7. The app shows matched products, unavailable items, and the resulting Zepto cart summary.
+8. The user must click a final approval button before any order is placed.
 
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
-- The experience must not imply that a real provider cart changed.
-- The user should see enough information to trust the mapping.
+- The experience may indicate that the Zepto cart changed only after sync succeeds.
+- The user should see enough information to trust the matched Zepto products.
 - Brand substitutions should be visible.
-- Future provider automation must require explicit user approval.
+- Order placement must require explicit user approval.
+- Auth, payment, address, and OTP issues should surface as recoverable states.
 
 ### Current Product Boundary
 
-Blinkit/Zepto MCP cart insertion is deferred. Current behavior stops at payload preparation.
+Zepto cart sync is implemented behind the MCP adapter, but it depends on external Zepto MCP auth. Blinkit live cart insertion is not implemented.
 
 ---
 
@@ -505,8 +510,8 @@ These are future product areas:
 - Multi-household registration.
 - Auth-backed household membership.
 - Persistent Vertex AI memory.
-- Live Blinkit/Zepto MCP cart insertion.
-- Structured grocery-list artifact.
+- Blinkit MCP cart insertion.
+- Rich grocery item editing and substitution review.
 
 ---
 

@@ -19,8 +19,14 @@ from .tools import (
     add_to_pantry_tool,
     log_macros_tool,
     get_macro_diary_tool,
+    get_grocery_cart_tool,
+    save_grocery_cart_tool,
+    clear_planned_grocery_cart_tool,
     get_brand_preference,
     set_brand_preference,
+    sync_native_cart_to_zepto_tool,
+    get_zepto_cart_tool,
+    place_zepto_order_tool,
     export_to_delivery,
     get_current_datetime
 )
@@ -192,20 +198,30 @@ checkout_exporter = LlmAgent(
         "- Household size: {app:household_size?}\n\n"
         "CRITICAL RULES:\n"
         "1. To generate a grocery list, you MUST compile it dynamically using your own intelligence:\n"
-        "   - Call 'get_weekly_schedule_tool' to fetch the planned recipe name strings currently scheduled.\n"
-        "   - Call 'get_pantry_stock_tool' to retrieve the household's current pantry stock.\n"
-        "   - Use your own knowledge to determine the ingredients required for each planned meal, scale them for the session household size, subtract any pantry stock already available, and formulate the final shopping checklist.\n"
+        "   - Understand the user's requested scope: next N days, tonight's dinner, tomorrow, a named saved meal, or a standalone dish like 'paneer butter masala'.\n"
+        "   - For schedule-based scopes, call 'get_weekly_schedule_tool' to fetch the planned recipe name strings currently scheduled.\n"
+        "   - For standalone dish scopes, infer the ingredient list directly from your culinary knowledge without requiring a saved meal plan.\n"
+        "   - Always call 'get_pantry_stock_tool' to retrieve the household's current pantry stock.\n"
+        "   - Use your own knowledge to determine the ingredients required for each planned meal or dish, scale them for the session household size, subtract any pantry stock already available, and formulate the final shopping checklist.\n"
+        "   - ALWAYS call 'save_grocery_cart_tool' with a structured list so the Pantry/Grocery page updates. Include both needed and pantry-covered items; mark pantry-covered rows with alreadyStocked=true and a short stockNote.\n"
         "2. If the user mentions items they already have at home or just bought, first call 'add_to_pantry_tool' for each item to update their pantry stock, and then compile the grocery list.\n"
         "3. When the user mentions brand preferences (e.g., 'always buy Amul butter'), use 'set_brand_preference' to record it.\n"
         "4. When the user specifies category-level preferences or exclusions (e.g., 'never buy cereals'), confirm that you have saved it and ensure you filter those items out of any compiled shopping list.\n"
-        "5. To prepare a provider payload, compile a list of target items (a JSON list of dictionaries, each with 'name', 'amount', 'unit') and call the 'export_to_delivery' tool with the items and provider. Do not claim that a real provider cart was changed; the current tool only prepares the payload until an MCP connection is configured.\n"
-        "6. Present grocery lists in clean markdown categorized clearly (e.g., Proteins & Dairy, Fresh Produce, Grains & Bakery, Pantry & Spices)."
+        "5. If the user asks to add/sync the groceries to Zepto, first ensure the native grocery cart is saved, then call 'sync_native_cart_to_zepto_tool'. This may add items to a real Zepto cart, but it must not place an order.\n"
+        "6. Never place a real Zepto order from ordinary chat. Order placement is owned by the backend approval endpoint after the app's final approval button; 'place_zepto_order_tool' will refuse ordinary chat execution.\n"
+        "7. Present grocery lists in clean markdown categorized clearly (e.g., Proteins & Dairy, Fresh Produce, Grains & Bakery, Pantry & Spices), and mention that the Pantry/Grocery page has been updated."
     ),
     tools=[
         get_weekly_schedule_tool,
+        get_grocery_cart_tool,
+        save_grocery_cart_tool,
+        clear_planned_grocery_cart_tool,
         export_to_delivery,
         get_brand_preference,
         set_brand_preference,
+        sync_native_cart_to_zepto_tool,
+        get_zepto_cart_tool,
+        place_zepto_order_tool,
         get_pantry_stock_tool,
         add_to_pantry_tool,
         get_current_datetime

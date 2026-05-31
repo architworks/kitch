@@ -1,411 +1,188 @@
-# Kitch: Current Architecture and Implementation Guide
+# Kitch: Current Architecture
 
-This document replaces the older implementation plan. It describes the app as it exists now: a Google ADK 2.0 multi-agent backend, a Next.js dashboard, Supabase persistence, and temporary in-memory ADK services that will later be replaced by Vertex AI managed services.
+This document describes the app as it exists now: a Google ADK 2.0 multi-agent backend, a Next.js dashboard, Supabase persistence, a native household grocery cart, and optional Zepto MCP cart sync.
 
-The goal of this document is separation of concerns. Frontend behavior stays in the frontend section. Agent topology stays in the agent section. Database details stay in the persistence section.
+The key architectural rule is separation of duties. The frontend renders and collects user intent. FastAPI owns browser-facing APIs and approval boundaries. ADK agents reason and call tools. Supabase stores structured app state. Zepto-specific behavior stays behind a provider adapter.
 
 ---
 
-## 1. System Shape
+## System Shape
 
-Kitch is a household meal planning, nutrition logging, pantry tracking, and grocery checkout assistant.
-
-At runtime it is split into three major surfaces:
-
-1. **Next.js frontend**
-   - Runs the dashboard and chat UI.
-   - Displays planner, macro diary, pantry, grocery cart, and checkout approval flows.
-   - Calls the FastAPI backend over HTTP.
-
-2. **FastAPI backend gateway**
-   - Owns all browser-facing API routes.
-   - Creates and syncs ADK sessions.
-   - Converts chat text and uploaded images into ADK `Content` messages.
-   - Reads and writes Supabase state through a small Python client wrapper.
-
-3. **Google ADK 2.0 agent layer**
-   - Uses a parent `kitch_coordinator` agent with three specialized sub-agents.
-   - Uses ADK `Runner`, `App`, `LlmAgent`, event compaction, `InMemorySessionService`, and `InMemoryMemoryService`.
-   - Calls Python tools for meal plans, pantry updates, macro logs, brand preferences, and checkout export.
+Kitch is a household meal planning, pantry, nutrition, grocery, and delivery-prep assistant.
 
 ```mermaid
 flowchart LR
-    Frontend[Next.js Dashboard] -->|HTTP fetch| API[FastAPI Gateway]
+    Frontend[Next.js Dashboard] -->|HTTP| API[FastAPI Gateway]
     API -->|runner.run_async| Runner[ADK Runner]
-    Runner --> App[ADK App]
-    App --> Coordinator[kitch_coordinator]
+    Runner --> Coordinator[kitch_coordinator]
     Coordinator --> Chef[chef_planner]
     Coordinator --> Vision[vision_scanner]
     Coordinator --> Checkout[checkout_exporter]
-    Chef --> Tools[Python Tool Layer]
+    Chef --> Tools[Python Tools]
     Vision --> Tools
     Checkout --> Tools
     Tools --> Supabase[(Supabase)]
-    Checkout --> Memory[ADK InMemoryMemoryService]
+    Checkout --> Memory[ADK Memory]
+    API --> Zepto[ZeptoProviderAdapter]
+    Zepto --> ZeptoMCP[Zepto MCP]
 ```
 
 ---
 
-## 2. Frontend Duties
+## Frontend Duties
 
-The frontend lives under `frontend/src/app`.
+Location: `frontend/src/app`
 
-Its job is presentation and user interaction. It should not own agent reasoning, long-term brand memory, or database rules.
+The frontend owns presentation and user interaction only.
 
-### Current Responsibilities
+Current duties:
 
-- Render the main Kitch app shell in `page.js`.
-- Let the user switch active household member.
-- Let the user switch diet profile and household size.
-- Render chat history and send user messages to `/api/chat`.
-- Upload fridge and plate photos to `/api/upload-photo`.
-- Render Supabase-backed pantry and macro diary state from `/api/state/{user_name}`.
-- Provide manual pantry add/remove controls.
-- Render the shared planner, shared pantry, manual cart items, and checkout payload review modal.
-- Call `/api/grocery/export` after the user approves checkout.
+- Render the household dashboard, planner, pantry/grocery page, macro diary, and floating chat input.
+- Send text chat turns to `POST /api/chat`.
+- Upload plate/fridge images plus optional user text to `POST /api/upload-photo`.
+- Load live state from `GET /api/state/{user_name}`.
+- Render the shared native grocery cart returned by the backend.
+- Let users manually add grocery cart rows with `source=manual`.
+- Mark native cart rows checked through backend cart endpoints.
+- Show pantry-covered grocery rows as disabled/muted.
+- Trigger Zepto cart sync from the native cart.
+- Show the actual Zepto sync result and require a final button click before order placement.
 
-### Current State
-
-The frontend no longer owns a static recipe catalog or default weekly recipe IDs.
-
-- Backend returns planner rows as display-ready meal names.
-- The planner renders the actual recipe name strings saved by the ADK chef planner.
-- The planner displays an explicit upcoming Monday-Sunday date window. It does not label future plan days as "Today" just because the weekday matches the current weekday.
-- Meal swaps are requested through chat, not through a local static recipe picker.
-- `mockData.js` currently contains diet macro targets only.
-
-### Current Limitation
-
-Structured grocery list rendering is still not fully backend-driven. Kitch can compile grocery lists conversationally through `checkout_exporter`, but the dashboard cart currently contains only manually added items until a structured grocery-list API is implemented.
+The frontend does not own recipe selection, grocery reasoning, brand memory, provider matching, or checkout logic.
 
 ---
 
-## 3. API Gateway Duties
+## Backend Gateway Duties
 
-The FastAPI backend lives in `backend/app/main.py`.
+Location: `backend/app/main.py`
 
-Its job is orchestration between browser requests, ADK runner turns, and persistence. It should not contain UI policy or deep agent reasoning.
+FastAPI owns API orchestration and safety boundaries.
 
-### Current Routes
+Current routes:
 
 | Route | Duty |
 | :--- | :--- |
 | `POST /api/chat` | Runs a text chat turn through the ADK runner. |
-| `POST /api/upload-photo` | Sends image bytes plus task instructions to the ADK runner. |
-| `GET /api/state/{user_name}` | Returns profile, pantry, macro diary, and weekly plan state. |
+| `POST /api/upload-photo` | Sends image bytes and accompanying text to ADK. If a fridge photo also asks for groceries, pantry is updated first, then a second grocery-planning turn runs. |
+| `GET /api/state/{user_name}` | Returns profile, pantry, macro diary, weekly plan, and native grocery cart. |
 | `POST /api/pantry/add` | Adds pantry stock manually. |
 | `DELETE /api/pantry/remove/{user_name}/{item_name}` | Removes pantry stock manually. |
-| `POST /api/diary/clear/{user_name}` | Clears a user's macro diary. |
-| `POST /api/grocery/calculate` | Placeholder for future structured grocery-list generation. |
-| `POST /api/grocery/export` | Prepares provider payloads with brand-memory mapping. Real MCP cart insertion is deferred. |
+| `POST /api/diary/clear/{user_name}` | Clears an individual user's macro diary. |
+| `GET /api/grocery/cart` | Returns the shared native household grocery cart. |
+| `POST /api/grocery/cart/items` | Adds a manual native grocery cart row. |
+| `PATCH /api/grocery/cart/items/{id}` | Updates a native grocery cart row. |
+| `DELETE /api/grocery/cart/items/{id}` | Deletes a native grocery cart row. |
+| `DELETE /api/grocery/cart/planned` | Deletes agent-planned rows while preserving manual rows. |
+| `POST /api/grocery/export` | Legacy provider payload preview route. |
+| `POST /api/grocery/zepto/sync-cart` | Replaces Zepto cart from unchecked, non-stocked native cart rows. |
+| `POST /api/grocery/zepto/place-order` | Places a Zepto order only after a frontend approval token. |
 | `GET /api/health` | Health check. |
 
-### Session Sync
+Order safety:
 
-Before each ADK turn, the backend ensures a session exists for the active user.
-
-It writes these values into ADK session state:
-
-- `user:profile_name`
-- `user:dietary_profile`
-- `app:household_size`
-- `app:household_members`
-
-This lets the coordinator and sub-agents reason with the current user profile without pushing all app state into every prompt manually.
-
-### Multimodal Handling
-
-Photo upload uses ADK-compatible content parts:
-
-- A text prompt describing whether this is a fridge scan or plate scan, including any text the user typed alongside the image.
-- An image part built from uploaded file bytes.
-
-The agent is instructed to call tools directly:
-
-- Fridge scan: call `add_to_pantry_tool`.
-- Plate scan: call `log_macros_tool`.
+- Chat text alone cannot place a real order.
+- Zepto cart sync is allowed after the user asks for it.
+- Real order placement requires a confirmation token produced by `/api/grocery/zepto/sync-cart` and submitted by the frontend approval button.
 
 ---
 
-## 4. Agent Topology Duties
+## Agent Duties
 
-The agent layer lives in `backend/app/agent/core.py`.
+Location: `backend/app/agent/core.py`
 
-Its job is intent routing and domain-specific reasoning. It should not know frontend layout details.
+Kitch uses one parent coordinator and three specialist sub-agents.
 
-### Runtime Framework
+- `kitch_coordinator`: routes natural language intent.
+- `chef_planner`: creates and edits meal plans.
+- `vision_scanner`: logs meals and updates pantry from photos/text.
+- `checkout_exporter`: plans groceries, saves native cart rows, manages brand preferences, and syncs to Zepto when requested.
 
-Current runtime primitives:
-
-- `google.adk.agents.llm_agent.LlmAgent`
-- `google.adk.runners.Runner`
-- `google.adk.apps.app.App`
-- `google.adk.sessions.InMemorySessionService`
-- `google.adk.memory.InMemoryMemoryService`
-- `google.adk.apps.llm_event_summarizer.LlmEventSummarizer`
-- `google.adk.apps.app.EventsCompactionConfig`
-
-### Model Access
-
-The ADK agents currently use `LiteLlm` in OpenAI-compatible mode.
-
-The model name and gateway credentials are loaded from environment variables:
-
-- `OPENAI_MODEL_NAME`
-- `OPENAI_API_KEY`
-- `OPENAI_API_BASE`
-
-### Coordinator Agent
-
-`kitch_coordinator` is the parent agent.
-
-Its duties:
-
-- Interpret the user's intent.
-- Route meal planning requests to `chef_planner`.
-- Route food logging, macro diary, pantry, and image requests to `vision_scanner`.
-- Route shopping, grocery list, brand preference, and checkout requests to `checkout_exporter`.
-- Answer simple general chat directly.
-
-It has no domain tools of its own.
-
-### Chef Planner Agent
-
-`chef_planner` owns meal planning and recipe reasoning.
-
-Its duties:
-
-- Generate dynamic weekly meal plans.
-- Treat "next week" planning as the upcoming Monday-Sunday planning window and include exact dates in chat responses.
-- Store recipe name strings in Supabase.
-- Update a single meal slot without rewriting the rest of the plan.
-- Answer "what is for dinner" style schedule questions.
-- Scale recipes conversationally for different household sizes or guests.
-
-It does not use a static recipe database.
-
-### Vision Scanner Agent
-
-`vision_scanner` owns intake logging and pantry scanning.
-
-Its duties:
-
-- Estimate macros from text meal descriptions.
-- Estimate macros from plate photos.
-- Log meals to the active user's macro diary.
-- Detect fridge or pantry items from images or text.
-- Add detected stock to the shared household pantry.
-- Summarize daily intake from diary records.
-
-Macro logs are individual per user. Meal plans and pantry stock are shared across the configured household.
-
-### Checkout Exporter Agent
-
-`checkout_exporter` owns grocery reasoning and delivery preparation.
-
-Its duties:
-
-- Fetch the shared weekly schedule.
-- Fetch shared pantry stock.
-- Reason about required ingredients from dynamic meal names.
-- Scale required quantities for household size.
-- Subtract pantry stock.
-- Save brand preferences into ADK memory.
-- Apply brand preferences during checkout export.
-- Prepare delivery-provider payloads after user approval. Live MCP cart insertion is intentionally deferred until a provider connection is configured.
+The agents do not know frontend layout details. They reason over meal names, pantry state, household size, current date/time, and user intent.
 
 ---
 
-## 5. Tool Layer Duties
+## Persistence Duties
 
-The tool layer lives in `backend/app/agent/tools.py`.
+Location: `backend/app/supabase_client.py`
 
-Its job is to expose small, explicit capabilities to the ADK agents. Tool functions should stay narrow and easy to verify.
+Supabase stores deterministic app state:
 
-### Meal Plan Tools
+- `profiles`: configured users and shared household profile.
+- `meal_plans`: shared household weekly meal plan.
+- `pantry_stock`: shared household pantry/fridge stock.
+- `grocery_cart_items`: shared provider-agnostic grocery cart.
+- `macro_diary`: individual user nutrition logs.
 
-- `get_weekly_schedule_tool`
-- `save_weekly_plan_tool`
-- `update_single_meal_in_schedule`
-- `get_current_datetime`
+Native grocery cart fields:
 
-These tools read and write the household-owned `meal_plans` rows. Meal columns store recipe names, not recipe IDs.
+- `id`
+- `profile_id`
+- `ingredient_name`
+- `amount`
+- `unit`
+- `category`
+- `source`
+- `checked`
+- `already_stocked`
+- `stock_note`
+- `created_at`
+- `updated_at`
 
-### Pantry and Macro Tools
+Planning rule:
 
-- `get_pantry_stock_tool`
-- `add_to_pantry_tool`
-- `log_macros_tool`
-- `get_macro_diary_tool`
-
-These tools delegate to `supabase_client.py`. Pantry tools operate on shared household stock; macro tools operate on the active user's diary.
-
-### Brand Memory Tools
-
-- `set_brand_preference`
-- `get_brand_preference`
-
-Brand preferences currently use ADK native memory.
-
-The current memory namespace is:
-
-- `app_name="kitch"`
-- `user_id="shared_household"`
-
-This matches the current prototype approach. It is intentionally not stored in a markdown file anymore.
-
-### Checkout Export Tool
-
-- `export_to_delivery`
-
-This tool:
-
-- Filters items that are already checked or stocked.
-- Searches ADK memory for brand preferences.
-- Replaces generic names with preferred branded names when a memory match exists.
-- Returns a provider payload preview for the selected provider. It does not place a live order or push to a real cart yet.
-
-Provider names currently supported:
-
-- `blinkit`
-- `zepto`
+- Agent-planned grocery runs replace prior `source=agent` rows.
+- Manual rows with `source=manual` survive later agent planning.
+- Pantry-covered rows remain in the native cart with `already_stocked=true`.
+- Provider export excludes rows where `checked=true` or `already_stocked=true`.
 
 ---
 
-## 6. Persistence Duties
+## Provider Boundary
 
-Persistence currently lives in Supabase and the ADK in-memory services.
+Location: `backend/app/providers/zepto.py`
 
-### Supabase Tables
+Zepto-specific behavior is isolated in `ZeptoProviderAdapter`.
 
-The SQL schema lives in `backend/database/supabase_schema.sql`.
+Current flow:
 
-| Table | Duty |
-| :--- | :--- |
-| `profiles` | Stores prototype member records and the shared household planning profile. |
-| `meal_plans` | Stores household planned recipe name strings by day and meal slot. |
-| `pantry_stock` | Stores shared household ingredient name, amount, and unit. |
-| `macro_diary` | Stores individual meal logs and macro estimates. |
+1. Read unchecked, non-stocked native cart rows.
+2. Apply household brand memory to provider search terms.
+3. Connect to Zepto MCP at `https://mcp.zepto.co.in/mcp` unless overridden.
+4. Clear/replace the existing Zepto cart.
+5. Search Zepto for each item.
+6. Auto-select the best returned match.
+7. Add matched items to Zepto cart.
+8. Fetch and return the Zepto cart summary when available.
+9. Surface unavailable items or auth/tool errors as recoverable UI errors.
 
-### Supabase Client Wrapper
+Environment variables:
 
-`backend/app/supabase_client.py` owns direct Supabase access.
+- `ZEPTO_MCP_URL`
+- `ZEPTO_MCP_ACCESS_TOKEN`
+- `ZEPTO_MCP_BEARER_TOKEN`
+- `ZEPTO_ACCESS_TOKEN`
+- `ZEPTO_MCP_HEADERS`
+- `ZEPTO_MCP_ENABLED`
 
-Prototype household membership is centralized in `backend/app/household_config.py`. It pre-fills the current household members and fixed local UUIDs:
+The native Kitch cart remains provider-agnostic. Zepto product names, quantities, prices, fees, auth states, and order states are provider responses, not Kitch source-of-truth fields.
 
-- `Archit`
-- `Anubhav`
-- `Naman`
+---
 
-This is a local prototype shortcut. Production auth and multi-household registration should replace this fixed mapping later. Until then, meal plans and pantry stock reuse one configured household owner profile ID, while macro diary reads and writes remain user-specific.
+## Memory and Sessions
 
-### ADK Session Service
-
-Current:
+Current local services:
 
 - `InMemorySessionService`
-
-Later:
-
-- `VertexAISessionService`
-
-The session service stores conversation/session state for active ADK turns.
-
-### ADK Memory Service
-
-Current:
-
 - `InMemoryMemoryService`
 
-Later:
+Current memory use:
 
+- Household brand preferences live in ADK memory under `user_id="shared_household"`.
+- Preferences remain plain text so agents can use them flexibly.
+
+Planned replacement:
+
+- `VertexAISessionService`
 - `VertexAIMemoryBank`
 
-The memory service stores household brand preferences and other durable agent memories during local testing.
-
----
-
-## 7. Checkout and Human Approval Duties
-
-Checkout payload review begins in the frontend and execution happens through the backend.
-
-### Frontend Duty
-
-The frontend:
-
-- Shows a review modal.
-- Displays the cart payload.
-- Requires explicit user approval.
-- Calls `/api/grocery/export` only after approval.
-
-### Backend Duty
-
-The backend:
-
-- Receives approved checkout items.
-- Calls `export_to_delivery`.
-- Returns the provider payload preview.
-
-### Agent and Tool Duty
-
-The checkout exporter:
-
-- Produces or receives the intended grocery items.
-- Applies brand memory.
-- Targets a provider such as Blinkit or Zepto.
-
-Actual provider automation is intentionally not wired yet. A real MCP adapter can replace the current preview implementation without changing the frontend approval concept.
-
----
-
-## 8. Known Current Gaps
-
-These are not failures of the architecture, but they are important current-state boundaries.
-
-1. **Structured grocery list state is still pending.**
-   - Grocery lists can be generated conversationally by the agent.
-   - The dashboard does not yet consume a structured grocery-list artifact from the backend.
-
-2. **`/api/grocery/calculate` is a placeholder.**
-   - It currently returns an empty grocery list.
-   - The production direction is backend or agent-driven grocery list generation.
-
-3. **Provider cart insertion is not wired.**
-   - `/api/grocery/export` prepares provider payloads and applies brand memory.
-   - It does not call a real Blinkit or Zepto MCP server yet.
-
-4. **Prototype identity is fixed-name based.**
-   - Current users map to configured UUIDs in `household_config.py`.
-   - Real auth should replace this after the core local flows are stable.
-
-5. **Brand memory is in-memory for now.**
-   - This is expected during local testing.
-   - Deployment should switch it to Vertex AI Memory Bank.
-
----
-
-## 9. Deployment Direction
-
-The intended evolution is:
-
-1. Keep the current local architecture stable.
-2. Move session persistence from `InMemorySessionService` to `VertexAISessionService`.
-3. Move brand and household memory from `InMemoryMemoryService` to `VertexAIMemoryBank`.
-4. Replace fixed UUID user mapping with real auth-backed identity.
-5. Add a structured grocery-list artifact/API that the frontend can render.
-6. Replace the checkout preview shim with real provider MCP adapters.
-
----
-
-## 10. Design Principle
-
-Kitch should remain split by duty:
-
-- Frontend renders and collects user approval.
-- FastAPI coordinates requests and session state.
-- ADK agents reason and choose tools.
-- Tools perform explicit side effects.
-- Supabase stores structured application data.
-- ADK memory stores agent-native household preferences.
-
-This separation keeps the app easier to debug now and easier to migrate to managed Vertex AI services later.
+Backend restarts clear local sessions and memory until that migration is done.

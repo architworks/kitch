@@ -74,6 +74,9 @@ export default function Home() {
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [zeptoCartReview, setZeptoCartReview] = useState(null);
+  const [isZeptoSyncing, setIsZeptoSyncing] = useState(false);
+  const [isPlacingZeptoOrder, setIsPlacingZeptoOrder] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
     active: false,
@@ -114,6 +117,9 @@ export default function Home() {
     }
     if (data.weekly_plan) {
       setWeeklyPlan(data.weekly_plan);
+    }
+    if (data.grocery_cart) {
+      setCustomGroceryItems(data.grocery_cart);
     }
   };
 
@@ -216,6 +222,7 @@ export default function Home() {
   // Sync count statistics
   const totalCount = groceryList.length;
   const checkedCount = groceryList.filter(item => item.checked).length;
+  const stockedCount = groceryList.filter(item => item.alreadyStocked).length;
 
   // 3. Application operations
   const triggerBannerAlert = (text) => {
@@ -294,33 +301,125 @@ export default function Home() {
     }
   };
 
-  const toggleGroceryItem = (itemName) => {
-    const key = itemName.toLowerCase().trim();
-    
-    // Check if it is a manual custom item
-    const customIdx = customGroceryItems.findIndex(i => i.name.toLowerCase() === key);
-    if (customIdx > -1) {
-      const updated = [...customGroceryItems];
-      updated[customIdx] = { ...updated[customIdx], checked: !updated[customIdx].checked };
-      setCustomGroceryItems(updated);
+  const toggleGroceryItem = async (item) => {
+    if (!item || item.alreadyStocked) return;
+    const nextChecked = !item.checked;
+
+    setCustomGroceryItems(prev => prev.map(current => (
+      current.id === item.id || current.name === item.name
+        ? { ...current, checked: nextChecked }
+        : current
+    )));
+
+    if (!item.id) return;
+
+    try {
+      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checked: nextChecked })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.grocery_cart) {
+          setCustomGroceryItems(data.grocery_cart);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to update grocery cart item", e);
     }
   };
 
-  const addCustomGroceryItem = (name, category) => {
-    if (name.trim()) {
-      setCustomGroceryItems(prev => [
-        ...prev,
-        {
-          name: name.trim(),
-          amount: 1,
-          unit: "piece",
-          category,
-          checked: false,
-          alreadyStocked: false
+  const addCustomGroceryItem = async (name, category) => {
+    if (!name.trim()) return;
+
+    const optimisticItem = {
+      id: `pending-${Date.now()}`,
+      name: name.trim(),
+      amount: 1,
+      unit: "piece",
+      category,
+      source: "manual",
+      checked: false,
+      alreadyStocked: false,
+      stockNote: ""
+    };
+
+    setCustomGroceryItems(prev => [...prev, optimisticItem]);
+    setGroceryCustomName("");
+    triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
+
+    try {
+      const res = await fetch(apiUrl("/api/grocery/cart/items"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(optimisticItem)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.grocery_cart) {
+          setCustomGroceryItems(data.grocery_cart);
         }
-      ]);
-      setGroceryCustomName("");
-      triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
+      }
+    } catch (e) {
+      console.error("Failed to add grocery cart item", e);
+    }
+  };
+
+  const syncNativeCartToZepto = async () => {
+    if (checkoutItems.length === 0) {
+      triggerBannerAlert("Your native grocery cart has no pending items for Zepto.");
+      return;
+    }
+
+    setIsZeptoSyncing(true);
+    setZeptoCartReview(null);
+    try {
+      const res = await fetch(apiUrl("/api/grocery/zepto/sync-cart"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean) })
+      });
+      const data = await res.json();
+      setZeptoCartReview(data);
+      setMcpModalOpen(true);
+      triggerBannerAlert(data.status === "success" ? "Zepto cart sync completed for review." : "Zepto cart sync needs attention.");
+    } catch (e) {
+      console.error("Failed to sync Zepto cart", e);
+      setZeptoCartReview({
+        status: "error",
+        result: {
+          code: "frontend_sync_failed",
+          message: "Failed to contact the backend Zepto cart sync endpoint."
+        }
+      });
+      setMcpModalOpen(true);
+    } finally {
+      setIsZeptoSyncing(false);
+    }
+  };
+
+  const placeZeptoOrder = async () => {
+    if (!zeptoCartReview?.confirmation_token) {
+      triggerBannerAlert("Final Zepto approval token is missing. Sync the cart again before placing the order.");
+      return;
+    }
+
+    setIsPlacingZeptoOrder(true);
+    try {
+      const res = await fetch(apiUrl("/api/grocery/zepto/place-order"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_token: zeptoCartReview.confirmation_token })
+      });
+      const data = await res.json();
+      setZeptoCartReview(data);
+      triggerBannerAlert(data.status === "success" ? "Zepto order placement request completed." : "Zepto order could not be placed.");
+    } catch (e) {
+      console.error("Failed to place Zepto order", e);
+      triggerBannerAlert("Failed to contact the backend Zepto order endpoint.");
+    } finally {
+      setIsPlacingZeptoOrder(false);
     }
   };
 
@@ -438,6 +537,8 @@ export default function Home() {
           triggerBannerAlert("Planner modified by Kitch Agent!");
         } else if (act.type === "UPDATE_PANTRY") {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
+        } else if (act.type === "UPDATE_GROCERY_CART") {
+          triggerBannerAlert("Grocery cart updated by Kitch Agent!");
         }
       }
     } catch (e) {
@@ -620,15 +721,23 @@ export default function Home() {
   const fatPerc = Math.min(100, Math.round((loggedFat / targetFat) * 100));
 
   // Items checkout checklist
-  const checkoutItems = useMemo(() => {
-    return groceryList
-      .filter(item => !item.checked)
-      .map(item => ({
-        name: item.name,
-        amount: Math.round(item.amount * 100) / 100,
-        unit: item.unit
-      }));
-  }, [groceryList]);
+  const checkoutItems = groceryList
+    .filter(item => !item.checked && !item.alreadyStocked)
+    .map(item => ({
+      id: item.id,
+      name: item.name,
+      amount: Math.round(item.amount * 100) / 100,
+      unit: item.unit,
+      category: item.category,
+      source: item.source
+    }));
+
+  const zeptoResult = zeptoCartReview?.result || {};
+  const zeptoStatus = zeptoCartReview?.status || zeptoResult.status;
+  const zeptoMatchedItems = Array.isArray(zeptoResult.items) ? zeptoResult.items : [];
+  const zeptoUnavailableItems = Array.isArray(zeptoResult.unavailable_items) ? zeptoResult.unavailable_items : [];
+  const zeptoCartDetails = zeptoResult.zepto_cart || zeptoResult.order_result || zeptoResult;
+  const canPlaceZeptoOrder = zeptoStatus === "success" && zeptoMatchedItems.length > 0 && Boolean(zeptoCartReview?.confirmation_token);
 
   const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
   const firstPlannedFocusMeal = WEEK_DAYS.map(day => ({
@@ -1022,8 +1131,12 @@ export default function Home() {
                   <span className="eyebrow">Shared household cart</span>
                   <h2>Grocery Cart</h2>
                 </div>
-                <button className="grocery-checkout-btn" onClick={() => checkoutItems.length === 0 ? triggerBannerAlert("🛒 Your cart has no pending items to checkout!") : setMcpModalOpen(true)}>
-                  Preview Blinkit Payload
+                <button
+                  className="grocery-checkout-btn"
+                  onClick={syncNativeCartToZepto}
+                  disabled={isZeptoSyncing || checkoutItems.length === 0}
+                >
+                  {isZeptoSyncing ? "Syncing Zepto..." : "Add to Zepto Cart"}
                 </button>
               </div>
               <div className="grocery-page-grid">
@@ -1034,10 +1147,14 @@ export default function Home() {
                     <div key={category} className="grocery-category">
                       <div className="grocery-category-title">{category}</div>
                       {groupedGroceries[category].map((item, idx) => (
-                        <div key={idx} className={`grocery-item-row ${item.checked ? "completed" : ""}`}>
+                        <div key={item.id || `${category}-${idx}`} className={`grocery-item-row ${item.checked ? "completed" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
                           <label className="grocery-checkbox-label">
-                            <input type="checkbox" name={`grocery-${idx}`} checked={item.checked} disabled={item.alreadyStocked} onChange={() => toggleGroceryItem(item.name)} />
-                            <span className="item-name">{item.name}</span>
+                            <input type="checkbox" name={`grocery-${idx}`} checked={item.checked} disabled={item.alreadyStocked} onChange={() => toggleGroceryItem(item)} />
+                            <span className="item-name">
+                              {item.name}
+                              {item.source === "manual" && <small>Manual</small>}
+                              {item.alreadyStocked && item.stockNote && <small>{item.stockNote}</small>}
+                            </span>
                           </label>
                           <span className={item.alreadyStocked ? "stocked-badge" : "grocery-item-qty"}>{item.alreadyStocked ? "Met (Pantry)" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</span>
                         </div>
@@ -1078,7 +1195,12 @@ export default function Home() {
                     <button className="grocery-add-btn" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}>Add to Cart</button>
                   </div>
                   <hr className="soft-divider" />
-                  <div className="grocery-summary-stats"><div><span>Required items:</span><strong>{totalCount}</strong></div><div><span>Stocked / Met:</span><strong>{checkedCount}</strong></div></div>
+                  <div className="grocery-summary-stats">
+                    <div><span>Total rows:</span><strong>{totalCount}</strong></div>
+                    <div><span>Ready for Zepto:</span><strong>{checkoutItems.length}</strong></div>
+                    <div><span>Covered by pantry:</span><strong>{stockedCount}</strong></div>
+                    <div><span>Checked off:</span><strong>{checkedCount}</strong></div>
+                  </div>
                 </aside>
               </div>
             </section>
@@ -1204,28 +1326,79 @@ export default function Home() {
         </div>
       </form>
 
-      {/* PROVIDER PAYLOAD REVIEW DIALOG */}
+      {/* ZEPTO CART REVIEW DIALOG */}
       {mcpModalOpen && (
         <div id="mcp-modal" className="modal-overlay active">
           <div className="modal-box">
             <div className="modal-header">
               <h3>
-                📦 Provider Payload Review
+                Zepto Cart Review
               </h3>
               <button className="modal-close-btn" onClick={() => setMcpModalOpen(false)}>&times;</button>
             </div>
             <div className="modal-body">
               <p className="modal-note">
-                Review the provider payload below. The live Blinkit MCP cart connection is not configured yet.
+                Kitch keeps the native grocery cart as the source of truth. Zepto sync replaces the Zepto cart with unchecked, non-stocked items only.
               </p>
-              
-              <div className="payload-preview">
-                <span>{"// Blinkit provider payload preview"}</span><br/>
-                <strong>blinkit_payload.prepare</strong>({`{`}<br/>
-                &nbsp;&nbsp;items: <span id="mcp-items-json">{JSON.stringify(checkoutItems, null, 2)}</span>,<br/>
-                &nbsp;&nbsp;household_size: <span id="mcp-household-val">{householdSize}</span><br/>
-                {`})`}
-              </div>
+
+              {!zeptoCartReview ? (
+                <div className="zepto-empty-review">
+                  <strong>No Zepto cart sync has run yet.</strong>
+                  <span>Use Add to Zepto Cart from the grocery page after Kitch has planned groceries.</span>
+                </div>
+              ) : (
+                <div className={`zepto-review-card ${zeptoStatus === "success" ? "success" : "error"}`}>
+                  <div>
+                    <span className="eyebrow">Provider status</span>
+                    <h4>{zeptoStatus === "success" ? "Cart synced" : "Sync needs attention"}</h4>
+                    <p>{zeptoResult.message || zeptoResult.result?.message || "Review the latest provider response below."}</p>
+                  </div>
+                  <div className="zepto-review-stats">
+                    <div><strong>{zeptoMatchedItems.length}</strong><span>Matched</span></div>
+                    <div><strong>{zeptoUnavailableItems.length}</strong><span>Unavailable</span></div>
+                  </div>
+                </div>
+              )}
+
+              {zeptoMatchedItems.length > 0 && (
+                <div className="zepto-match-list">
+                  <h4>Matched items</h4>
+                  {zeptoMatchedItems.map((match, idx) => {
+                    const product = match.matched_product || {};
+                    const native = match.native_item || {};
+                    return (
+                      <div key={`${native.id || native.name || idx}-matched`} className="zepto-match-row">
+                        <span>{native.name || "Cart item"}</span>
+                        <strong>{product.name || product.title || product.product_name || "Matched Zepto product"}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {zeptoUnavailableItems.length > 0 && (
+                <div className="zepto-unavailable-list">
+                  <h4>Unavailable items</h4>
+                  {zeptoUnavailableItems.map((item, idx) => (
+                    <div key={`${item.name || idx}-unavailable`} className="zepto-unavailable-row">
+                      <strong>{item.name || "Unknown item"}</strong>
+                      <span>{item.reason || "Zepto did not return a usable match."}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {zeptoCartReview ? (
+                <div className="payload-preview">
+                  <span>Zepto MCP cart response</span>
+                  <pre>{JSON.stringify(zeptoCartDetails, null, 2)}</pre>
+                </div>
+              ) : (
+                <div className="payload-preview">
+                  <span>Native cart rows pending Zepto sync</span>
+                  <pre>{JSON.stringify(checkoutItems, null, 2)}</pre>
+                </div>
+              )}
               
               <div className="modal-actions">
                 <button
@@ -1233,42 +1406,18 @@ export default function Home() {
                   className="modal-reject"
                   onClick={() => {
                     setMcpModalOpen(false);
-                    triggerBannerAlert("Blinkit payload preview dismissed.");
+                    triggerBannerAlert("Zepto cart review closed.");
                   }}
                 >
-                  Dismiss
+                  Close
                 </button>
                 <button
                   id="mcp-approve-btn"
                   className="modal-approve"
-                  onClick={async () => {
-                    setMcpModalOpen(false);
-                    
-                    try {
-                      const res = await fetch(apiUrl("/api/grocery/export"), {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          items: checkoutItems,
-                          provider: "blinkit"
-                        })
-                      });
-                      if (res.ok) {
-                        const data = await res.json();
-                        triggerBannerAlert(`Payload prepared. ${data.result}`);
-                      } else {
-                        throw new Error("API call failed");
-                      }
-                    } catch (e) {
-                      triggerBannerAlert("❌ Failed to contact the backend checkout exporter.");
-                      console.error(e);
-                    }
-                    
-                    const updatedCustom = customGroceryItems.map(item => ({ ...item, checked: true }));
-                    setCustomGroceryItems(updatedCustom);
-                  }}
+                  disabled={!canPlaceZeptoOrder || isPlacingZeptoOrder}
+                  onClick={placeZeptoOrder}
                 >
-                  Prepare Payload
+                  {isPlacingZeptoOrder ? "Placing..." : "Place Zepto Order"}
                 </button>
               </div>
             </div>

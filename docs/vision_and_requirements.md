@@ -16,7 +16,7 @@ Modern life demands split-second decisions about what we eat, yet managing nutri
 4. **Maintains a platform-agnostic, Intermediary Native Grocery List** in its local database, separating planned needs from delivery logistics.
 5. **Logs nutrition with zero friction** on an *individualized* basis using simple photo uploads.
 6. **Remembers your precise ingredient brand preferences** using agent-native plain-text memory that can later move to Vertex AI Memory Bank without forcing rigid relational schemas.
-7. **Prepares modular grocery delivery payloads (Blinkit/Zepto style)** via a flexible adapter boundary. Live provider MCP cart insertion is intentionally deferred until a provider connection is configured.
+7. **Syncs native groceries to delivery providers through adapters**, starting with Zepto MCP cart sync while keeping real order placement behind explicit user approval.
 
 ```mermaid
 graph TD
@@ -32,9 +32,9 @@ graph TD
     CoreAI <-->|Natively Reads & Writes| BrandPref[ADK Memory: Plain-Text Brand Preferences]
     
     NativeList -->|Modular Adapter Layer| DeliveryRouter{Delivery Provider Router}
-    DeliveryRouter -->|Current Preview| ProviderPayload[Provider Payload Review]
+    DeliveryRouter -->|Legacy Preview| ProviderPayload[Provider Payload Review]
+    DeliveryRouter -->|Current Adapter| ZeptoMCP[Zepto MCP Cart]
     DeliveryRouter -->|Future Adapter| BlinkitMCP[Blinkit MCP Cart]
-    DeliveryRouter -->|Future Adapter| ZeptoMCP[Zepto MCP Cart]
     DeliveryRouter -->|Future Adapters| OtherAPI[Instacart / BigBasket API]
 ```
 
@@ -54,7 +54,7 @@ graph TD
 *Decoupling recipe requirements from delivery providers.*
 *   **Intermediary Native List**: The database maintains a native, provider-agnostic shopping list. This list aggregates scaled ingredients, tracks ticked items, and adjusts for pantry stock.
 *   **Modular Delivery Adapters**: Delivery integrations are treated as modular plugins (the *Provider Pattern*). 
-*   **Blinkit, Zepto, and More**: Users can review their native list on the dashboard, choose their preferred grocery delivery merchant, and export the list. The backend adapter maps native ingredients (e.g. "cabbage 1 piece") to merchant catalog payloads dynamically.
+*   **Zepto, Blinkit, and More**: Users can review their native list on the dashboard and sync eligible rows to a provider cart. The backend adapter maps native ingredients (e.g. "cabbage 1 piece") to merchant catalog products dynamically.
 
 ### 📈 Pillar 3: Context-Isolated Household vs. Individual "Minds"
 *Shared collaborative assets alongside private personal health tracking.*
@@ -71,13 +71,13 @@ graph TD
 *No redundant relational table overhead. The agent manages its own records.*
 *   **Plain-Text Preference Memory:** Rather than storing brand preferences in strict database tables, Kitch records specific brand settings as flexible text in ADK memory.
 *   **Active Conversational Updates:** If you casually tell Kitch during a chat: *"Oh, remember to always buy Country Delight milk from now on,"* the agent stores that preference for later grocery preparation.
-*   **Checkout Consulting:** When you prepare a provider payload, the agent consults brand memory to translate generic recipe ingredients (e.g. "paneer 200g") into favored branded items (e.g. "Amul Malai Paneer 200g").
+*   **Checkout Consulting:** When preparing a provider cart, the agent consults brand memory to translate generic native ingredients (e.g. "paneer 200g") into favored branded search terms (e.g. "Amul Malai Paneer 200g").
 *   **Deployment Path:** Local testing currently uses ADK in-memory services. Deployment should replace that with Vertex AI Memory Bank for persistence.
 
 ### 💬 Pillar 6: Conversational Chat & Delivery Preparation
-*An agent that lives in your ecosystem and prepares delivery-ready grocery payloads.*
-*   **Blinkit/Zepto Payload Preparation:** Finalized grocery lists can be mapped into provider-style payloads. Direct MCP cart insertion is a planned integration, not current behavior.
-*   **Human-in-the-loop Review:** Before any future provider automation runs, the application presents a clear review prompt displaying the exact list. Current behavior stops at payload preparation.
+*An agent that lives in your ecosystem and prepares delivery-ready grocery carts.*
+*   **Zepto Cart Sync:** Finalized native grocery rows can be synced into a real Zepto cart through the Zepto MCP adapter after the user asks for it.
+*   **Human-in-the-loop Order Approval:** Cart sync does not place an order. The app must show the Zepto cart summary and require a final approval button before order placement.
 *   **Conversational Chat (Telegram/WhatsApp):** Interact with Kitch on-the-go:
     *   *“We have chicken and spinach in the fridge, what can we make for the 3 of us tonight?”*
     *   *“Remember that our household prefers strictly organic whole wheat bread.”*
@@ -111,8 +111,8 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | **REQ-008** | Brand Preference Memory | Agent maintains conversational plain-text brand preferences in ADK memory, later migratable to Vertex AI Memory Bank. | Customizes grocery payload preparation without rigid schema rules. |
 | **REQ-009** | Native Intermediary List | Maintains a unified, provider-agnostic required shopping list in the database. | Decouples groceries from merchants. |
-| **REQ-010** | Modular Exporter Boundary | Exposes pluggable delivery adapter boundaries (Blinkit, Zepto, etc.) to map native items to branded merchant payloads. | Prepares for multi-app expansion. |
-| **REQ-011** | Human-in-the-loop Review | Displays an authorization dialog showing provider payload inputs before any future provider execution. | High security and error prevention. |
+| **REQ-010** | Modular Provider Boundary | Exposes pluggable delivery adapter boundaries (Zepto, Blinkit, etc.) to map native items to merchant carts. | Keeps provider logic separate from Kitch's native cart. |
+| **REQ-011** | Human-in-the-loop Order Approval | Displays the real provider cart summary and requires final UI approval before order placement. | High security and error prevention. |
 
 ---
 
@@ -125,7 +125,7 @@ sequenceDiagram
     participant Agent as Kitch Agent
     participant Memory as ADK Memory
     participant DB as Supabase DB
-    participant Payload as Provider Payload Preview
+    participant Zepto as Zepto MCP Adapter
     
     Note over Archit, Memory: Scenario A: Updating Brand Preferences
     Archit->>Agent: "Remember to always order bread of brand Bakers Dozen."
@@ -139,15 +139,14 @@ sequenceDiagram
     DB->>Agent: Shared native list compiled
     Agent->>Archit: "Household Shopping List compiled in your database."
     
-    Note over Archit, Payload: Scenario C: Brand-Mapped Checkout Prep
-    Archit->>Agent: "Export our grocery list to Blinkit."
+    Note over Archit, Zepto: Scenario C: Brand-Mapped Zepto Cart Sync
+    Archit->>Agent: "Add our grocery list to Zepto."
     Agent->>Memory: Read brand preferences
     Memory-->>Agent: Brand maps returned
-    Agent->>Payload: Map native ingredients (e.g. 'bread') to branded items (e.g. 'Bakers Dozen Bread')
-    Payload->>Archit: Prompt [Provider Payload Review]
-    Archit->>Payload: Click [Prepare Payload]
-    Payload->>Agent: Payload prepared
-    Agent->>Archit: "Blinkit payload prepared with your preferred branded products. MCP cart connection is not configured yet."
+    Agent->>Zepto: Clear Zepto cart, search products, add best matches
+    Zepto->>Archit: Show Zepto cart summary and unavailable items
+    Archit->>Zepto: Click [Place Order]
+    Zepto->>Agent: Order placement requested after final approval
 ```
 
 ---
