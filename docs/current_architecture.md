@@ -117,7 +117,7 @@ This lets the coordinator and sub-agents reason with the current user profile wi
 
 Photo upload uses ADK-compatible content parts:
 
-- A text prompt describing whether this is a fridge scan or plate scan.
+- A text prompt describing whether this is a fridge scan or plate scan, including any text the user typed alongside the image.
 - An image part built from uploaded file bytes.
 
 The agent is instructed to call tools directly:

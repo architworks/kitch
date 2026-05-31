@@ -169,7 +169,8 @@ async def chat_endpoint(payload: ChatRequest):
 async def upload_photo_endpoint(
     file: UploadFile = File(...),
     active_user: str = Form(...),
-    is_fridge_scan: bool = Form(False)
+    is_fridge_scan: bool = Form(False),
+    message: str = Form("")
 ):
     """
     Natively ingests food plate or fridge interior images utilizing 
@@ -196,6 +197,15 @@ async def upload_photo_endpoint(
             household_size=household_size
         )
         
+        user_context = message.strip()
+        context_instruction = (
+            f"\n\nUser accompanying text: {user_context}\n"
+            "Use this text as first-class context alongside the image. "
+            "If the text provides dish names, quantities, corrections, goals, or pantry instructions, honor it."
+            if user_context
+            else ""
+        )
+
         # Construct dynamic prompt instructions
         if is_fridge_scan:
             prompt = (
@@ -204,6 +214,7 @@ async def upload_photo_endpoint(
                 "2. PROACTIVELY call the 'add_to_pantry_tool' for each detected ingredient to save it to the shared household pantry in Supabase. "
                 "Include the ingredient name, estimated amount, and standard unit (e.g. 'stalks', 'slice', 'whole', 'large', 'tbsp').\n"
                 "3. In your response text, summarize the pantry updates in a friendly list."
+                f"{context_instruction}"
             )
         else:
             prompt = (
@@ -212,6 +223,7 @@ async def upload_photo_endpoint(
                 "2. Estimate total calories and macronutrients (protein, carbs, fat, fiber).\n"
                 f"3. PROACTIVELY call the 'log_macros_tool' to write this meal log directly to {active_user}'s intake journal in Supabase.\n"
                 "4. In your response text, summarize the nutritional breakdown and confirm it has been logged."
+                f"{context_instruction}"
             )
             
         # Natively package file bytes and prompt text as ContentParts

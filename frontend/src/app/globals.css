@@ -2628,6 +2628,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(74, 103, 65, 0.28);
   border-radius: 999px;
@@ -2640,6 +2641,78 @@ button {
 
 .smart-input-dock.expanded .smart-input-shell {
   transform: scale(1.01);
+}
+
+.pending-attachment-chip {
+  min-width: 0;
+  max-width: 260px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px 5px 5px;
+  color: var(--ink);
+  background: var(--surface-low);
+  border: 1px solid rgba(195, 200, 189, 0.72);
+  border-radius: 999px;
+}
+
+.pending-attachment-preview {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  font-size: 16px;
+}
+
+.pending-attachment-chip div {
+  min-width: 0;
+  flex: 1;
+}
+
+.pending-attachment-chip div span,
+.pending-attachment-chip strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-attachment-chip div span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pending-attachment-chip strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pending-attachment-chip button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.pending-attachment-chip button:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .smart-input-shell:focus-within {
@@ -2831,6 +2904,13 @@ button {
   .smart-input-shell {
     min-height: 60px;
     padding: 6px;
+  }
+
+  .pending-attachment-chip {
+    order: -1;
+    flex: 1 0 100%;
+    max-width: none;
+    border-radius: 18px;
   }
 
   .smart-input-shell input[type="text"] {

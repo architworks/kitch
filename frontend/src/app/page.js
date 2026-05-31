@@ -56,6 +56,7 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [isChatTyping, setIsChatTyping] = useState(false);
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState(null);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
@@ -310,6 +311,20 @@ export default function Home() {
     }
   };
 
+  const stagePhotoForInput = (file, isFridgeScan) => {
+    if (!file) return;
+
+    setPendingPhoto({
+      file,
+      isFridgeScan
+    });
+    setSmartDockExpanded(true);
+  };
+
+  const clearPendingPhoto = () => {
+    setPendingPhoto(null);
+  };
+
   // 4. Send chat message to real FastAPI backend agent
   const sendChatMessage = async (prompt) => {
     if (!prompt.trim() || isChatTyping) return;
@@ -392,23 +407,38 @@ export default function Home() {
 
   const handleChatSubmit = (e) => {
     e.preventDefault();
-    if (chatInput.trim()) {
-      const text = chatInput;
+    const text = chatInput.trim();
+
+    if (pendingPhoto) {
+      const photo = pendingPhoto;
+      setChatInput("");
+      setPendingPhoto(null);
+      handleRealPhotoUpload(photo.file, photo.isFridgeScan, text);
+      return;
+    }
+
+    if (text) {
       setChatInput("");
       sendChatMessage(text);
     }
   };
 
   // 5. Real Vision Camera scanning & upload workflow
-  const handleRealPhotoUpload = async (file, isFridgeScan) => {
+  const handleRealPhotoUpload = async (file, isFridgeScan, accompanyingText = "") => {
     if (!file) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const trimmedText = accompanyingText.trim();
+    const scanLabel = isFridgeScan ? "fridge scan" : "plate photo";
+
+    setSmartDockExpanded(true);
     setChatHistory(prev => [
       ...prev,
       {
         sender: "user",
-        text: `📷 *Uploaded photo: ${file.name}*`,
+        text: trimmedText
+          ? `📷 *Attached ${scanLabel}: ${file.name}*\n\n${trimmedText}`
+          : `📷 *Attached ${scanLabel}: ${file.name}*`,
         time
       }
     ]);
@@ -431,6 +461,7 @@ export default function Home() {
       formData.append("file", file);
       formData.append("active_user", activeUser);
       formData.append("is_fridge_scan", isFridgeScan ? "true" : "false");
+      formData.append("message", trimmedText);
 
       setScanningOverlay(prev => ({
         ...prev,
@@ -1063,24 +1094,55 @@ export default function Home() {
         )}
         <div className="smart-input-shell">
           <button type="button" className="input-icon-btn" aria-label="Voice input">🎙️</button>
+          {pendingPhoto && (
+            <div className="pending-attachment-chip">
+              <span className="pending-attachment-preview" aria-hidden="true">
+                {pendingPhoto.isFridgeScan ? "📷" : "🖼️"}
+              </span>
+              <div>
+                <span>{pendingPhoto.isFridgeScan ? "Fridge scan" : "Plate photo"}</span>
+                <strong>{pendingPhoto.file.name}</strong>
+              </div>
+              <button type="button" aria-label="Remove selected image" onClick={clearPendingPhoto}>×</button>
+            </div>
+          )}
           <input
             type="text"
             id="chat-user-input"
             name="chat-user-input"
-            placeholder="Ask Kitch to plan, log, or add items..."
+            placeholder={pendingPhoto ? "Add context for this image..." : "Ask Kitch to plan, log, or add items..."}
             autoComplete="off"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
           />
-          <label className="input-icon-btn" aria-label="Upload plate image">
+          <label className="input-icon-btn" aria-label="Attach plate image">
             🖼️
-            <input name="plate-image-upload" type="file" accept="image/*" className="hidden-file-input" onChange={(e) => handleRealPhotoUpload(e.target.files[0], false)} />
+            <input
+              name="plate-image-upload"
+              type="file"
+              accept="image/*"
+              className="hidden-file-input"
+              onChange={(e) => {
+                stagePhotoForInput(e.target.files[0], false);
+                e.target.value = "";
+              }}
+            />
           </label>
-          <label className="input-icon-btn" aria-label="Open camera to scan fridge">
+          <label className="input-icon-btn" aria-label="Attach fridge scan image">
             📷
-            <input name="camera-fridge-upload" type="file" accept="image/*" capture="environment" className="hidden-file-input" onChange={(e) => handleRealPhotoUpload(e.target.files[0], true)} />
+            <input
+              name="camera-fridge-upload"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden-file-input"
+              onChange={(e) => {
+                stagePhotoForInput(e.target.files[0], true);
+                e.target.value = "";
+              }}
+            />
           </label>
-          <button type="submit" className="smart-send-btn" disabled={isChatTyping}>↑</button>
+          <button type="submit" className="smart-send-btn" disabled={isChatTyping || (!chatInput.trim() && !pendingPhoto)}>↑</button>
         </div>
       </form>
 
