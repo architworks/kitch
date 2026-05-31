@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import Image from "next/image";
 import { DIET_TYPES } from "./mockData.js";
 import {
   DEFAULT_ACTIVE_USER,
@@ -654,8 +655,8 @@ export default function Home() {
 
       <aside className="kitch-rail" aria-label="Kitch navigation">
         <div className="rail-brand">
-          <div className="rail-logo-mark" aria-hidden="true">
-            <span>K</span>
+          <div className="rail-logo-mark">
+            <Image src="/kitch-chef-hat.svg" alt="" width={46} height={46} aria-hidden="true" />
           </div>
           <div>
             <h1>Kitch</h1>
@@ -707,7 +708,9 @@ export default function Home() {
       <div className="kitch-workspace">
         <header className="app-header">
           <div className="mobile-brand">
-            <div className="logo-icon">🥗</div>
+            <div className="logo-icon">
+              <Image src="/kitch-chef-hat.svg" alt="" width={48} height={48} aria-hidden="true" />
+            </div>
             <div>
               <h1>Kitch</h1>
               <span>Household assistant</span>
@@ -1051,7 +1054,9 @@ export default function Home() {
         <div className="smart-chat-thread" aria-live="polite">
           <div className="smart-chat-header">
             <div>
-              <span className="smart-agent-avatar">🥗</span>
+              <span className="smart-agent-avatar">
+                <Image src="/kitch-chef-hat.svg" alt="" width={40} height={40} aria-hidden="true" />
+              </span>
               <div>
                 <strong>Kitch</strong>
                 <small>Household meal agent</small>
