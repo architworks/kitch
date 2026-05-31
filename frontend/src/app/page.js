@@ -39,14 +39,6 @@ const getMealTitle = (meal, fallback = "No recipe set") => {
   return meal.name || meal.title || meal.recipe_name || fallback;
 };
 
-const getMealIngredients = (meal) => {
-  if (!meal || typeof meal === "string") return [];
-  if (Array.isArray(meal.ingredients)) return meal.ingredients;
-  if (Array.isArray(meal.ingredient_list)) return meal.ingredient_list;
-  if (Array.isArray(meal.recipe?.ingredients)) return meal.recipe.ingredients;
-  return [];
-};
-
 // Default welcome messaging
 const INITIAL_CHAT = [
   {
@@ -634,26 +626,18 @@ export default function Home() {
     title: `Ask Kitch to plan the first household ${currentMealLabel.toLowerCase()}`
   };
 
-  const selectedDayMeals = weeklyPlan[selectedPlannerDay] || {};
+  const pantryPreview = pantryStock.slice(0, 3);
   const selectedDayDate = planningWeekDates[selectedPlannerDay] || {};
   const selectedDayMealList = MEAL_SLOTS.map(slot => ({
     slot,
     key: `${selectedPlannerDay}-${slot}`,
-    meal: selectedDayMeals[slot],
-    title: getMealTitle(selectedDayMeals[slot]),
-    ingredients: getMealIngredients(selectedDayMeals[slot])
+    title: getMealTitle(weeklyPlan[selectedPlannerDay]?.[slot], `${MEAL_SLOT_LABELS[slot]} not set`)
   }));
-  const pantryPreview = pantryStock.slice(0, 3);
   const focusMealDateText = firstPlannedFocusMeal.date.longLabel || firstPlannedFocusMeal.date.label || "Upcoming week";
   const focusMealTitle = firstPlannedFocusMeal.title;
   const nutritionSummary = loggedCal > 0
     ? `${calPercentage}% of daily target`
     : "No meals logged yet";
-  const recentActivity = [
-    `${activeUser} is viewing personal macro logs`,
-    weeklyPlan.Monday?.dinner ? "Weekly plan is ready for the household" : "Weekly plan is waiting for Kitch",
-    pantryStock.length ? `${pantryStock.length} pantry items available` : "Pantry has not been scanned yet"
-  ];
   const quickPrompts = [
     "Plan next week for the whole household",
     "What are we cooking tomorrow?",
@@ -809,7 +793,7 @@ export default function Home() {
                     <h2>{currentMealLabel} is up next</h2>
                     <p>Shared plan for {householdSize} {householdSize === 1 ? "person" : "people"}. Each member can still track nutrition separately.</p>
                     <div className="hero-meal-card">
-                      <span className={`meal-orb ${currentMealSlot}`} aria-hidden="true"></span>
+                      <span className={`meal-time-icon ${currentMealSlot}`} aria-hidden="true"><span></span></span>
                       <div>
                         <small>{currentMealLabel} · {focusMealDateText}</small>
                         <strong>{focusMealTitle}</strong>
@@ -828,7 +812,7 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="meal-hero-art">
-                    <Image src="/countertop.png" alt="" fill sizes="(max-width: 900px) 100vw, 52vw" priority />
+                    <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 60vw" priority unoptimized />
                     <span className="hero-date-pill">{firstPlannedFocusMeal.date.label || "Next week"}</span>
                     <div className="chip-row">
                       <span>Household</span>
@@ -855,31 +839,32 @@ export default function Home() {
                     </div>
                     <p>{planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label ? `${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}` : "Upcoming Monday - Sunday"}</p>
                   </div>
-                  <div id="weekly-plan-grid" className="calendar-board">
-                    <div className="week-selector-strip">
+                  <div id="weekly-plan-grid" className="weekly-plan-board">
+                    <div className="week-date-rail" aria-label="Select planning day">
                       {WEEK_DAYS.map(day => {
                         const dateMeta = planningWeekDates[day] || {};
-                        const focusMealTitle = getMealTitle(weeklyPlan[day]?.[currentMealSlot], `${currentMealLabel} not set`);
                         return (
                           <button
                             key={day}
                             type="button"
-                            className={`week-selector-card ${selectedPlannerDay === day ? "active" : ""}`}
+                            className={`week-date-card ${selectedPlannerDay === day ? "active" : ""}`}
                             onClick={() => {
                               setSelectedPlannerDay(day);
                               setExpandedMealKey(`${day}-${currentMealSlot}`);
                             }}
                           >
                             <span>{day.slice(0, 3)}</span>
-                            <strong>{dateMeta.label || "Soon"}</strong>
-                            <em>{focusMealTitle}</em>
+                            <div>
+                              <strong>{dateMeta.label || "Soon"}</strong>
+                              <em>{selectedPlannerDay === day ? "Selected" : ""}</em>
+                            </div>
                           </button>
                         );
                       })}
                     </div>
 
-                    <article className="selected-day-planner">
-                      <div className="selected-day-glance">
+                    <article className="selected-week-meals">
+                      <div className="selected-week-heading">
                         <div>
                           <span className="eyebrow">Meals for {selectedDayDate.label || selectedPlannerDay}</span>
                           <h3>{selectedPlannerDay}</h3>
@@ -887,41 +872,23 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="meal-accordion-list">
-                        {selectedDayMealList.map(({ slot, key, title, ingredients }) => {
-                          const isExpanded = expandedMealKey === key;
-                          return (
-                            <div key={key} className={`meal-accordion ${isExpanded ? "expanded" : ""}`}>
-                              <button
-                                type="button"
-                                className="meal-accordion-trigger"
-                                onClick={() => setExpandedMealKey(isExpanded ? "" : key)}
-                              >
-                                <span className={`meal-orb ${slot}`} aria-hidden="true"></span>
-                                <span className="meal-row-label">{MEAL_SLOT_LABELS[slot]}</span>
-                                <strong>{title}</strong>
-                                <em>{isExpanded ? "−" : "+"}</em>
-                              </button>
-                              {isExpanded && (
-                                <div className="meal-accordion-body">
-                                  {ingredients.length > 0 ? (
-                                    <ul>
-                                      {ingredients.map((ingredient, idx) => (
-                                        <li key={`${key}-${idx}`}>{typeof ingredient === "string" ? ingredient : `${ingredient.amount || ""} ${ingredient.unit || ""} ${ingredient.name || ""}`.trim()}</li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p>Kitch has the meal name saved, but ingredients are not attached to this structured plan yet.</p>
-                                  )}
-                                  <div className="meal-detail-actions">
-                                    <button type="button" onClick={() => setChatInput(`Show full ingredients for ${title} on ${selectedPlannerDay}`)}>Get ingredients</button>
-                                    <button type="button" onClick={() => draftMealSwapPrompt(selectedPlannerDay, slot)}>Swap this meal</button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                      <div className="selected-meal-list">
+                        {selectedDayMealList.map(({ slot, key, title }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={`selected-meal-row ${slot} ${expandedMealKey === key ? "active" : ""}`}
+                            onClick={() => {
+                              setExpandedMealKey(key);
+                              setChatInput(`Show details for ${title} on ${selectedPlannerDay}`);
+                            }}
+                          >
+                            <span className={`meal-time-icon ${slot}`} aria-hidden="true"><span></span></span>
+                            <span>{MEAL_SLOT_LABELS[slot]}</span>
+                            <strong>{title}</strong>
+                            <em>+</em>
+                          </button>
+                        ))}
                       </div>
                     </article>
                   </div>
@@ -965,17 +932,6 @@ export default function Home() {
                     <small>{checkedCount} already stocked or marked complete</small>
                   </article>
 
-                  <article className="side-status-card activity-status-card">
-                    <h3>Recent Activity</h3>
-                    <div className="activity-timeline">
-                      {recentActivity.map((item, idx) => (
-                        <div key={item} className="activity-item">
-                          <span>{idx + 1}</span>
-                          <p>{item}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </article>
                 </aside>
               </div>
             </section>
