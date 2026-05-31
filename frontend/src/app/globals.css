@@ -2179,9 +2179,7 @@ button {
 }
 
 .selected-day-glance {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr);
-  gap: 16px;
+  display: block;
   margin-bottom: 18px;
 }
 
@@ -2197,41 +2195,6 @@ button {
   margin: 0;
   color: var(--muted);
   font-weight: 700;
-}
-
-.glance-dinner-card {
-  padding: 16px;
-  color: var(--ink);
-  background:
-    radial-gradient(circle at 15% 15%, rgba(202, 236, 188, 0.45), transparent 40%),
-    var(--surface-low);
-  border: 1px solid rgba(195, 200, 189, 0.72);
-  border-radius: 18px;
-}
-
-.glance-dinner-card span {
-  display: block;
-  color: var(--oak);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.glance-dinner-card strong {
-  display: block;
-  margin: 7px 0 14px;
-  font-family: var(--font-head);
-  font-size: 20px;
-  line-height: 1.16;
-}
-
-.glance-dinner-card button {
-  color: var(--sage-deep);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font-weight: 900;
 }
 
 .meal-accordion-list {

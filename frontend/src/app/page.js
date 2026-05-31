@@ -15,6 +15,21 @@ import {
   getUpcomingPlanningWeekDates
 } from "./householdConfig.js";
 
+const MEAL_SLOT_LABELS = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner"
+};
+
+const DEFAULT_MEAL_SLOT = "breakfast";
+
+const getTimeBasedMealSlot = (date = new Date()) => {
+  const hour = date.getHours();
+  if (hour < 11) return "breakfast";
+  if (hour < 16) return "lunch";
+  return "dinner";
+};
+
 const getMealTitle = (meal, fallback = "No recipe set") => {
   if (!meal) return fallback;
   if (typeof meal === "string") return meal || fallback;
@@ -42,7 +57,8 @@ export default function Home() {
   // Application core state variables
   const [activeTab, setActiveTab] = useState("planner"); // planner, analytics, groceries
   const [selectedPlannerDay, setSelectedPlannerDay] = useState("Monday");
-  const [expandedMealKey, setExpandedMealKey] = useState("Monday-dinner");
+  const [currentMealSlot, setCurrentMealSlot] = useState(DEFAULT_MEAL_SLOT);
+  const [expandedMealKey, setExpandedMealKey] = useState(`Monday-${DEFAULT_MEAL_SLOT}`);
   const [dietPreference, setDietPreference] = useState("balanced");
   const [householdSize, setHouseholdSize] = useState(DEFAULT_HOUSEHOLD_SIZE);
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
@@ -148,6 +164,27 @@ export default function Home() {
 
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const syncMealFocus = () => {
+      const nextMealSlot = getTimeBasedMealSlot();
+      setCurrentMealSlot(previousMealSlot => {
+        if (previousMealSlot !== nextMealSlot) {
+          setExpandedMealKey(currentKey => (
+            currentKey === `${selectedPlannerDay}-${previousMealSlot}`
+              ? `${selectedPlannerDay}-${nextMealSlot}`
+              : currentKey
+          ));
+        }
+
+        return nextMealSlot;
+      });
+    };
+
+    syncMealFocus();
+    const interval = window.setInterval(syncMealFocus, 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [selectedPlannerDay]);
 
   // Sync alert auto-dismiss timer
   useEffect(() => {
@@ -581,18 +618,19 @@ export default function Home() {
       }));
   }, [groceryList]);
 
-  const firstPlannedDinner = WEEK_DAYS.map(day => ({
+  const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
+  const firstPlannedFocusMeal = WEEK_DAYS.map(day => ({
     day,
     date: planningWeekDates[day] || {},
-    dinner: getMealTitle(weeklyPlan[day]?.dinner, "")
-  })).find(item => item.dinner) || {
+    slot: currentMealSlot,
+    title: getMealTitle(weeklyPlan[day]?.[currentMealSlot], "")
+  })).find(item => item.title) || {
     day: "Monday",
     date: planningWeekDates.Monday || {},
-    dinner: "Ask Kitch to plan the first household dinner"
+    slot: currentMealSlot,
+    title: `Ask Kitch to plan the first household ${currentMealLabel.toLowerCase()}`
   };
 
-  const tomorrowDay = WEEK_DAYS[1];
-  const tomorrowDinner = getMealTitle(weeklyPlan[tomorrowDay]?.dinner, "No dinner selected yet");
   const selectedDayMeals = weeklyPlan[selectedPlannerDay] || {};
   const selectedDayDate = planningWeekDates[selectedPlannerDay] || {};
   const selectedDayMealList = MEAL_SLOTS.map(slot => ({
@@ -602,7 +640,6 @@ export default function Home() {
     title: getMealTitle(selectedDayMeals[slot]),
     ingredients: getMealIngredients(selectedDayMeals[slot])
   }));
-  const selectedDayDinner = selectedDayMealList.find(item => item.slot === "dinner");
   const pantryPreview = pantryStock.slice(0, 3);
   const recentActivity = [
     `${activeUser} is viewing personal macro logs`,
@@ -761,12 +798,12 @@ export default function Home() {
                 <article className="dinner-hero-card">
                   <div className="meal-hero-art">
                     <div className="meal-hero-illustration" aria-hidden="true"></div>
-                    <span>{firstPlannedDinner.date.label || "Next week"}</span>
+                    <span>{firstPlannedFocusMeal.date.label || "Next week"}</span>
                   </div>
                   <div className="meal-hero-copy">
-                    <span className="eyebrow">What&apos;s for dinner?</span>
-                    <h2>{firstPlannedDinner.dinner}</h2>
-                    <p>{firstPlannedDinner.day} dinner for the shared household plan. Tap a meal in the calendar to ask Kitch for swaps.</p>
+                    <span className="eyebrow">What&apos;s for {currentMealLabel.toLowerCase()}?</span>
+                    <h2>{firstPlannedFocusMeal.title}</h2>
+                    <p>{firstPlannedFocusMeal.day} {currentMealLabel.toLowerCase()} for the shared household plan. Tap a meal in the calendar to ask Kitch for swaps.</p>
                     <div className="chip-row">
                       <span>Household</span>
                       <span>{householdSize} people</span>
@@ -778,7 +815,7 @@ export default function Home() {
                           <span key={member.value}>{member.value[0]}</span>
                         ))}
                       </div>
-                      <button type="button" onClick={() => setChatInput(`Show me the recipe for ${firstPlannedDinner.dinner}`)}>
+                      <button type="button" onClick={() => setChatInput(`Show me the recipe for ${firstPlannedFocusMeal.title}`)}>
                         View recipe →
                       </button>
                     </div>
@@ -817,7 +854,7 @@ export default function Home() {
                   <div className="week-selector-strip">
                     {WEEK_DAYS.map(day => {
                       const dateMeta = planningWeekDates[day] || {};
-                      const dinnerTitle = getMealTitle(weeklyPlan[day]?.dinner, "Dinner not set");
+                      const focusMealTitle = getMealTitle(weeklyPlan[day]?.[currentMealSlot], `${currentMealLabel} not set`);
                       return (
                         <button
                           key={day}
@@ -825,12 +862,12 @@ export default function Home() {
                           className={`week-selector-card ${selectedPlannerDay === day ? "active" : ""}`}
                           onClick={() => {
                             setSelectedPlannerDay(day);
-                            setExpandedMealKey(`${day}-dinner`);
+                            setExpandedMealKey(`${day}-${currentMealSlot}`);
                           }}
                         >
                           <span>{day.slice(0, 3)}</span>
                           <strong>{dateMeta.label || "Soon"}</strong>
-                          <em>{dinnerTitle}</em>
+                          <em>{focusMealTitle}</em>
                         </button>
                       );
                     })}
@@ -839,16 +876,9 @@ export default function Home() {
                   <article className="selected-day-planner">
                     <div className="selected-day-glance">
                       <div>
-                        <span className="eyebrow">{selectedDayDate.label || "Selected day"} at a glance</span>
+                        <span className="eyebrow">{selectedDayDate.label || "Selected day"} meal plan</span>
                         <h3>{selectedPlannerDay}</h3>
                         <p>{selectedDayDate.longLabel || "Upcoming planning week"}</p>
-                      </div>
-                      <div className="glance-dinner-card">
-                        <span>Dinner focus</span>
-                        <strong>{selectedDayDinner?.title || "No dinner set"}</strong>
-                        <button type="button" onClick={() => setChatInput(`Show ingredients and cooking steps for ${selectedDayDinner?.title || `${selectedPlannerDay} dinner`}`)}>
-                          Ask for ingredients →
-                        </button>
                       </div>
                     </div>
 
