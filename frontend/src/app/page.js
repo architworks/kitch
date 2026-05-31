@@ -583,6 +583,7 @@ export default function Home() {
     "What groceries should I order for tomorrow?",
     "Log what I just ate"
   ];
+  const hasStartedConversation = chatHistory.some(msg => msg.sender === "user");
 
   return (
     <div id="app">
@@ -622,28 +623,54 @@ export default function Home() {
 
       <aside className="kitch-rail" aria-label="Kitch navigation">
         <div className="rail-brand">
-          <div className="logo-icon">🥗</div>
+          <div className="rail-logo-mark" aria-hidden="true">
+            <span>K</span>
+          </div>
           <div>
             <h1>Kitch</h1>
-            <span>Household assistant</span>
+            <span>AI Household</span>
           </div>
         </div>
         <nav className="rail-nav">
           {[
-            ["planner", "📅", "Weekly Plan"],
-            ["analytics", "📊", "Macro Logs"],
-            ["groceries", "🛒", "Grocery Cart"]
+            ["planner", "household", "Household"],
+            ["groceries", "pantry", "Pantry"],
+            ["analytics", "nutrition", "Nutrition"]
           ].map(([key, icon, label]) => (
             <button
               key={key}
               className={`rail-link ${activeTab === key ? "active" : ""}`}
               onClick={() => setActiveTab(key)}
             >
-              <span>{icon}</span>
+              <span className={`rail-line-icon ${icon}`} aria-hidden="true">
+                {icon === "household" && (
+                  <svg viewBox="0 0 24 24"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.5 19c.6-3.1 2.2-5 4.5-5s3.9 1.9 4.5 5M11.5 19c.6-3.1 2.2-5 4.5-5s3.9 1.9 4.5 5"/></svg>
+                )}
+                {icon === "pantry" && (
+                  <svg viewBox="0 0 24 24"><path d="M6 8h12l-1 12H7L6 8Zm2-4h8l2 4H6l2-4Zm2 8h4"/></svg>
+                )}
+                {icon === "nutrition" && (
+                  <svg viewBox="0 0 24 24"><path d="M4 19h16M5 15l4-4 3 3 6-8M5 5v14"/></svg>
+                )}
+              </span>
               {label}
             </button>
           ))}
         </nav>
+        <div className="rail-member-card">
+          <div className="rail-member-avatar">
+            {HOUSEHOLD_MEMBERS.map(member => (
+              <span key={member.value}>{member.value[0]}</span>
+            ))}
+          </div>
+          <div>
+            <span>Active member</span>
+            <strong>{activeUser}</strong>
+          </div>
+          <button type="button" aria-label="Change active member" onClick={() => setChatInput("Switch active member to ")}>
+            ▾
+          </button>
+        </div>
       </aside>
 
       <div className="kitch-workspace">
@@ -1025,13 +1052,15 @@ export default function Home() {
             )}
           </div>
         </div>
-        <div className="quick-prompt-row">
-          {quickPrompts.map(prompt => (
-            <button key={prompt} type="button" onClick={() => setChatInput(prompt)}>
-              {prompt}
-            </button>
-          ))}
-        </div>
+        {!hasStartedConversation && (
+          <div className="quick-prompt-row">
+            {quickPrompts.map(prompt => (
+              <button key={prompt} type="button" onClick={() => setChatInput(prompt)}>
+                {prompt}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="smart-input-shell">
           <button type="button" className="input-icon-btn" aria-label="Voice input">🎙️</button>
           <input

@@ -1612,14 +1612,14 @@ button {
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 30;
-  width: 264px;
+  width: 236px;
   display: flex;
   flex-direction: column;
-  gap: 26px;
-  padding: 30px 22px;
-  background: rgba(250, 242, 237, 0.96);
-  border-right: 1px solid rgba(195, 200, 189, 0.62);
-  box-shadow: 18px 0 60px rgba(52, 44, 36, 0.07);
+  gap: 42px;
+  padding: 28px 20px 22px;
+  background: rgba(255, 253, 250, 0.96);
+  border-right: 1px solid rgba(195, 200, 189, 0.46);
+  box-shadow: 14px 0 44px rgba(52, 44, 36, 0.045);
   backdrop-filter: blur(18px);
 }
 
@@ -1628,6 +1628,53 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.rail-logo-mark {
+  width: 46px;
+  height: 46px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 42%),
+    radial-gradient(circle at 70% 20%, var(--oak-soft), transparent 18%),
+    #151513;
+  border-radius: 16px;
+  box-shadow: 0 16px 32px rgba(21, 21, 19, 0.18);
+  overflow: hidden;
+}
+
+.rail-logo-mark::before {
+  content: "";
+  position: absolute;
+  inset: -18px -14px auto auto;
+  width: 54px;
+  height: 54px;
+  background: var(--surface);
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+.rail-logo-mark::after {
+  content: "✦";
+  position: absolute;
+  left: 7px;
+  bottom: 6px;
+  color: #ff4d8d;
+  font-size: 15px;
+}
+
+.rail-logo-mark span {
+  position: relative;
+  z-index: 1;
+  color: #ff4d8d;
+  font-family: var(--font-head);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .rail-brand h1,
@@ -1643,7 +1690,7 @@ button {
 .mobile-brand span {
   display: block;
   margin-top: 4px;
-  color: var(--sage);
+  color: #ff4d8d;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.14em;
@@ -1653,46 +1700,138 @@ button {
 .rail-nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 24px;
 }
 
 .rail-link {
-  min-height: 48px;
+  min-height: 38px;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 0 12px;
-  color: var(--ink-soft);
+  gap: 16px;
+  padding: 0 8px;
+  color: #4b514c;
   background: transparent;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: 14px;
   cursor: pointer;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
   text-align: left;
   transition: var(--transition-smooth);
 }
 
-.rail-link span {
-  width: 28px;
-  height: 28px;
+.rail-line-icon {
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface-card);
-  border: 1px solid var(--line-soft);
-  border-radius: 999px;
+  color: #4b514c;
+}
+
+.rail-line-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .rail-link:hover,
 .rail-link.active {
   color: var(--sage-deep);
-  background: var(--surface-card);
-  box-shadow: 0 12px 28px rgba(52, 44, 36, 0.08);
+  background: rgba(74, 103, 65, 0.08);
+  box-shadow: none;
+}
+
+.rail-link.active .rail-line-icon {
+  color: var(--sage-deep);
+}
+
+.rail-member-card {
+  margin-top: auto;
+  min-height: 70px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(250, 242, 237, 0.92);
+  border: 1px solid rgba(195, 200, 189, 0.42);
+  border-radius: 18px;
+  box-shadow: 0 16px 34px rgba(52, 44, 36, 0.06);
+}
+
+.rail-member-avatar {
+  width: 46px;
+  height: 46px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rail-member-avatar span {
+  width: 24px;
+  height: 24px;
+  margin-left: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--sage);
+  border: 2px solid var(--surface-card);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.rail-member-avatar span:first-child {
+  margin-left: 0;
+  background: var(--oak);
+}
+
+.rail-member-avatar span:last-child {
+  background: var(--slate);
+}
+
+.rail-member-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.rail-member-card strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-member-card button {
+  width: 28px;
+  height: 28px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.rail-member-card button:hover {
+  background: var(--surface-muted);
 }
 
 .kitch-workspace {
   min-height: 100vh;
-  margin-left: 264px;
+  margin-left: 236px;
   padding: 24px 32px 180px;
 }
 
@@ -2318,7 +2457,7 @@ button {
   position: fixed;
   right: 32px;
   bottom: 0;
-  left: 296px;
+  left: 268px;
   z-index: 50;
   padding: 86px 0 28px;
   pointer-events: none;
@@ -2592,6 +2731,10 @@ button {
   }
 
   .rail-brand {
+    display: none;
+  }
+
+  .rail-member-card {
     display: none;
   }
 
