@@ -8,7 +8,6 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models.google_llm import Gemini
-from google.adk.models.lite_llm import LiteLlm
 from google.genai.types import Content, Part
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, household_members_text
 
@@ -61,6 +60,8 @@ def build_llm_model():
         if "/" in model_name
         else f"{os.environ.get('KITCH_LLM_LITELLM_PREFIX', 'openai')}/{model_name}"
     )
+
+    from google.adk.models.lite_llm import LiteLlm
 
     return LiteLlm(
         model=model_identifier,
