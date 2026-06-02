@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from datetime import timedelta
 from typing import Any, Dict, List
 
@@ -24,20 +25,61 @@ class ZeptoProviderAdapter:
             or os.environ.get("ZEPTO_ACCESS_TOKEN")
         )
         self.enabled = os.environ.get("ZEPTO_MCP_ENABLED", "true").lower() not in {"0", "false", "no"}
+        self.raw_headers = os.environ.get("ZEPTO_MCP_HEADERS")
+        explicit_transport = os.environ.get("ZEPTO_MCP_TRANSPORT", "").strip().lower()
+        self.transport = explicit_transport or ("http" if self.access_token or self.raw_headers else "stdio_remote")
+        self.remote_command = os.environ.get("ZEPTO_MCP_REMOTE_COMMAND", "npx")
+        self.remote_args = self._remote_args()
 
     def _headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}
         if self.access_token:
             headers["Authorization"] = f"Bearer {self.access_token}"
 
-        raw_headers = os.environ.get("ZEPTO_MCP_HEADERS")
-        if raw_headers:
+        if self.raw_headers:
             try:
-                headers.update(json.loads(raw_headers))
+                headers.update(json.loads(self.raw_headers))
             except json.JSONDecodeError:
                 pass
 
         return headers
+
+    def _remote_args(self) -> List[str]:
+        raw_args = os.environ.get("ZEPTO_MCP_REMOTE_ARGS")
+        if not raw_args:
+            return ["-y", "mcp-remote", self.url]
+        try:
+            parsed = json.loads(raw_args)
+            if isinstance(parsed, list) and all(isinstance(arg, str) for arg in parsed):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        return shlex.split(raw_args)
+
+    def status(self) -> Dict[str, Any]:
+        if not self.enabled:
+            state = "disabled"
+            message = "Zepto MCP integration is disabled."
+        elif self.transport in {"stdio", "stdio_remote", "mcp_remote"} and not self.access_token:
+            state = "browser_login_required"
+            message = "Zepto will open a browser OAuth flow on first MCP use."
+        elif self.access_token or self.raw_headers:
+            state = "configured"
+            message = "Zepto MCP credentials are configured."
+        else:
+            state = "not_connected"
+            message = "No Zepto MCP auth token or remote OAuth bridge is configured."
+
+        return {
+            "provider": "zepto",
+            "enabled": self.enabled,
+            "state": state,
+            "message": message,
+            "endpoint": self.url,
+            "transport": self.transport,
+            "auth_mode": "bearer_or_headers" if self.access_token or self.raw_headers else "browser_oauth",
+            "setup_command": f"{self.remote_command} {' '.join(self.remote_args)}" if self.transport in {"stdio", "stdio_remote", "mcp_remote"} else None,
+        }
 
     async def sync_cart(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Replace the Zepto cart with best matches for native cart items."""
@@ -67,6 +109,7 @@ class ZeptoProviderAdapter:
             search_tool = self._find_tool(tools, required=(), preferred=("search", "product", "catalog"))
             add_tool = self._find_tool(tools, required=("cart",), preferred=("add",))
             get_cart_tool = self._find_tool(tools, required=("cart",), preferred=("get", "view", "show", "list"))
+            checkout_context = await self._checkout_context(session, tools)
 
             if not clear_tool:
                 return self._error(
@@ -124,6 +167,8 @@ class ZeptoProviderAdapter:
                 "items": matched_items,
                 "unavailable_items": unavailable_items,
                 "zepto_cart": zepto_cart,
+                "checkout_context": checkout_context,
+                "available_tools": list(tools.keys()),
                 "message": f"Synced {len(matched_items)} items to Zepto cart.",
             }
 
@@ -140,15 +185,17 @@ class ZeptoProviderAdapter:
         except Exception as exc:
             return self._error("mcp_get_cart_failed", f"Zepto MCP cart read failed: {exc}")
 
-    async def place_order(self) -> Dict[str, Any]:
+    async def place_order(self, review: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Place the currently reviewed Zepto cart order through MCP."""
         try:
             async with self._session() as session:
                 tools = await self._list_tools(session)
+                if review:
+                    await self._apply_checkout_selection(session, tools, review)
                 order_tool = self._find_tool(tools, required=("order",), preferred=("place", "checkout", "create"))
                 if not order_tool:
                     return self._error("missing_place_order_tool", "Could not find a Zepto MCP tool to place an order.", available_tools=list(tools.keys()))
-                result = await self._call_tool(session, order_tool, self._build_empty_or_default_args(tools[order_tool]))
+                result = await self._call_tool(session, order_tool, self._build_order_args(tools[order_tool], review or {}))
                 return {"status": "success", "provider": "zepto", "order_result": result}
         except Exception as exc:
             return self._error("mcp_order_failed", f"Zepto MCP order placement failed: {exc}")
@@ -159,9 +206,19 @@ class ZeptoProviderAdapter:
     def _session(self):
         try:
             from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
         except ImportError as exc:
             raise RuntimeError("Python MCP client is not installed. Install the `mcp` package.") from exc
+
+        if self.transport in {"stdio", "stdio_remote", "mcp_remote"}:
+            return self._stdio_remote_session(ClientSession)
+
+        return self._http_session(ClientSession)
+
+    def _http_session(self, ClientSession):
+        try:
+            from mcp.client.streamable_http import streamablehttp_client
+        except ImportError as exc:
+            raise RuntimeError("Python MCP streamable HTTP client is not installed.") from exc
 
         headers = self._headers()
         client_ctx = streamablehttp_client(
@@ -175,6 +232,31 @@ class ZeptoProviderAdapter:
             async def __aenter__(inner_self):
                 inner_self.client = client_ctx
                 inner_self.read, inner_self.write, _ = await inner_self.client.__aenter__()
+                inner_self.session = ClientSession(inner_self.read, inner_self.write)
+                await inner_self.session.__aenter__()
+                await inner_self.session.initialize()
+                return inner_self.session
+
+            async def __aexit__(inner_self, exc_type, exc, tb):
+                await inner_self.session.__aexit__(exc_type, exc, tb)
+                await inner_self.client.__aexit__(exc_type, exc, tb)
+
+        return _SessionContext()
+
+    def _stdio_remote_session(self, ClientSession):
+        try:
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+        except ImportError as exc:
+            raise RuntimeError("Python MCP stdio client is not installed.") from exc
+
+        server_params = StdioServerParameters(command=self.remote_command, args=self.remote_args)
+        client_ctx = stdio_client(server_params)
+
+        class _SessionContext:
+            async def __aenter__(inner_self):
+                inner_self.client = client_ctx
+                inner_self.read, inner_self.write = await inner_self.client.__aenter__()
                 inner_self.session = ClientSession(inner_self.read, inner_self.write)
                 await inner_self.session.__aenter__()
                 await inner_self.session.initialize()
@@ -249,6 +331,81 @@ class ZeptoProviderAdapter:
             args = {"product_id": product_id, "quantity": quantity}
 
         return args
+
+    def _build_selection_args(self, tool: Any, value: Any, kind: str) -> Dict[str, Any]:
+        props = self._schema_properties(tool)
+        args: Dict[str, Any] = {}
+        candidate_keys = (
+            "address_id", "addressId", "selected_address_id", "id"
+        ) if kind == "address" else (
+            "payment_method_id", "paymentMethodId", "payment_method", "method", "id"
+        )
+        for key in candidate_keys:
+            if key in props:
+                args[key] = value
+                break
+        if not args and value:
+            args = {candidate_keys[0]: value}
+        return args
+
+    def _build_order_args(self, tool: Any, review: Dict[str, Any]) -> Dict[str, Any]:
+        args = self._build_empty_or_default_args(tool)
+        props = self._schema_properties(tool)
+        selected_address = review.get("selected_address_id")
+        selected_payment = review.get("selected_payment_method_id")
+
+        for key in ("address_id", "addressId", "selected_address_id"):
+            if key in props and selected_address:
+                args[key] = selected_address
+                break
+
+        for key in ("payment_method_id", "paymentMethodId", "payment_method", "method"):
+            if key in props and selected_payment:
+                args[key] = selected_payment
+                break
+
+        return args
+
+    async def _checkout_context(self, session: Any, tools: Dict[str, Any]) -> Dict[str, Any]:
+        context: Dict[str, Any] = {
+            "addresses": None,
+            "payment_methods": None,
+            "address_tool": None,
+            "payment_tool": None,
+        }
+
+        address_tool = self._find_tool(tools, required=("address",), preferred=("get", "list", "show", "view"))
+        payment_tool = self._find_tool(tools, required=("payment",), preferred=("get", "list", "show", "view"))
+
+        if address_tool:
+            context["address_tool"] = address_tool
+            try:
+                context["addresses"] = await self._call_tool(session, address_tool, self._build_empty_or_default_args(tools[address_tool]))
+            except Exception as exc:
+                context["address_error"] = str(exc)
+
+        if payment_tool:
+            context["payment_tool"] = payment_tool
+            try:
+                context["payment_methods"] = await self._call_tool(session, payment_tool, self._build_empty_or_default_args(tools[payment_tool]))
+            except Exception as exc:
+                context["payment_error"] = str(exc)
+
+        return context
+
+    async def _apply_checkout_selection(self, session: Any, tools: Dict[str, Any], review: Dict[str, Any]) -> None:
+        selected_address = review.get("selected_address_id")
+        selected_payment = review.get("selected_payment_method_id")
+
+        if selected_address:
+            address_tool = self._find_tool(tools, required=("address",), preferred=("select", "set", "update", "choose"))
+            if address_tool:
+                await self._call_tool(session, address_tool, self._build_selection_args(tools[address_tool], selected_address, "address"))
+
+        if selected_payment:
+            payment_tool = self._find_tool(tools, required=("payment",), preferred=("select", "set", "update", "choose"))
+            if payment_tool:
+                await self._call_tool(session, payment_tool, self._build_selection_args(tools[payment_tool], selected_payment, "payment"))
 
     def _build_empty_or_default_args(self, tool: Any) -> Dict[str, Any]:
         props = self._schema_properties(tool)

@@ -1704,6 +1704,17 @@ button {
     grid-column: 1 / -1;
   }
 
+  .grocery-execution-layout,
+  .zepto-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zepto-approval-card,
+  .zepto-raw-response {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .recipe-grocery-layout {
     grid-template-columns: 1fr;
   }
@@ -3078,6 +3089,605 @@ button {
   grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.9fr) minmax(260px, 0.7fr);
 }
 
+.grocery-management-page {
+  gap: 18px;
+}
+
+.grocery-management-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.grocery-management-header h2 {
+  margin: 4px 0 5px;
+  color: var(--sage-deep);
+  font-family: var(--font-head);
+  font-size: clamp(31px, 3vw, 44px);
+  line-height: 1.06;
+}
+
+.grocery-management-header p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.grocery-header-actions,
+.cart-tabs-row,
+.native-cart-meta,
+.workflow-step-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.grocery-header-actions button,
+.cart-tabs-row button,
+.cart-add-row button,
+.zepto-move-card button,
+.quick-actions-card button,
+.native-cart-empty button,
+.confirm-order-btn {
+  min-height: 42px;
+  padding: 0 16px;
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(115, 121, 111, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.grocery-header-actions button:hover,
+.cart-add-row button:hover,
+.quick-actions-card button:hover,
+.native-cart-empty button:hover {
+  color: var(--sage-deep);
+  border-color: rgba(74, 103, 65, 0.34);
+}
+
+.grocery-execution-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+.native-cart-panel,
+.grocery-side-card,
+.zepto-review-workflow {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(195, 200, 189, 0.68);
+  border-radius: 22px;
+  box-shadow: 0 18px 48px rgba(52, 44, 36, 0.08);
+}
+
+.native-cart-panel {
+  overflow: hidden;
+}
+
+.cart-tabs-row {
+  padding: 0 22px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cart-tabs-row button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+
+.cart-tabs-row button.active {
+  color: var(--sage-deep);
+  border-bottom-color: var(--sage);
+}
+
+.cart-tabs-row button span {
+  color: var(--oak);
+}
+
+.native-cart-meta {
+  padding: 20px 22px 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.native-cart-meta strong {
+  color: var(--ink);
+}
+
+.native-cart-empty {
+  margin: 0 22px 22px;
+  padding: 24px;
+  color: var(--ink-soft);
+  background: rgba(250, 242, 237, 0.56);
+  border: 1px dashed rgba(115, 121, 111, 0.26);
+  border-radius: 18px;
+}
+
+.native-cart-empty strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 20px;
+}
+
+.native-cart-groups {
+  padding: 0 22px 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.native-cart-group {
+  overflow: hidden;
+  border: 1px solid rgba(195, 200, 189, 0.62);
+  border-radius: 18px;
+}
+
+.native-cart-group-header,
+.native-cart-row {
+  display: grid;
+  grid-template-columns: 36px minmax(180px, 1fr) minmax(220px, 0.8fr) 86px 94px 38px;
+  gap: 12px;
+  align-items: center;
+}
+
+.native-cart-group-header {
+  padding: 14px 16px;
+  background: linear-gradient(90deg, rgba(250, 242, 237, 0.78), rgba(255, 255, 255, 0.8));
+}
+
+.native-cart-group-header h3 {
+  grid-column: 1 / 4;
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 16px;
+}
+
+.native-cart-group-header h3 span {
+  color: var(--muted);
+}
+
+.native-cart-group-header > div {
+  grid-column: 4 / 7;
+  display: grid;
+  grid-template-columns: 86px 94px 38px;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.native-cart-row {
+  min-height: 64px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.native-cart-row.checked,
+.native-cart-row.stocked {
+  opacity: 0.68;
+}
+
+.native-cart-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--sage);
+}
+
+.native-cart-name {
+  min-width: 0;
+}
+
+.native-cart-name strong {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.native-cart-name span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.native-cart-quantity {
+  display: grid;
+  grid-template-columns: 30px 54px 30px minmax(72px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.native-cart-quantity button,
+.native-cart-actions button {
+  height: 30px;
+  color: var(--sage-deep);
+  background: rgba(250, 242, 237, 0.74);
+  border: 1px solid rgba(115, 121, 111, 0.18);
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.native-cart-quantity input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(115, 121, 111, 0.18);
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.native-cart-have,
+.native-cart-buy {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.native-cart-buy {
+  color: var(--ink);
+}
+
+.native-cart-actions button {
+  width: 30px;
+  color: var(--danger);
+}
+
+.cart-add-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 80px 100px 150px auto;
+  gap: 8px;
+  padding: 0 22px 22px;
+}
+
+.cart-add-row input,
+.cart-add-row select,
+.zepto-approval-card select {
+  min-height: 42px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(115, 121, 111, 0.18);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cart-add-row button,
+.zepto-move-card button,
+.confirm-order-btn {
+  color: #fff;
+  background: linear-gradient(145deg, var(--sage), var(--sage-deep));
+  border-color: transparent;
+}
+
+.grocery-execution-sidebar {
+  display: grid;
+  gap: 14px;
+}
+
+.grocery-side-card {
+  padding: 18px;
+}
+
+.grocery-side-card h3 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 18px;
+}
+
+.grocery-side-card p {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.grocery-side-card p strong {
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 24px;
+}
+
+.grocery-side-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.summary-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 0;
+  color: var(--muted);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.summary-total-row strong {
+  color: var(--ink);
+}
+
+.missing-card {
+  background: rgba(224, 239, 217, 0.72);
+}
+
+.zepto-move-card {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(245, 238, 255, 0.84));
+}
+
+.zepto-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.zepto-card-title span {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.zepto-card-title strong {
+  color: #6f3ec5;
+  font-size: 20px;
+}
+
+.zepto-connection-state {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(115, 121, 111, 0.14);
+  border-radius: 12px;
+}
+
+.zepto-connection-state b {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.zepto-connection-state span {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.zepto-move-card code {
+  display: block;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  padding: 9px;
+  color: var(--sage-deep);
+  background: rgba(255, 255, 255, 0.76);
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.zepto-move-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.zepto-move-card button,
+.confirm-order-btn {
+  width: 100%;
+}
+
+.zepto-move-card button:disabled,
+.confirm-order-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.quick-actions-card {
+  display: grid;
+  gap: 8px;
+}
+
+.quick-actions-card button {
+  justify-content: flex-start;
+  width: 100%;
+  background: transparent;
+}
+
+.zepto-review-workflow {
+  padding: 20px;
+}
+
+.workflow-step-row {
+  margin-bottom: 16px;
+}
+
+.workflow-step-row span {
+  padding: 8px 12px;
+  color: var(--muted);
+  background: rgba(250, 242, 237, 0.7);
+  border: 1px solid rgba(115, 121, 111, 0.14);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.workflow-step-row span.active {
+  color: var(--sage-deep);
+  background: rgba(202, 236, 188, 0.45);
+}
+
+.zepto-review-empty {
+  padding: 20px;
+  color: var(--ink-soft);
+  background: rgba(250, 242, 237, 0.6);
+  border: 1px dashed rgba(115, 121, 111, 0.24);
+  border-radius: 16px;
+}
+
+.zepto-review-empty strong {
+  color: var(--ink);
+}
+
+.zepto-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 14px;
+}
+
+.zepto-review-status,
+.zepto-review-list,
+.zepto-approval-card,
+.zepto-raw-response {
+  padding: 16px;
+  background: rgba(250, 242, 237, 0.44);
+  border: 1px solid rgba(195, 200, 189, 0.58);
+  border-radius: 16px;
+}
+
+.zepto-review-status.success {
+  background: rgba(224, 239, 217, 0.55);
+}
+
+.zepto-review-status.error {
+  background: var(--danger-soft);
+}
+
+.zepto-review-status h3,
+.zepto-review-list h3,
+.zepto-approval-card h3 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: 18px;
+}
+
+.zepto-review-status p,
+.zepto-review-list p,
+.zepto-approval-card p {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.zepto-product-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.zepto-product-row span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.zepto-product-row strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.zepto-product-row.unavailable strong {
+  color: var(--danger);
+}
+
+.zepto-approval-card {
+  grid-row: span 2;
+  display: grid;
+  gap: 12px;
+}
+
+.zepto-approval-card label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.approval-checkbox {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+}
+
+.approval-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--sage);
+}
+
+.zepto-blocker-list {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  color: var(--danger);
+  background: rgba(255, 246, 241, 0.88);
+  border: 1px solid rgba(188, 84, 52, 0.22);
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.zepto-blocker-list strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.zepto-raw-response {
+  grid-column: 1 / 3;
+}
+
+.zepto-raw-response summary {
+  cursor: pointer;
+  color: var(--sage-deep);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.zepto-raw-response pre {
+  overflow: auto;
+  max-height: 260px;
+  margin: 12px 0 0;
+  padding: 12px;
+  color: #e6f4ea;
+  background: var(--cast-iron);
+  border-radius: 12px;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
 .recipe-grocery-page {
   gap: 14px;
 }
@@ -4013,6 +4623,17 @@ button {
     grid-column: 1 / -1;
   }
 
+  .grocery-execution-layout,
+  .zepto-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zepto-approval-card,
+  .zepto-raw-response {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .recipe-grocery-layout {
     grid-template-columns: 1fr;
   }
@@ -4049,9 +4670,11 @@ button {
   }
 
   .rail-link {
-    flex: 1 0 150px;
+    flex: 0 0 auto;
     justify-content: center;
     min-height: 42px;
+    min-width: 108px;
+    padding: 0 10px;
   }
 
   .kitch-workspace {
@@ -4196,6 +4819,63 @@ button {
 
   .recipe-empty-visual {
     min-height: 240px;
+  }
+
+  .grocery-management-header {
+    flex-direction: column;
+  }
+
+  .grocery-header-actions {
+    width: 100%;
+  }
+
+  .grocery-header-actions button {
+    flex: 1;
+  }
+
+  .grocery-execution-layout,
+  .zepto-review-grid {
+    gap: 14px;
+  }
+
+  .native-cart-group-header {
+    display: none;
+  }
+
+  .native-cart-row {
+    grid-template-columns: 28px minmax(0, 1fr) 34px;
+    gap: 10px;
+    align-items: start;
+  }
+
+  .native-cart-name,
+  .native-cart-quantity,
+  .native-cart-have,
+  .native-cart-buy {
+    grid-column: 2 / 3;
+  }
+
+  .native-cart-actions {
+    grid-column: 3 / 4;
+    grid-row: 1 / 3;
+  }
+
+  .native-cart-quantity {
+    grid-template-columns: 30px 54px 30px minmax(82px, 1fr);
+  }
+
+  .native-cart-have::before {
+    content: "Have: ";
+    color: var(--muted);
+  }
+
+  .native-cart-buy::before {
+    content: "To buy: ";
+    color: var(--muted);
+  }
+
+  .cart-add-row {
+    grid-template-columns: 1fr;
   }
 
   .calendar-board {

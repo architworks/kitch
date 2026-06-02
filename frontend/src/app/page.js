@@ -103,11 +103,57 @@ const getRecipeSteps = (recipe) => {
   }).filter(step => step.body || step.title);
 };
 
+const formatCartQuantity = (amount, unit) => {
+  const amountText = `${amount ?? ""}`.trim();
+  const unitText = `${unit || ""}`.trim();
+  if (!amountText && !unitText) return "—";
+  if (unitText.toLowerCase() === "to taste") return "To taste";
+  if (unitText.toLowerCase() === "as needed") return "As needed";
+  return [amountText, unitText].filter(Boolean).join(" ");
+};
+
+const parseJsonText = (value) => {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+const collectObjectsWithAnyKey = (value, keys, results = []) => {
+  const parsed = parseJsonText(value);
+  if (Array.isArray(parsed)) {
+    parsed.forEach(item => collectObjectsWithAnyKey(item, keys, results));
+    return results;
+  }
+  if (!parsed || typeof parsed !== "object") return results;
+
+  if (typeof parsed.text === "string") {
+    collectObjectsWithAnyKey(parsed.text, keys, results);
+  }
+
+  const lowerKeys = Object.keys(parsed).map(key => key.toLowerCase());
+  if (keys.some(key => lowerKeys.includes(key.toLowerCase()))) {
+    results.push(parsed);
+  }
+
+  Object.values(parsed).forEach(child => collectObjectsWithAnyKey(child, keys, results));
+  return results;
+};
+
+const optionValue = (option, keys, fallback = "") => {
+  for (const key of keys) {
+    if (option?.[key]) return option[key];
+  }
+  return fallback;
+};
+
 const INITIAL_CHAT = [];
 
 export default function Home() {
   // Application core state variables
-  const [activeTab, setActiveTab] = useState("planner"); // planner, analytics, groceries
+  const [activeTab, setActiveTab] = useState("planner");
   const [selectedPlannerDay, setSelectedPlannerDay] = useState("Monday");
   const [currentMealSlot, setCurrentMealSlot] = useState(DEFAULT_MEAL_SLOT);
   const [expandedMealKey, setExpandedMealKey] = useState(`Monday-${DEFAULT_MEAL_SLOT}`);
@@ -129,8 +175,12 @@ export default function Home() {
   const [isChatTyping, setIsChatTyping] = useState(false);
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
-  const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [zeptoCartReview, setZeptoCartReview] = useState(null);
+  const [zeptoConnectionStatus, setZeptoConnectionStatus] = useState(null);
+  const [selectedZeptoAddress, setSelectedZeptoAddress] = useState("");
+  const [selectedZeptoPaymentMethod, setSelectedZeptoPaymentMethod] = useState("");
+  const [zeptoReviewAcknowledged, setZeptoReviewAcknowledged] = useState(false);
+  const [isUpdatingZeptoReview, setIsUpdatingZeptoReview] = useState(false);
   const [isZeptoSyncing, setIsZeptoSyncing] = useState(false);
   const [isPlacingZeptoOrder, setIsPlacingZeptoOrder] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
@@ -145,12 +195,9 @@ export default function Home() {
 
   // Custom ingredient add inputs
   const [groceryCustomName, setGroceryCustomName] = useState("");
+  const [groceryCustomAmount, setGroceryCustomAmount] = useState(1);
+  const [groceryCustomUnit, setGroceryCustomUnit] = useState("piece");
   const [groceryCustomCat, setGroceryCustomCat] = useState("Fresh Produce");
-
-  // Pantry add inputs
-  const [pantryAddName, setPantryAddName] = useState("");
-  const [pantryAddAmount, setPantryAddAmount] = useState(1);
-  const [pantryAddUnit, setPantryAddUnit] = useState("piece");
 
   const applyLiveState = (userName, data) => {
     if (data.pantry_stock) {
@@ -204,6 +251,27 @@ export default function Home() {
     }
   };
 
+  const syncZeptoStatus = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/grocery/zepto/status"));
+      if (!res.ok) {
+        throw new Error(`Zepto status failed with status ${res.status}`);
+      }
+      const data = await res.json();
+      setZeptoConnectionStatus(data);
+      return data;
+    } catch (e) {
+      console.error("Failed to sync Zepto status", e);
+      const status = {
+        provider: "zepto",
+        state: "failed",
+        message: "Could not contact the backend Zepto status endpoint."
+      };
+      setZeptoConnectionStatus(status);
+      return status;
+    }
+  };
+
   const syncLiveState = async (userName) => {
     try {
       const data = await fetchLiveState(userName);
@@ -236,6 +304,14 @@ export default function Home() {
       ignore = true;
     };
   }, [activeUser]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries") return undefined;
+    const timer = window.setTimeout(() => {
+      syncZeptoStatus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -320,61 +396,6 @@ export default function Home() {
     triggerBannerAlert(`Switched active profile to ${userName}. Viewing macro logs for ${userName}.`);
   };
 
-  const addPantryItem = async (name, amount, unit = "piece") => {
-    if (!name.trim()) return;
-    const key = name.toLowerCase().trim();
-    
-    setPantryStock(prev => {
-      const updated = [...prev];
-      const existing = updated.find(i => i.name.toLowerCase() === key);
-      
-      if (existing) {
-        existing.amount += parseFloat(amount) || 1;
-      } else {
-        updated.push({
-          name: name.trim(),
-          amount: parseFloat(amount) || 1,
-          unit
-        });
-      }
-      return updated;
-    });
-
-    try {
-      await fetch(apiUrl("/api/pantry/add"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_name: activeUser,
-          name: name.trim(),
-          amount: parseFloat(amount) || 1,
-          unit
-        })
-      });
-    } catch (e) {
-      console.error("Failed to add pantry item to DB", e);
-    }
-  };
-
-  const removePantryItem = async (idx) => {
-    const item = pantryStock[idx];
-    if (!item) return;
-
-    setPantryStock(prev => {
-      const updated = [...prev];
-      updated.splice(idx, 1);
-      return updated;
-    });
-
-    try {
-      await fetch(apiUrl(`/api/pantry/remove/${activeUser}/${encodeURIComponent(item.name)}`), {
-        method: "DELETE"
-      });
-    } catch (e) {
-      console.error("Failed to remove pantry item from DB", e);
-    }
-  };
-
   const toggleGroceryItem = async (item) => {
     if (!item || item.alreadyStocked) return;
     const nextChecked = !item.checked;
@@ -404,14 +425,81 @@ export default function Home() {
     }
   };
 
-  const addCustomGroceryItem = async (name, category) => {
+  const updateGroceryCartItemDetails = async (item, updates) => {
+    if (!item) return;
+
+    setCustomGroceryItems(prev => prev.map(current => (
+      current.id === item.id
+        ? { ...current, ...updates }
+        : current
+    )));
+
+    if (!item.id) return;
+
+    try {
+      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.grocery_cart) {
+          setCustomGroceryItems(data.grocery_cart);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to update grocery cart item", e);
+    }
+  };
+
+  const deleteGroceryCartItem = async (item) => {
+    if (!item) return;
+
+    setCustomGroceryItems(prev => prev.filter(current => current.id !== item.id));
+    if (!item.id) return;
+
+    try {
+      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.grocery_cart) {
+          setCustomGroceryItems(data.grocery_cart);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to delete grocery cart item", e);
+    }
+  };
+
+  const clearPlannedGroceryRows = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/grocery/cart/planned"), {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.grocery_cart) {
+          setCustomGroceryItems(data.grocery_cart);
+        }
+      }
+      triggerBannerAlert("Cleared recipe-planned grocery rows.");
+    } catch (e) {
+      console.error("Failed to clear planned grocery rows", e);
+      triggerBannerAlert("Could not clear planned grocery rows.");
+    }
+  };
+
+  const addCustomGroceryItem = async (name, category, amount = 1, unit = "piece") => {
     if (!name.trim()) return;
 
     const optimisticItem = {
       id: `pending-${Date.now()}`,
       name: name.trim(),
-      amount: 1,
-      unit: "piece",
+      amount: parseFloat(amount) || 1,
+      unit: unit || "piece",
       category,
       source: "manual",
       checked: false,
@@ -421,6 +509,8 @@ export default function Home() {
 
     setCustomGroceryItems(prev => [...prev, optimisticItem]);
     setGroceryCustomName("");
+    setGroceryCustomAmount(1);
+    setGroceryCustomUnit("piece");
     triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
 
     try {
@@ -455,39 +545,81 @@ export default function Home() {
         body: JSON.stringify({ cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean) })
       });
       const data = await res.json();
-      setZeptoCartReview(data);
-      setMcpModalOpen(true);
+      const review = data.review || data;
+      setZeptoCartReview(review);
+      setSelectedZeptoAddress(review.selected_address_id || "");
+      setSelectedZeptoPaymentMethod(review.selected_payment_method_id || "");
+      setZeptoReviewAcknowledged(Boolean(review.order_review_acknowledged));
       triggerBannerAlert(data.status === "success" ? "Zepto cart sync completed for review." : "Zepto cart sync needs attention.");
     } catch (e) {
       console.error("Failed to sync Zepto cart", e);
       setZeptoCartReview({
         status: "error",
-        result: {
-          code: "frontend_sync_failed",
-          message: "Failed to contact the backend Zepto cart sync endpoint."
-        }
+        message: "Failed to contact the backend Zepto cart sync endpoint.",
+        matched_items: [],
+        unavailable_items: []
       });
-      setMcpModalOpen(true);
     } finally {
       setIsZeptoSyncing(false);
+      syncZeptoStatus();
     }
   };
 
+  const updateZeptoReview = async (updates) => {
+    if (!zeptoCartReview?.review_id) return null;
+    setIsUpdatingZeptoReview(true);
+    try {
+      const res = await fetch(apiUrl(`/api/grocery/zepto/review/${zeptoCartReview.review_id}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (res.ok && data.review) {
+        setZeptoCartReview(data.review);
+        setSelectedZeptoAddress(data.review.selected_address_id || "");
+        setSelectedZeptoPaymentMethod(data.review.selected_payment_method_id || "");
+        setZeptoReviewAcknowledged(Boolean(data.review.order_review_acknowledged));
+        return data.review;
+      }
+    } catch (e) {
+      console.error("Failed to update Zepto review", e);
+      triggerBannerAlert("Could not update Zepto review selection.");
+    } finally {
+      setIsUpdatingZeptoReview(false);
+    }
+    return null;
+  };
+
   const placeZeptoOrder = async () => {
-    if (!zeptoCartReview?.confirmation_token) {
+    if (!zeptoCartReview?.review_id || !zeptoCartReview?.confirmation_token) {
       triggerBannerAlert("Final Zepto approval token is missing. Sync the cart again before placing the order.");
+      return;
+    }
+    if (!zeptoReviewAcknowledged) {
+      triggerBannerAlert("Review and acknowledge the exact Zepto cart before confirming the order.");
       return;
     }
 
     setIsPlacingZeptoOrder(true);
     try {
+      const latestReview = await updateZeptoReview({
+        selected_address_id: selectedZeptoAddress || null,
+        selected_payment_method_id: selectedZeptoPaymentMethod || null,
+        order_review_acknowledged: true
+      }) || zeptoCartReview;
       const res = await fetch(apiUrl("/api/grocery/zepto/place-order"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmation_token: zeptoCartReview.confirmation_token })
+        body: JSON.stringify({
+          review_id: latestReview.review_id,
+          confirmation_token: latestReview.confirmation_token,
+          approved_snapshot_hash: latestReview.snapshot_hash,
+          order_review_acknowledged: true
+        })
       });
       const data = await res.json();
-      setZeptoCartReview(data);
+      setZeptoCartReview(data.review || data);
       triggerBannerAlert(data.status === "success" ? "Zepto order placement request completed." : "Zepto order could not be placed.");
     } catch (e) {
       console.error("Failed to place Zepto order", e);
@@ -819,12 +951,42 @@ export default function Home() {
     : [];
   const recipeNeededCartItems = recipeCartItems.filter(item => !item.alreadyStocked);
 
-  const zeptoResult = zeptoCartReview?.result || {};
-  const zeptoStatus = zeptoCartReview?.status || zeptoResult.status;
-  const zeptoMatchedItems = Array.isArray(zeptoResult.items) ? zeptoResult.items : [];
-  const zeptoUnavailableItems = Array.isArray(zeptoResult.unavailable_items) ? zeptoResult.unavailable_items : [];
-  const zeptoCartDetails = zeptoResult.zepto_cart || zeptoResult.order_result || zeptoResult;
-  const canPlaceZeptoOrder = zeptoStatus === "success" && zeptoMatchedItems.length > 0 && Boolean(zeptoCartReview?.confirmation_token);
+  const groupedGroceryCart = groceryList.reduce((groups, item) => {
+    const category = item.category || "General";
+    if (!groups[category]) groups[category] = [];
+    groups[category].push(item);
+    return groups;
+  }, {});
+  const groceryCategoryCount = Object.keys(groupedGroceryCart).length;
+  const stockedCount = groceryList.filter(item => item.alreadyStocked).length;
+  const pendingBuyCount = checkoutItems.length;
+  const zeptoStatus = zeptoCartReview?.status;
+  const zeptoMatchedItems = Array.isArray(zeptoCartReview?.matched_items)
+    ? zeptoCartReview.matched_items
+    : Array.isArray(zeptoCartReview?.result?.items) ? zeptoCartReview.result.items : [];
+  const zeptoUnavailableItems = Array.isArray(zeptoCartReview?.unavailable_items)
+    ? zeptoCartReview.unavailable_items
+    : Array.isArray(zeptoCartReview?.result?.unavailable_items) ? zeptoCartReview.result.unavailable_items : [];
+  const zeptoCartDetails = zeptoCartReview?.zepto_cart || zeptoCartReview?.result?.zepto_cart || zeptoCartReview?.result || null;
+  const zeptoCheckoutContext = zeptoCartReview?.checkout_context || zeptoCartReview?.result?.checkout_context || {};
+  const zeptoAddressOptions = collectObjectsWithAnyKey(zeptoCheckoutContext.addresses, ["address", "address_line", "addressLine", "id"]);
+  const zeptoPaymentOptions = collectObjectsWithAnyKey(zeptoCheckoutContext.payment_methods, ["payment", "method", "payment_method", "id"]);
+  const zeptoOrderBlockers = Array.isArray(zeptoCartReview?.order_blockers) ? zeptoCartReview.order_blockers : [];
+  const canPlaceZeptoOrder = zeptoCartReview?.can_place_order
+    && Boolean(zeptoCartReview?.confirmation_token)
+    && Boolean(zeptoCartReview?.snapshot_hash)
+    && zeptoOrderBlockers.length === 0
+    && zeptoReviewAcknowledged
+    && !isUpdatingZeptoReview;
+  const zeptoState = zeptoConnectionStatus?.state || "unknown";
+  const zeptoStatusLabel = {
+    configured: "Configured",
+    browser_login_required: "Browser login required",
+    not_connected: "Not connected",
+    disabled: "Disabled",
+    failed: "Failed",
+    unknown: "Unknown"
+  }[zeptoState] || zeptoState;
 
   const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
   const firstPlannedFocusMeal = WEEK_DAYS.map(day => ({
@@ -920,6 +1082,7 @@ export default function Home() {
         <nav className="rail-nav">
           {[
             ["planner", "household", "Household"],
+            ["recipes", "recipes", "Recipes"],
             ["groceries", "pantry", "Groceries"],
             ["analytics", "nutrition", "Nutrition"]
           ].map(([key, icon, label]) => (
@@ -934,6 +1097,9 @@ export default function Home() {
                 )}
                 {icon === "pantry" && (
                   <svg viewBox="0 0 24 24"><path d="M6 8h12l-1 12H7L6 8Zm2-4h8l2 4H6l2-4Zm2 8h4"/></svg>
+                )}
+                {icon === "recipes" && (
+                  <svg viewBox="0 0 24 24"><path d="M6 4h10a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2V4Zm3 4h6M9 12h6M9 16h4"/></svg>
                 )}
                 {icon === "nutrition" && (
                   <svg viewBox="0 0 24 24"><path d="M4 19h16M5 15l4-4 3 3 6-8M5 5v14"/></svg>
@@ -1211,7 +1377,7 @@ export default function Home() {
             </section>
           )}
 
-          {activeTab === "groceries" && (
+          {activeTab === "recipes" && (
             <section className="page-view recipe-grocery-page" aria-label="Recipe and grocery planning">
               <button type="button" className="back-to-today-btn" onClick={() => setActiveTab("planner")}>
                 ← Back to Today
@@ -1409,45 +1575,15 @@ export default function Home() {
                       className="add-all-groceries-btn"
                       onClick={() => {
                         if (recipeCartItems.length > 0) {
-                          syncNativeCartToZepto();
+                          setActiveTab("groceries");
                         } else {
                           sendChatMessage(`Add groceries for ${activeRecipeTitle} to the native grocery cart`);
                         }
                       }}
-                      disabled={isZeptoSyncing || (!activeRecipeTitle && recipeCartItems.length === 0)}
+                      disabled={!activeRecipeTitle && recipeCartItems.length === 0}
                     >
-                      {recipeCartItems.length > 0 ? "Sync eligible to Zepto" : "Add all to groceries"}
+                      {recipeCartItems.length > 0 ? "View grocery cart" : "Add all to groceries"}
                     </button>
-
-                    <div className="recipe-management-grid">
-                      <div className="compact-pantry-card">
-                        <h4>Pantry Stock</h4>
-                        <p>Available items are used by Kitch before adding groceries.</p>
-                        <div className="pantry-add-box compact">
-                          <input id="pantry-item-name" name="pantry-item-name" type="text" placeholder="Item name..." value={pantryAddName} onChange={(e) => setPantryAddName(e.target.value)} />
-                          <div className="pantry-amount-row">
-                            <input id="pantry-item-qty" name="pantry-item-qty" type="number" placeholder="Qty" value={pantryAddAmount} min="0.1" step="0.1" onChange={(e) => setPantryAddAmount(parseFloat(e.target.value) || 1)} />
-                            <input id="pantry-item-unit" name="pantry-item-unit" type="text" placeholder="Unit" value={pantryAddUnit} onChange={(e) => setPantryAddUnit(e.target.value)} />
-                          </div>
-                          <button type="button" onClick={() => { addPantryItem(pantryAddName, pantryAddAmount, pantryAddUnit); triggerBannerAlert(`Added ${pantryAddAmount} ${pantryAddUnit} of "${pantryAddName}" to pantry.`); setPantryAddName(""); }}>Add Stock</button>
-                        </div>
-                      </div>
-
-                      <div className="compact-pantry-card">
-                        <h4>Manual Cart Item</h4>
-                        <p>Add household grocery rows that are not recipe-derived.</p>
-                        <div className="grocery-add-form compact">
-                          <input id="custom-grocery-name" name="custom-grocery-name" type="text" placeholder="E.g. Sparkling water" value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
-                          <select id="custom-grocery-category" name="custom-grocery-category" value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
-                            <option value="Fresh Produce">Fresh Produce</option>
-                            <option value="Proteins & Dairy">Proteins & Dairy</option>
-                            <option value="Grains & Bakery">Grains & Bakery</option>
-                            <option value="Pantry & Spices">Pantry & Spices</option>
-                          </select>
-                          <button type="button" className="grocery-add-btn" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}>Add to Cart</button>
-                        </div>
-                      </div>
-                    </div>
                   </aside>
                 </div>
               ) : (
@@ -1470,6 +1606,311 @@ export default function Home() {
                   </div>
                 </section>
               )}
+            </section>
+          )}
+
+          {activeTab === "groceries" && (
+            <section className="page-view grocery-management-page" aria-label="Native grocery cart and Zepto checkout">
+              <div className="grocery-management-header">
+                <div>
+                  <span className="eyebrow">Grocery Management</span>
+                  <h2>Native cart review</h2>
+                  <p>Review Kitch’s household cart before moving eligible items to Zepto.</p>
+                </div>
+                <div className="grocery-header-actions">
+                  <button type="button" onClick={() => setActiveTab("recipes")}>Import from recipe</button>
+                  <button type="button" onClick={() => setChatInput("Add groceries for tomorrow to the native grocery cart")}>Ask Kitch</button>
+                </div>
+              </div>
+
+              <div className="grocery-execution-layout">
+                <section className="native-cart-panel">
+                  <div className="cart-tabs-row">
+                    <button type="button" className="active">My List <span>{totalCount}</span></button>
+                    <button type="button">Pantry <span>{pantryStock.length}</span></button>
+                    <button type="button" disabled>Buy Again</button>
+                    <button type="button" disabled>Past Orders</button>
+                  </div>
+
+                  <div className="native-cart-meta">
+                    <strong>{totalCount} items</strong>
+                    <span>{groceryCategoryCount} categories</span>
+                    <span>{pendingBuyCount} to buy</span>
+                  </div>
+
+                  {totalCount === 0 ? (
+                    <div className="native-cart-empty">
+                      <strong>Your native grocery cart is empty.</strong>
+                      <p>Ask Kitch to plan groceries from a recipe or add a custom household item.</p>
+                      <button type="button" onClick={() => setActiveTab("recipes")}>Open Recipes</button>
+                    </div>
+                  ) : (
+                    <div className="native-cart-groups">
+                      {Object.entries(groupedGroceryCart).map(([category, items]) => (
+                        <article key={category} className="native-cart-group">
+                          <div className="native-cart-group-header">
+                            <h3>{category} <span>({items.length})</span></h3>
+                            <div>
+                              <span>Needed</span>
+                              <span>Have</span>
+                              <span>To buy</span>
+                            </div>
+                          </div>
+
+                          {items.map((item, index) => {
+                            const itemAmount = Number(item.amount) || 1;
+                            const haveText = item.alreadyStocked ? formatCartQuantity(item.amount, item.unit) : "0";
+                            const toBuyText = item.checked || item.alreadyStocked ? "—" : formatCartQuantity(item.amount, item.unit);
+                            return (
+                              <div key={item.id || `${item.name}-${index}`} className={`native-cart-row ${item.checked ? "checked" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
+                                <label className="native-cart-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.checked}
+                                    disabled={item.alreadyStocked}
+                                    onChange={() => toggleGroceryItem(item)}
+                                  />
+                                </label>
+                                <div className="native-cart-name">
+                                  <strong>{item.name}</strong>
+                                  <span>{item.source === "manual" ? "Manual" : "Recipe planned"}{item.stockNote ? ` · ${item.stockNote}` : ""}</span>
+                                </div>
+                                <div className="native-cart-quantity">
+                                  <button type="button" onClick={() => updateGroceryCartItemDetails(item, { amount: Math.max(0.1, itemAmount - 1) })}>−</button>
+                                  <input
+                                    aria-label={`Quantity for ${item.name}`}
+                                    type="number"
+                                    min="0.1"
+                                    step="0.1"
+                                    value={item.amount}
+                                    onChange={(e) => {
+                                      const nextAmount = parseFloat(e.target.value) || 1;
+                                      setCustomGroceryItems(prev => prev.map(current => current.id === item.id ? { ...current, amount: nextAmount } : current));
+                                    }}
+                                    onBlur={(e) => updateGroceryCartItemDetails(item, { amount: parseFloat(e.target.value) || 1 })}
+                                  />
+                                  <button type="button" onClick={() => updateGroceryCartItemDetails(item, { amount: itemAmount + 1 })}>+</button>
+                                  <input
+                                    aria-label={`Unit for ${item.name}`}
+                                    type="text"
+                                    value={item.unit || ""}
+                                    onChange={(e) => setCustomGroceryItems(prev => prev.map(current => current.id === item.id ? { ...current, unit: e.target.value } : current))}
+                                    onBlur={(e) => updateGroceryCartItemDetails(item, { unit: e.target.value || "piece" })}
+                                  />
+                                </div>
+                                <span className="native-cart-have">{haveText}</span>
+                                <span className="native-cart-buy">{toBuyText}</span>
+                                <div className="native-cart-actions">
+                                  <button type="button" aria-label={`Delete ${item.name}`} onClick={() => deleteGroceryCartItem(item)}>×</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="cart-add-row">
+                    <input type="text" placeholder="Add custom item..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
+                    <input type="number" min="0.1" step="0.1" value={groceryCustomAmount} onChange={(e) => setGroceryCustomAmount(parseFloat(e.target.value) || 1)} />
+                    <input type="text" value={groceryCustomUnit} onChange={(e) => setGroceryCustomUnit(e.target.value)} />
+                    <select value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
+                      <option value="Fresh Produce">Fresh Produce</option>
+                      <option value="Proteins & Dairy">Proteins & Dairy</option>
+                      <option value="Grains & Bakery">Grains & Bakery</option>
+                      <option value="Pantry & Spices">Pantry & Spices</option>
+                      <option value="General">General</option>
+                    </select>
+                    <button type="button" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
+                  </div>
+                </section>
+
+                <aside className="grocery-execution-sidebar">
+                  <article className="grocery-side-card list-summary-card">
+                    <h3>List summary</h3>
+                    <p><strong>{totalCount}</strong> items</p>
+                    <div className="summary-total-row">
+                      <span>Est. total</span>
+                      <strong>{zeptoCartReview ? "From Zepto response" : "Not synced"}</strong>
+                    </div>
+                    <small>Prices, fees, and availability appear only after Zepto MCP sync.</small>
+                  </article>
+
+                  <article className="grocery-side-card missing-card">
+                    <h3>Missing from pantry</h3>
+                    <p><strong>{pendingBuyCount}</strong> items to buy</p>
+                    <small>{stockedCount} rows are already stocked or pantry-covered.</small>
+                  </article>
+
+                  <article className="grocery-side-card zepto-move-card">
+                    <div className="zepto-card-title">
+                      <span>Move to Zepto</span>
+                      <strong>zepto</strong>
+                    </div>
+                    <div className={`zepto-connection-state ${zeptoState}`}>
+                      <b>{zeptoStatusLabel}</b>
+                      <span>{zeptoConnectionStatus?.message || "Zepto status has not been checked yet."}</span>
+                    </div>
+                    {zeptoConnectionStatus?.setup_command && (
+                      <code>{zeptoConnectionStatus.setup_command}</code>
+                    )}
+                    <ul>
+                      <li>Instant delivery depends on live Zepto availability.</li>
+                      <li>Native cart rows stay as Kitch’s source of truth.</li>
+                      <li>Sync replaces the current Zepto cart.</li>
+                    </ul>
+                    <button type="button" onClick={syncNativeCartToZepto} disabled={isZeptoSyncing || checkoutItems.length === 0}>
+                      {isZeptoSyncing ? "Moving to Zepto..." : "Move to Zepto cart"}
+                    </button>
+                    <small>Browser login may open on first Zepto MCP use.</small>
+                  </article>
+
+                  <article className="grocery-side-card quick-actions-card">
+                    <h3>Quick actions</h3>
+                    <button type="button" onClick={() => setCustomGroceryItems(prev => [...prev].sort((a, b) => (a.category || "").localeCompare(b.category || "")))}>Sort by category</button>
+                    <button type="button" onClick={() => setCustomGroceryItems(prev => prev.map(item => item.alreadyStocked ? { ...item, checked: true } : item))}>Check off pantry-covered rows</button>
+                    <button type="button" onClick={clearPlannedGroceryRows}>Clear planned rows</button>
+                  </article>
+                </aside>
+              </div>
+
+              <section className="zepto-review-workflow" aria-label="Zepto cart review and approval">
+                <div className="workflow-step-row">
+                  <span className="active">1 Native cart</span>
+                  <span className={zeptoCartReview ? "active" : ""}>2 Zepto cart</span>
+                  <span className={zeptoCartReview?.can_place_order ? "active" : ""}>3 Order review</span>
+                  <span className={canPlaceZeptoOrder ? "active" : ""}>4 Confirm order</span>
+                </div>
+
+                {!zeptoCartReview ? (
+                  <div className="zepto-review-empty">
+                    <strong>No Zepto cart review yet.</strong>
+                    <p>Move eligible native cart rows to Zepto to see matched products, unavailable items, address/payment state, and the final approval button.</p>
+                  </div>
+                ) : (
+                  <div className="zepto-review-grid">
+                    <article className={`zepto-review-status ${zeptoStatus === "success" ? "success" : "error"}`}>
+                      <span className="eyebrow">Zepto cart</span>
+                      <h3>{zeptoStatus === "success" ? "Cart ready for review" : "Sync needs attention"}</h3>
+                      <p>{zeptoCartReview.message || "Review the latest Zepto MCP result."}</p>
+                      <div className="zepto-review-stats">
+                        <div><strong>{zeptoMatchedItems.length}</strong><span>Matched</span></div>
+                        <div><strong>{zeptoUnavailableItems.length}</strong><span>Unavailable</span></div>
+                      </div>
+                    </article>
+
+                    <article className="zepto-review-list">
+                      <h3>Matched products</h3>
+                      {zeptoMatchedItems.length === 0 ? (
+                        <p>No Zepto products were matched yet.</p>
+                      ) : zeptoMatchedItems.map((match, idx) => {
+                        const product = match.matched_product || {};
+                        const native = match.native_item || {};
+                        return (
+                          <div key={`${native.id || native.name || idx}-zepto-match`} className="zepto-product-row">
+                            <span>{native.name || "Native row"}</span>
+                            <strong>{product.name || product.title || product.product_name || "Matched Zepto product"}</strong>
+                          </div>
+                        );
+                      })}
+                    </article>
+
+                    <article className="zepto-review-list">
+                      <h3>Unavailable or unresolved</h3>
+                      {zeptoUnavailableItems.length === 0 ? (
+                        <p>No unavailable items reported by Zepto MCP.</p>
+                      ) : zeptoUnavailableItems.map((item, idx) => (
+                        <div key={`${item.name || idx}-zepto-unavailable`} className="zepto-product-row unavailable">
+                          <strong>{item.name || "Unknown item"}</strong>
+                          <span>{item.reason || "Zepto did not return a usable match."}</span>
+                        </div>
+                      ))}
+                    </article>
+
+                    <article className="zepto-approval-card">
+                      <h3>Address and payment</h3>
+                      {zeptoAddressOptions.length > 0 ? (
+                        <label>
+                          Address
+                          <select
+                            value={selectedZeptoAddress}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setSelectedZeptoAddress(value);
+                              updateZeptoReview({ selected_address_id: value || null });
+                            }}
+                          >
+                            <option value="">Use Zepto default</option>
+                            {zeptoAddressOptions.map((option, idx) => {
+                              const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                              const label = optionValue(option, ["label", "name", "address", "address_line", "addressLine", "title"], JSON.stringify(option).slice(0, 90));
+                              return <option key={`${value}-${idx}`} value={value}>{label}</option>;
+                            })}
+                          </select>
+                        </label>
+                      ) : (
+                        <p>Zepto MCP did not expose selectable address options. Kitch will use the current/default Zepto account address if you confirm.</p>
+                      )}
+
+                      {zeptoPaymentOptions.length > 0 ? (
+                        <label>
+                          Payment
+                          <select
+                            value={selectedZeptoPaymentMethod}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setSelectedZeptoPaymentMethod(value);
+                              updateZeptoReview({ selected_payment_method_id: value || null });
+                            }}
+                          >
+                            <option value="">Use Zepto default</option>
+                            {zeptoPaymentOptions.map((option, idx) => {
+                              const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${idx}`);
+                              const label = optionValue(option, ["label", "name", "payment_method", "paymentMethod", "method", "title"], JSON.stringify(option).slice(0, 90));
+                              return <option key={`${value}-${idx}`} value={value}>{label}</option>;
+                            })}
+                          </select>
+                        </label>
+                      ) : (
+                        <p>Zepto MCP did not expose selectable payment options. Kitch will use the current/default Zepto account payment method if you confirm.</p>
+                      )}
+
+                      <label className="approval-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={zeptoReviewAcknowledged}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setZeptoReviewAcknowledged(checked);
+                            updateZeptoReview({ order_review_acknowledged: checked });
+                          }}
+                        />
+                        I reviewed the exact Zepto cart, address/payment state, and unavailable items.
+                      </label>
+
+                      {zeptoOrderBlockers.length > 0 && (
+                        <div className="zepto-blocker-list">
+                          <strong>Order blocked</strong>
+                          {zeptoOrderBlockers.map((blocker, idx) => (
+                            <span key={`${blocker}-${idx}`}>{blocker}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      <button type="button" className="confirm-order-btn" onClick={placeZeptoOrder} disabled={!canPlaceZeptoOrder || isPlacingZeptoOrder}>
+                        {isPlacingZeptoOrder ? "Confirming..." : "Confirm Order"}
+                      </button>
+                      <small>This button is the only path that can call Zepto order placement.</small>
+                    </article>
+
+                    <details className="zepto-raw-response">
+                      <summary>Zepto MCP cart response</summary>
+                      <pre>{JSON.stringify(zeptoCartDetails, null, 2)}</pre>
+                    </details>
+                  </div>
+                )}
+              </section>
             </section>
           )}
         </main>
@@ -1592,105 +2033,6 @@ export default function Home() {
           <button type="submit" className="smart-send-btn" disabled={isChatTyping || (!chatInput.trim() && !pendingPhoto)}>↑</button>
         </div>
       </form>
-
-      {/* ZEPTO CART REVIEW DIALOG */}
-      {mcpModalOpen && (
-        <div id="mcp-modal" className="modal-overlay active">
-          <div className="modal-box">
-            <div className="modal-header">
-              <h3>
-                Zepto Cart Review
-              </h3>
-              <button className="modal-close-btn" onClick={() => setMcpModalOpen(false)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <p className="modal-note">
-                Kitch keeps the native grocery cart as the source of truth. Zepto sync replaces the Zepto cart with unchecked, non-stocked items only.
-              </p>
-
-              {!zeptoCartReview ? (
-                <div className="zepto-empty-review">
-                  <strong>No Zepto cart sync has run yet.</strong>
-                  <span>Use Add to Zepto Cart from the grocery page after Kitch has planned groceries.</span>
-                </div>
-              ) : (
-                <div className={`zepto-review-card ${zeptoStatus === "success" ? "success" : "error"}`}>
-                  <div>
-                    <span className="eyebrow">Provider status</span>
-                    <h4>{zeptoStatus === "success" ? "Cart synced" : "Sync needs attention"}</h4>
-                    <p>{zeptoResult.message || zeptoResult.result?.message || "Review the latest provider response below."}</p>
-                  </div>
-                  <div className="zepto-review-stats">
-                    <div><strong>{zeptoMatchedItems.length}</strong><span>Matched</span></div>
-                    <div><strong>{zeptoUnavailableItems.length}</strong><span>Unavailable</span></div>
-                  </div>
-                </div>
-              )}
-
-              {zeptoMatchedItems.length > 0 && (
-                <div className="zepto-match-list">
-                  <h4>Matched items</h4>
-                  {zeptoMatchedItems.map((match, idx) => {
-                    const product = match.matched_product || {};
-                    const native = match.native_item || {};
-                    return (
-                      <div key={`${native.id || native.name || idx}-matched`} className="zepto-match-row">
-                        <span>{native.name || "Cart item"}</span>
-                        <strong>{product.name || product.title || product.product_name || "Matched Zepto product"}</strong>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {zeptoUnavailableItems.length > 0 && (
-                <div className="zepto-unavailable-list">
-                  <h4>Unavailable items</h4>
-                  {zeptoUnavailableItems.map((item, idx) => (
-                    <div key={`${item.name || idx}-unavailable`} className="zepto-unavailable-row">
-                      <strong>{item.name || "Unknown item"}</strong>
-                      <span>{item.reason || "Zepto did not return a usable match."}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {zeptoCartReview ? (
-                <div className="payload-preview">
-                  <span>Zepto MCP cart response</span>
-                  <pre>{JSON.stringify(zeptoCartDetails, null, 2)}</pre>
-                </div>
-              ) : (
-                <div className="payload-preview">
-                  <span>Native cart rows pending Zepto sync</span>
-                  <pre>{JSON.stringify(checkoutItems, null, 2)}</pre>
-                </div>
-              )}
-              
-              <div className="modal-actions">
-                <button
-                  id="mcp-reject-btn"
-                  className="modal-reject"
-                  onClick={() => {
-                    setMcpModalOpen(false);
-                    triggerBannerAlert("Zepto cart review closed.");
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  id="mcp-approve-btn"
-                  className="modal-approve"
-                  disabled={!canPlaceZeptoOrder || isPlacingZeptoOrder}
-                  onClick={placeZeptoOrder}
-                >
-                  {isPlacingZeptoOrder ? "Placing..." : "Place Zepto Order"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* DYNAMIC ALERT BANNER */}
       {alertBanner.show && (
