@@ -61,8 +61,8 @@ class ZeptoProviderAdapter:
             state = "disabled"
             message = "Zepto MCP integration is disabled."
         elif self.transport in {"stdio", "stdio_remote", "mcp_remote"} and not self.access_token:
-            state = "browser_login_required"
-            message = "Zepto will open a browser OAuth flow on first MCP use."
+            state = "oauth_bridge_ready"
+            message = "Zepto MCP will use the local browser OAuth bridge. If the token is expired, the bridge may open login."
         elif self.access_token or self.raw_headers:
             state = "configured"
             message = "Zepto MCP credentials are configured."
@@ -105,6 +105,9 @@ class ZeptoProviderAdapter:
     async def _sync_cart(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         async with self._session() as session:
             tools = await self._list_tools(session)
+            if {"search_products", "update_cart", "view_cart"}.issubset(tools):
+                return await self._sync_cart_with_zepto_tools(session, tools, items)
+
             clear_tool = self._find_tool(tools, required=("cart",), preferred=("clear", "empty", "replace"))
             search_tool = self._find_tool(tools, required=(), preferred=("search", "product", "catalog"))
             add_tool = self._find_tool(tools, required=("cart",), preferred=("add",))
@@ -171,6 +174,76 @@ class ZeptoProviderAdapter:
                 "available_tools": list(tools.keys()),
                 "message": f"Synced {len(matched_items)} items to Zepto cart.",
             }
+
+    async def _sync_cart_with_zepto_tools(self, session: Any, tools: Dict[str, Any], items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        checkout_context = await self._checkout_context(session, tools)
+        matched_items = []
+        unavailable_items = []
+        cart_items = []
+
+        if "get_past_order_items" in tools:
+            try:
+                await self._call_tool(session, "get_past_order_items", {})
+            except Exception:
+                pass
+
+        for item in items:
+            search_term = str(item.get("search_name") or item.get("name") or "").strip()
+            if not search_term:
+                continue
+
+            try:
+                search_result = await self._call_tool(session, "search_products", {"query": search_term, "pageNumber": 0})
+            except Exception as exc:
+                unavailable_items.append({"name": item.get("name"), "reason": f"Zepto search failed: {exc}"})
+                continue
+
+            product = self._first_product(search_result)
+            if not product:
+                unavailable_items.append({"name": item.get("name"), "reason": "No product match returned by Zepto."})
+                continue
+
+            cart_item = self._build_zepto_cart_item(product, item)
+            if not cart_item:
+                unavailable_items.append({
+                    "name": item.get("name"),
+                    "reason": "Product matched, but Zepto cart identifiers were missing.",
+                    "matched_product": product,
+                })
+                continue
+
+            cart_items.append(cart_item)
+            matched_items.append({
+                "native_item": item,
+                "matched_product": product,
+                "cart_item": cart_item,
+            })
+
+        zepto_cart = None
+        if cart_items:
+            update_result = await self._call_tool(
+                session,
+                "update_cart",
+                {
+                    "deviceId": "kitch-native-cart",
+                    "replaceCart": True,
+                    "cartItems": cart_items,
+                },
+            )
+            for index, match in enumerate(matched_items):
+                match["add_result"] = update_result if index == 0 else {"status": "batched_update"}
+            zepto_cart = await self._call_tool(session, "view_cart", {})
+
+        return {
+            "status": "success" if matched_items else "error",
+            "provider": "zepto",
+            "items": matched_items,
+            "unavailable_items": unavailable_items,
+            "zepto_cart": zepto_cart,
+            "checkout_context": checkout_context,
+            "available_tools": list(tools.keys()),
+            "message": f"Synced {len(matched_items)} items to Zepto cart." if matched_items else "No Zepto products could be matched.",
+        }
 
     async def get_cart(self) -> Dict[str, Any]:
         """Fetch the current Zepto cart through MCP."""
@@ -366,6 +439,37 @@ class ZeptoProviderAdapter:
 
         return args
 
+    def _build_zepto_cart_item(self, product: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any] | None:
+        product_variant_id = product.get("productVariantId") or product.get("variantId") or product.get("id")
+        store_product_id = product.get("storeProductId")
+        if not product_variant_id or not store_product_id:
+            return None
+
+        quantity = 1
+        unit = str(item.get("unit") or "").lower()
+        try:
+            amount = float(item.get("amount") or 1)
+        except (TypeError, ValueError):
+            amount = 1
+        if unit in {"piece", "pieces", "pc", "pcs", "pack", "packs"}:
+            quantity = max(1, round(amount))
+
+        return {
+            "productVariantId": product_variant_id,
+            "storeProductId": store_product_id,
+            "quantity": quantity,
+            "name": product.get("name") or product.get("title") or item.get("name"),
+            "label": product.get("label") or "",
+            "price": product.get("price"),
+            "mrp": product.get("mrp"),
+            "imageUrl": product.get("imageUrl"),
+            "packSize": product.get("packSize"),
+            "availableQuantity": product.get("availableQuantity"),
+            "isAd": bool(product.get("isAd", False)),
+            "variantId": product.get("variantId") or product_variant_id,
+            "cartProductId": product.get("cartProductId") or product_variant_id,
+        }
+
     async def _checkout_context(self, session: Any, tools: Dict[str, Any]) -> Dict[str, Any]:
         context: Dict[str, Any] = {
             "addresses": None,
@@ -374,8 +478,16 @@ class ZeptoProviderAdapter:
             "payment_tool": None,
         }
 
-        address_tool = self._find_tool(tools, required=("address",), preferred=("get", "list", "show", "view"))
-        payment_tool = self._find_tool(tools, required=("payment",), preferred=("get", "list", "show", "view"))
+        address_tool = "list_saved_addresses" if "list_saved_addresses" in tools else self._find_tool(
+            tools,
+            required=("address",),
+            preferred=("get", "list", "show", "view"),
+        )
+        payment_tool = "get_payment_methods" if "get_payment_methods" in tools else self._find_tool(
+            tools,
+            required=("payment",),
+            preferred=("get", "list", "show", "view"),
+        )
 
         if address_tool:
             context["address_tool"] = address_tool

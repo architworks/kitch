@@ -607,8 +607,7 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
         cart_items = get_grocery_cart()
         export_items = [
             item for item in cart_items
-            if not item.get("checked")
-            and not item.get("alreadyStocked")
+            if not item.get("alreadyStocked")
             and (not selected_ids or str(item.get("id")) in selected_ids)
         ]
 

@@ -149,6 +149,8 @@ const optionValue = (option, keys, fallback = "") => {
   return fallback;
 };
 
+const cartItemKey = (item) => String(item?.id || item?.name || "");
+
 const INITIAL_CHAT = [];
 
 export default function Home() {
@@ -181,6 +183,7 @@ export default function Home() {
   const [selectedZeptoPaymentMethod, setSelectedZeptoPaymentMethod] = useState("");
   const [zeptoReviewAcknowledged, setZeptoReviewAcknowledged] = useState(false);
   const [isUpdatingZeptoReview, setIsUpdatingZeptoReview] = useState(false);
+  const [excludedZeptoItemIds, setExcludedZeptoItemIds] = useState([]);
   const [isZeptoSyncing, setIsZeptoSyncing] = useState(false);
   const [isPlacingZeptoOrder, setIsPlacingZeptoOrder] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
@@ -372,7 +375,7 @@ export default function Home() {
 
   // Sync count statistics
   const totalCount = groceryList.length;
-  const checkedCount = groceryList.filter(item => item.checked).length;
+  const zeptoSelectedCount = groceryList.filter(item => !item.alreadyStocked && !excludedZeptoItemIds.includes(cartItemKey(item))).length;
 
   // 3. Application operations
   const triggerBannerAlert = (text) => {
@@ -396,33 +399,15 @@ export default function Home() {
     triggerBannerAlert(`Switched active profile to ${userName}. Viewing macro logs for ${userName}.`);
   };
 
-  const toggleGroceryItem = async (item) => {
+  const toggleZeptoItemSelection = (item) => {
     if (!item || item.alreadyStocked) return;
-    const nextChecked = !item.checked;
-
-    setCustomGroceryItems(prev => prev.map(current => (
-      current.id === item.id || current.name === item.name
-        ? { ...current, checked: nextChecked }
-        : current
-    )));
-
-    if (!item.id) return;
-
-    try {
-      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ checked: nextChecked })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.grocery_cart) {
-          setCustomGroceryItems(data.grocery_cart);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to update grocery cart item", e);
-    }
+    const key = cartItemKey(item);
+    if (!key) return;
+    setExcludedZeptoItemIds(prev => (
+      prev.includes(key)
+        ? prev.filter(id => id !== key)
+        : [...prev, key]
+    ));
   };
 
   const updateGroceryCartItemDetails = async (item, updates) => {
@@ -532,7 +517,7 @@ export default function Home() {
 
   const syncNativeCartToZepto = async () => {
     if (checkoutItems.length === 0) {
-      triggerBannerAlert("Your native grocery cart has no pending items for Zepto.");
+      triggerBannerAlert("Select at least one native cart item for Zepto.");
       return;
     }
 
@@ -916,7 +901,7 @@ export default function Home() {
 
   // Items checkout checklist
   const checkoutItems = groceryList
-    .filter(item => !item.checked && !item.alreadyStocked)
+    .filter(item => !item.alreadyStocked && !excludedZeptoItemIds.includes(cartItemKey(item)))
     .map(item => ({
       id: item.id,
       name: item.name,
@@ -960,6 +945,7 @@ export default function Home() {
   const groceryCategoryCount = Object.keys(groupedGroceryCart).length;
   const stockedCount = groceryList.filter(item => item.alreadyStocked).length;
   const pendingBuyCount = checkoutItems.length;
+  const eligibleBuyCount = groceryList.filter(item => !item.alreadyStocked).length;
   const zeptoStatus = zeptoCartReview?.status;
   const zeptoMatchedItems = Array.isArray(zeptoCartReview?.matched_items)
     ? zeptoCartReview.matched_items
@@ -981,6 +967,7 @@ export default function Home() {
   const zeptoState = zeptoConnectionStatus?.state || "unknown";
   const zeptoStatusLabel = {
     configured: "Configured",
+    oauth_bridge_ready: "OAuth bridge ready",
     browser_login_required: "Browser login required",
     not_connected: "Not connected",
     disabled: "Disabled",
@@ -1315,7 +1302,7 @@ export default function Home() {
                     <span className="side-card-icon">□</span>
                     <h3>Grocery List</h3>
                     <p><strong>{totalCount}</strong> required items</p>
-                    <small>{checkedCount} already stocked or marked complete</small>
+                    <small>{stockedCount} already stocked, {zeptoSelectedCount} selected for Zepto</small>
                   </article>
 
                 </aside>
@@ -1555,17 +1542,11 @@ export default function Home() {
                         {recipeCartItems.length === 0 ? (
                           <div className="recipe-empty-note">This recipe has not populated the native grocery cart yet.</div>
                         ) : recipeCartItems.map((item, index) => (
-                          <label key={item.id || `${item.name}-${index}`} className={`ingredient-cart-row ${item.checked ? "completed" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
-                            <input
-                              type="checkbox"
-                              name={`recipe-cart-${index}`}
-                              checked={item.checked}
-                              disabled={item.alreadyStocked}
-                              onChange={() => toggleGroceryItem(item)}
-                            />
+                          <div key={item.id || `${item.name}-${index}`} className={`ingredient-cart-row ${item.alreadyStocked ? "stocked" : ""}`}>
+                            <span className="ingredient-cart-dot" aria-hidden="true">{item.alreadyStocked ? "✓" : ""}</span>
                             <strong>{item.name}</strong>
                             <em>{item.alreadyStocked ? "In pantry" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</em>
-                          </label>
+                          </div>
                         ))}
                       </div>
                     )}
@@ -1635,7 +1616,7 @@ export default function Home() {
                   <div className="native-cart-meta">
                     <strong>{totalCount} items</strong>
                     <span>{groceryCategoryCount} categories</span>
-                    <span>{pendingBuyCount} to buy</span>
+                    <span>{zeptoSelectedCount} selected for Zepto</span>
                   </div>
 
                   {totalCount === 0 ? (
@@ -1651,6 +1632,7 @@ export default function Home() {
                           <div className="native-cart-group-header">
                             <h3>{category} <span>({items.length})</span></h3>
                             <div>
+                              <span>Add to Zepto</span>
                               <span>Needed</span>
                               <span>Have</span>
                               <span>To buy</span>
@@ -1660,15 +1642,17 @@ export default function Home() {
                           {items.map((item, index) => {
                             const itemAmount = Number(item.amount) || 1;
                             const haveText = item.alreadyStocked ? formatCartQuantity(item.amount, item.unit) : "0";
-                            const toBuyText = item.checked || item.alreadyStocked ? "—" : formatCartQuantity(item.amount, item.unit);
+                            const toBuyText = item.alreadyStocked ? "—" : formatCartQuantity(item.amount, item.unit);
+                            const selectedForZepto = !item.alreadyStocked && !excludedZeptoItemIds.includes(cartItemKey(item));
                             return (
-                              <div key={item.id || `${item.name}-${index}`} className={`native-cart-row ${item.checked ? "checked" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
+                              <div key={item.id || `${item.name}-${index}`} className={`native-cart-row ${!selectedForZepto ? "excluded" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
                                 <label className="native-cart-check">
                                   <input
                                     type="checkbox"
-                                    checked={item.checked}
+                                    aria-label={`Add ${item.name} to Zepto`}
+                                    checked={selectedForZepto}
                                     disabled={item.alreadyStocked}
-                                    onChange={() => toggleGroceryItem(item)}
+                                    onChange={() => toggleZeptoItemSelection(item)}
                                   />
                                 </label>
                                 <div className="native-cart-name">
@@ -1739,8 +1723,8 @@ export default function Home() {
 
                   <article className="grocery-side-card missing-card">
                     <h3>Missing from pantry</h3>
-                    <p><strong>{pendingBuyCount}</strong> items to buy</p>
-                    <small>{stockedCount} rows are already stocked or pantry-covered.</small>
+                    <p><strong>{eligibleBuyCount}</strong> items to buy</p>
+                    <small>{pendingBuyCount} selected for Zepto. {stockedCount} rows are already stocked or pantry-covered.</small>
                   </article>
 
                   <article className="grocery-side-card zepto-move-card">
@@ -1769,7 +1753,8 @@ export default function Home() {
                   <article className="grocery-side-card quick-actions-card">
                     <h3>Quick actions</h3>
                     <button type="button" onClick={() => setCustomGroceryItems(prev => [...prev].sort((a, b) => (a.category || "").localeCompare(b.category || "")))}>Sort by category</button>
-                    <button type="button" onClick={() => setCustomGroceryItems(prev => prev.map(item => item.alreadyStocked ? { ...item, checked: true } : item))}>Check off pantry-covered rows</button>
+                    <button type="button" onClick={() => setExcludedZeptoItemIds([])}>Select all for Zepto</button>
+                    <button type="button" onClick={() => setExcludedZeptoItemIds(groceryList.filter(item => !item.alreadyStocked).map(cartItemKey).filter(Boolean))}>Clear Zepto selection</button>
                     <button type="button" onClick={clearPlannedGroceryRows}>Clear planned rows</button>
                   </article>
                 </aside>
