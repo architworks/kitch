@@ -48,6 +48,61 @@ const getMealTitle = (meal, fallback = "No recipe set") => {
   return meal.name || meal.title || meal.recipe_name || fallback;
 };
 
+const getRecipeCardTitle = (recipe, fallback = "Recipe details pending") => {
+  if (!recipe) return fallback;
+  if (typeof recipe === "string") return recipe || fallback;
+  return recipe.title || recipe.name || recipe.recipeName || recipe.recipe_name || fallback;
+};
+
+const normalizeList = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    return value
+      .split(/\n+/)
+      .map(item => item.replace(/^[-*\d.\s]+/, "").trim())
+      .filter(Boolean);
+  }
+  return [value];
+};
+
+const getIngredientName = (ingredient) => {
+  if (!ingredient) return "";
+  if (typeof ingredient === "string") return ingredient;
+  return ingredient.name || ingredient.ingredient_name || ingredient.item || ingredient.ingredient || "";
+};
+
+const getIngredientQuantity = (ingredient) => {
+  if (!ingredient || typeof ingredient === "string") return "";
+  const amount = ingredient.amount ?? ingredient.quantity ?? ingredient.qty ?? "";
+  const unit = ingredient.unit || "";
+  const note = ingredient.note || ingredient.notes || "";
+  const amountText = `${amount}`.trim();
+  const unitText = `${unit}`.trim();
+  const lowerUnit = unitText.toLowerCase();
+  if (lowerUnit === "to taste") return "To taste";
+  if (lowerUnit === "as needed") return "As needed";
+  const qty = [amountText, unitText].filter(Boolean).join(" ");
+  return qty || note || "";
+};
+
+const getRecipeSteps = (recipe) => {
+  const rawSteps = recipe?.steps || recipe?.instructions || recipe?.method || recipe?.directions || [];
+  return normalizeList(rawSteps).map((step, index) => {
+    if (typeof step === "string") {
+      return {
+        title: `Step ${index + 1}`,
+        body: step
+      };
+    }
+
+    return {
+      title: step.title || step.name || `Step ${index + 1}`,
+      body: step.body || step.description || step.text || step.instruction || ""
+    };
+  }).filter(step => step.body || step.title);
+};
+
 const INITIAL_CHAT = [];
 
 export default function Home() {
@@ -66,6 +121,7 @@ export default function Home() {
   const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
   const chatMessagesRef = useRef(null);
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
+  const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
   // UI state variables
@@ -84,6 +140,8 @@ export default function Home() {
     steps: [],
     fileName: ""
   });
+  const [recipeSidebarTab, setRecipeSidebarTab] = useState("ingredients");
+  const [recipeBodyTab, setRecipeBodyTab] = useState("recipe");
 
   // Custom ingredient add inputs
   const [groceryCustomName, setGroceryCustomName] = useState("");
@@ -131,10 +189,26 @@ export default function Home() {
     return res.json();
   };
 
+  const syncLatestRecipeGroceryPlan = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/recipe-grocery/plans/latest"));
+      if (!res.ok) {
+        throw new Error(`Recipe sync failed with status ${res.status}`);
+      }
+      const data = await res.json();
+      setLatestRecipeGroceryPlan(data.plan || null);
+      return data.plan || null;
+    } catch (e) {
+      console.error("Failed to sync latest recipe+grocery plan", e);
+      return null;
+    }
+  };
+
   const syncLiveState = async (userName) => {
     try {
       const data = await fetchLiveState(userName);
       applyLiveState(userName, data);
+      await syncLatestRecipeGroceryPlan();
       return data;
     } catch (e) {
       console.error("Failed to sync live state with Supabase backend", e);
@@ -150,6 +224,7 @@ export default function Home() {
         const data = await fetchLiveState(activeUser);
         if (!ignore) {
           applyLiveState(activeUser, data);
+          await syncLatestRecipeGroceryPlan();
         }
       } catch (e) {
         console.error("Failed to sync live state with Supabase backend", e);
@@ -222,7 +297,6 @@ export default function Home() {
   // Sync count statistics
   const totalCount = groceryList.length;
   const checkedCount = groceryList.filter(item => item.checked).length;
-  const stockedCount = groceryList.filter(item => item.alreadyStocked).length;
 
   // 3. Application operations
   const triggerBannerAlert = (text) => {
@@ -678,18 +752,6 @@ export default function Home() {
     setChatInput(`Change ${day} ${slot} to `);
   };
 
-  // Consolidated group category calculator
-  const groupedGroceries = useMemo(() => {
-    const grouped = {};
-    groceryList.forEach(item => {
-      if (!grouped[item.category]) {
-        grouped[item.category] = [];
-      }
-      grouped[item.category].push(item);
-    });
-    return grouped;
-  }, [groceryList]);
-
   // Daily target calorie values per person
   const targetCalories = DIET_TYPES[dietPreference].dailyCalorieTargetPerPerson;
   const dietMeta = DIET_TYPES[dietPreference];
@@ -731,6 +793,31 @@ export default function Home() {
       category: item.category,
       source: item.source
     }));
+
+  const recipeCards = normalizeList(latestRecipeGroceryPlan?.recipeCards);
+  const activeRecipeCard = recipeCards[0] || null;
+  const activeRecipeTitle = getRecipeCardTitle(activeRecipeCard, latestRecipeGroceryPlan ? "Recipe details pending" : "");
+  const activeRecipeIngredients = normalizeList(
+    activeRecipeCard?.ingredients ||
+    activeRecipeCard?.ingredientList ||
+    activeRecipeCard?.ingredient_list ||
+    latestRecipeGroceryPlan?.ingredients
+  ).filter(ingredient => getIngredientName(ingredient));
+  const activeRecipeSteps = getRecipeSteps(activeRecipeCard);
+  const recipePlanScope = latestRecipeGroceryPlan?.scope || {};
+  const recipePlanLabel = latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || latestRecipeGroceryPlan?.request || "Latest recipe plan";
+  const recipeServings = activeRecipeCard?.servings || activeRecipeCard?.serves || latestRecipeGroceryPlan?.householdSize || householdSize;
+  const recipeCookTime = activeRecipeCard?.cookTime || activeRecipeCard?.cook_time || activeRecipeCard?.time || "";
+  const recipeCalories = activeRecipeCard?.calories || activeRecipeCard?.caloriesPerServing || activeRecipeCard?.calories_per_serving || "";
+  const recipeDescription = activeRecipeCard?.shortDescription || activeRecipeCard?.description || activeRecipeCard?.summary || latestRecipeGroceryPlan?.notes || "";
+  const recipePantryNotes = normalizeList(latestRecipeGroceryPlan?.pantryConsiderations);
+  const recipeLinkedCartItems = latestRecipeGroceryPlan?.id
+    ? groceryList.filter(item => item.recipeGroceryPlanId === latestRecipeGroceryPlan.id || item.recipe_grocery_plan_id === latestRecipeGroceryPlan.id)
+    : groceryList;
+  const recipeCartItems = recipeLinkedCartItems.length > 0 || latestRecipeGroceryPlan?.updatesCart
+    ? recipeLinkedCartItems
+    : [];
+  const recipeNeededCartItems = recipeCartItems.filter(item => !item.alreadyStocked);
 
   const zeptoResult = zeptoCartReview?.result || {};
   const zeptoStatus = zeptoCartReview?.status || zeptoResult.status;
@@ -833,7 +920,7 @@ export default function Home() {
         <nav className="rail-nav">
           {[
             ["planner", "household", "Household"],
-            ["groceries", "pantry", "Pantry"],
+            ["groceries", "pantry", "Groceries"],
             ["analytics", "nutrition", "Nutrition"]
           ].map(([key, icon, label]) => (
             <button
@@ -1125,84 +1212,264 @@ export default function Home() {
           )}
 
           {activeTab === "groceries" && (
-            <section className="page-view groceries-page" aria-label="Grocery cart">
-              <div className="section-heading page-heading">
-                <div>
-                  <span className="eyebrow">Shared household cart</span>
-                  <h2>Grocery Cart</h2>
-                </div>
-                <button
-                  className="grocery-checkout-btn"
-                  onClick={syncNativeCartToZepto}
-                  disabled={isZeptoSyncing || checkoutItems.length === 0}
-                >
-                  {isZeptoSyncing ? "Syncing Zepto..." : "Add to Zepto Cart"}
-                </button>
-              </div>
-              <div className="grocery-page-grid">
-                <section className="grocery-list-container">
-                  {totalCount === 0 ? (
-                    <div className="diary-empty-state">🛒 Your shopping cart is empty. Ask Kitch what groceries to order for tomorrow.</div>
-                  ) : Object.keys(groupedGroceries).map(category => (
-                    <div key={category} className="grocery-category">
-                      <div className="grocery-category-title">{category}</div>
-                      {groupedGroceries[category].map((item, idx) => (
-                        <div key={item.id || `${category}-${idx}`} className={`grocery-item-row ${item.checked ? "completed" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
-                          <label className="grocery-checkbox-label">
-                            <input type="checkbox" name={`grocery-${idx}`} checked={item.checked} disabled={item.alreadyStocked} onChange={() => toggleGroceryItem(item)} />
-                            <span className="item-name">
-                              {item.name}
-                              {item.source === "manual" && <small>Manual</small>}
-                              {item.alreadyStocked && item.stockNote && <small>{item.stockNote}</small>}
-                            </span>
-                          </label>
-                          <span className={item.alreadyStocked ? "stocked-badge" : "grocery-item-qty"}>{item.alreadyStocked ? "Met (Pantry)" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</span>
+            <section className="page-view recipe-grocery-page" aria-label="Recipe and grocery planning">
+              <button type="button" className="back-to-today-btn" onClick={() => setActiveTab("planner")}>
+                ← Back to Today
+              </button>
+
+              {latestRecipeGroceryPlan ? (
+                <div className="recipe-grocery-layout">
+                  <section className="recipe-workspace-card">
+                    <div className="recipe-hero-panel">
+                      <div className="recipe-hero-copy">
+                        <span className="recipe-plan-pill">{recipePlanLabel}</span>
+                        <h2>{activeRecipeTitle}</h2>
+                        {recipeDescription && <p>{recipeDescription}</p>}
+                        <div className="recipe-stat-row">
+                          {recipeCookTime && <span><b aria-hidden="true">◷</b>{recipeCookTime}</span>}
+                          {recipeCalories && <span><b aria-hidden="true">▥</b>{recipeCalories} kcal</span>}
+                          <span><b aria-hidden="true">♙</b>Serves {recipeServings}</span>
                         </div>
+                        <div className="recipe-action-row">
+                          <button
+                            type="button"
+                            className="recipe-primary-btn"
+                            onClick={() => {
+                              setChatInput(`Swap ${activeRecipeTitle} with another suitable meal`);
+                              setSmartDockExpanded(false);
+                            }}
+                          >
+                            Swap this meal
+                          </button>
+                          <button type="button" onClick={() => setChatInput(`Log ${activeRecipeTitle} for ${activeUser}`)}>
+                            Log meal
+                          </button>
+                          <button type="button" aria-label="Save recipe" onClick={() => triggerBannerAlert("Recipe is already saved in Kitch history.")}>
+                            ♡
+                          </button>
+                          <button type="button" aria-label="Share recipe" onClick={() => setChatInput(`Share the recipe for ${activeRecipeTitle}`)}>
+                            ↗
+                          </button>
+                        </div>
+                      </div>
+                      <div className="recipe-hero-visual" aria-hidden="true">
+                        <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 48vw" unoptimized />
+                      </div>
+                    </div>
+
+                    <div className="recipe-detail-tabs" role="tablist" aria-label="Recipe details">
+                      {[
+                        ["recipe", "Recipe"],
+                        ["ingredients", "Ingredients"],
+                        ["nutrition", "Nutrition"],
+                        ["notes", "Tips & Notes"]
+                      ].map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={recipeBodyTab === key ? "active" : ""}
+                          onClick={() => setRecipeBodyTab(key)}
+                        >
+                          {label}
+                        </button>
                       ))}
                     </div>
-                  ))}
-                </section>
-                <section className="pantry-card">
-                  <div><h3 className="section-title section-title-sage">Pantry Stock</h3><p className="section-note">Stock levels subtract from your cart required totals.</p></div>
-                  <div className="pantry-add-box">
-                    <h4>Quick Add Fridge Stock</h4>
-                    <input id="pantry-item-name" name="pantry-item-name" type="text" placeholder="Item name..." value={pantryAddName} onChange={(e) => setPantryAddName(e.target.value)} />
-                    <div className="pantry-amount-row">
-                      <input id="pantry-item-qty" name="pantry-item-qty" type="number" placeholder="Qty" value={pantryAddAmount} min="0.1" step="0.1" onChange={(e) => setPantryAddAmount(parseFloat(e.target.value) || 1)} />
-                      <input id="pantry-item-unit" name="pantry-item-unit" type="text" placeholder="Unit" value={pantryAddUnit} onChange={(e) => setPantryAddUnit(e.target.value)} />
+
+                    <div className="recipe-detail-body">
+                      {recipeBodyTab === "recipe" && (
+                        <>
+                          <h3>How to make it</h3>
+                          {activeRecipeSteps.length === 0 ? (
+                            <div className="recipe-empty-note">No cooking steps were saved for this recipe yet.</div>
+                          ) : (
+                            <div className="recipe-step-list">
+                              {activeRecipeSteps.map((step, index) => (
+                                <details key={`${step.title}-${index}`} className="recipe-step-item" open={index < 4}>
+                                  <summary>
+                                    <span>{index + 1}</span>
+                                    <strong>{step.title}</strong>
+                                  </summary>
+                                  {step.body && <p>{step.body}</p>}
+                                </details>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {recipeBodyTab === "ingredients" && (
+                        <>
+                          <h3>Ingredients</h3>
+                          {activeRecipeIngredients.length === 0 ? (
+                            <div className="recipe-empty-note">No structured ingredients were saved for this recipe yet.</div>
+                          ) : (
+                            <div className="recipe-inline-ingredient-grid">
+                              {activeRecipeIngredients.map((ingredient, index) => (
+                                <div key={`${getIngredientName(ingredient)}-${index}`}>
+                                  <span>{getIngredientName(ingredient)}</span>
+                                  <strong>{getIngredientQuantity(ingredient)}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {recipeBodyTab === "nutrition" && (
+                        <>
+                          <h3>Nutrition</h3>
+                          <div className="recipe-empty-note">
+                            {recipeCalories
+                              ? `${recipeCalories} kcal was saved for this recipe. Detailed macros can be logged on the Nutrition page after eating.`
+                              : "Detailed recipe nutrition was not saved for this artifact."}
+                          </div>
+                        </>
+                      )}
+
+                      {recipeBodyTab === "notes" && (
+                        <>
+                          <h3>Tips & Notes</h3>
+                          {recipePantryNotes.length === 0 && !latestRecipeGroceryPlan.notes ? (
+                            <div className="recipe-empty-note">No pantry notes or recipe tips were saved for this plan.</div>
+                          ) : (
+                            <div className="recipe-note-list">
+                              {latestRecipeGroceryPlan.notes && <p>{latestRecipeGroceryPlan.notes}</p>}
+                              {recipePantryNotes.map((note, index) => (
+                                <p key={`${note}-${index}`}>{typeof note === "string" ? note : JSON.stringify(note)}</p>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <button onClick={() => { addPantryItem(pantryAddName, pantryAddAmount, pantryAddUnit); triggerBannerAlert(`Manually added ${pantryAddAmount} ${pantryAddUnit} of "${pantryAddName}" to Fridge Stock.`); setPantryAddName(""); }}>Add Stock</button>
-                  </div>
-                  <div className="pantry-list">
-                    {pantryStock.length === 0 ? <div className="diary-empty-state diary-empty-state-compact">❄️ Fridge inventory is empty. Use the camera button below to scan it.</div> : pantryStock.map((pantryItem, idx) => (
-                      <div key={idx} className="pantry-item-row">
-                        <div className="pantry-item-row-info"><strong>{pantryItem.name}</strong><span>{pantryItem.amount} {pantryItem.unit} available</span></div>
-                        <button className="pantry-item-delete" onClick={() => { removePantryItem(idx); triggerBannerAlert(`Removed "${pantryItem.name}" from your fridge inventory.`); }}>&times;</button>
+                  </section>
+
+                  <aside className="recipe-ingredients-panel">
+                    <div className="recipe-panel-tabs" role="tablist" aria-label="Ingredients and grocery list">
+                      <button
+                        type="button"
+                        className={recipeSidebarTab === "ingredients" ? "active" : ""}
+                        onClick={() => setRecipeSidebarTab("ingredients")}
+                      >
+                        Ingredients
+                      </button>
+                      <button
+                        type="button"
+                        className={recipeSidebarTab === "grocery" ? "active" : ""}
+                        onClick={() => setRecipeSidebarTab("grocery")}
+                      >
+                        Grocery List <span>{recipeNeededCartItems.length}</span>
+                      </button>
+                    </div>
+
+                    {recipeSidebarTab === "ingredients" ? (
+                      <div className="ingredient-side-list">
+                        <div className="ingredient-side-header">
+                          <strong>Ingredients you need</strong>
+                          <span>Serves {recipeServings}</span>
+                        </div>
+                        {activeRecipeIngredients.length === 0 ? (
+                          <div className="recipe-empty-note">Ask Kitch for a recipe or grocery plan to populate ingredients.</div>
+                        ) : activeRecipeIngredients.map((ingredient, index) => (
+                          <div key={`${getIngredientName(ingredient)}-side-${index}`} className="ingredient-side-row">
+                            <span className="ingredient-check" aria-hidden="true">✓</span>
+                            <strong>{getIngredientName(ingredient)}</strong>
+                            <em>{getIngredientQuantity(ingredient)}</em>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : (
+                      <div className="ingredient-side-list">
+                        <div className="ingredient-side-header grocery">
+                          <div>
+                            <strong>Grocery list ({recipeNeededCartItems.length} items)</strong>
+                            <span>Pantry-covered items stay muted.</span>
+                          </div>
+                        </div>
+                        {recipeCartItems.length === 0 ? (
+                          <div className="recipe-empty-note">This recipe has not populated the native grocery cart yet.</div>
+                        ) : recipeCartItems.map((item, index) => (
+                          <label key={item.id || `${item.name}-${index}`} className={`ingredient-cart-row ${item.checked ? "completed" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
+                            <input
+                              type="checkbox"
+                              name={`recipe-cart-${index}`}
+                              checked={item.checked}
+                              disabled={item.alreadyStocked}
+                              onChange={() => toggleGroceryItem(item)}
+                            />
+                            <strong>{item.name}</strong>
+                            <em>{item.alreadyStocked ? "In pantry" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</em>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="add-all-groceries-btn"
+                      onClick={() => {
+                        if (recipeCartItems.length > 0) {
+                          syncNativeCartToZepto();
+                        } else {
+                          sendChatMessage(`Add groceries for ${activeRecipeTitle} to the native grocery cart`);
+                        }
+                      }}
+                      disabled={isZeptoSyncing || (!activeRecipeTitle && recipeCartItems.length === 0)}
+                    >
+                      {recipeCartItems.length > 0 ? "Sync eligible to Zepto" : "Add all to groceries"}
+                    </button>
+
+                    <div className="recipe-management-grid">
+                      <div className="compact-pantry-card">
+                        <h4>Pantry Stock</h4>
+                        <p>Available items are used by Kitch before adding groceries.</p>
+                        <div className="pantry-add-box compact">
+                          <input id="pantry-item-name" name="pantry-item-name" type="text" placeholder="Item name..." value={pantryAddName} onChange={(e) => setPantryAddName(e.target.value)} />
+                          <div className="pantry-amount-row">
+                            <input id="pantry-item-qty" name="pantry-item-qty" type="number" placeholder="Qty" value={pantryAddAmount} min="0.1" step="0.1" onChange={(e) => setPantryAddAmount(parseFloat(e.target.value) || 1)} />
+                            <input id="pantry-item-unit" name="pantry-item-unit" type="text" placeholder="Unit" value={pantryAddUnit} onChange={(e) => setPantryAddUnit(e.target.value)} />
+                          </div>
+                          <button type="button" onClick={() => { addPantryItem(pantryAddName, pantryAddAmount, pantryAddUnit); triggerBannerAlert(`Added ${pantryAddAmount} ${pantryAddUnit} of "${pantryAddName}" to pantry.`); setPantryAddName(""); }}>Add Stock</button>
+                        </div>
+                      </div>
+
+                      <div className="compact-pantry-card">
+                        <h4>Manual Cart Item</h4>
+                        <p>Add household grocery rows that are not recipe-derived.</p>
+                        <div className="grocery-add-form compact">
+                          <input id="custom-grocery-name" name="custom-grocery-name" type="text" placeholder="E.g. Sparkling water" value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
+                          <select id="custom-grocery-category" name="custom-grocery-category" value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
+                            <option value="Fresh Produce">Fresh Produce</option>
+                            <option value="Proteins & Dairy">Proteins & Dairy</option>
+                            <option value="Grains & Bakery">Grains & Bakery</option>
+                            <option value="Pantry & Spices">Pantry & Spices</option>
+                          </select>
+                          <button type="button" className="grocery-add-btn" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}>Add to Cart</button>
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+              ) : (
+                <section className="recipe-empty-state">
+                  <div>
+                    <span className="eyebrow">No recipe plan yet</span>
+                    <h2>Create a recipe and grocery plan</h2>
+                    <p>Ask Kitch for a recipe, ingredients for a dish, or groceries for a planned meal. This page will show the latest saved recipe+grocery artifact.</p>
+                    <div className="hero-actions">
+                      <button type="button" className="primary-action" onClick={() => setChatInput("What groceries do I need for tomorrow?")}>
+                        Plan groceries for tomorrow
+                      </button>
+                      <button type="button" onClick={() => setChatInput("Give me a recipe for paneer butter masala")}>
+                        Ask for a recipe
+                      </button>
+                    </div>
+                  </div>
+                  <div className="recipe-empty-visual" aria-hidden="true">
+                    <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 48vw" unoptimized />
                   </div>
                 </section>
-                <aside className="grocery-summary-sidebar">
-                  <div className="grocery-add-form">
-                    <h4>Add Custom Cart Item</h4>
-                    <input id="custom-grocery-name" name="custom-grocery-name" type="text" placeholder="E.g. Sparkling water, napkins..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
-                    <select id="custom-grocery-category" name="custom-grocery-category" value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
-                      <option value="Fresh Produce">Fresh Produce</option>
-                      <option value="Proteins & Dairy">Proteins & Dairy</option>
-                      <option value="Grains & Bakery">Grains & Bakery</option>
-                      <option value="Pantry & Spices">Pantry & Spices</option>
-                    </select>
-                    <button className="grocery-add-btn" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat)}>Add to Cart</button>
-                  </div>
-                  <hr className="soft-divider" />
-                  <div className="grocery-summary-stats">
-                    <div><span>Total rows:</span><strong>{totalCount}</strong></div>
-                    <div><span>Ready for Zepto:</span><strong>{checkoutItems.length}</strong></div>
-                    <div><span>Covered by pantry:</span><strong>{stockedCount}</strong></div>
-                    <div><span>Checked off:</span><strong>{checkedCount}</strong></div>
-                  </div>
-                </aside>
-              </div>
+              )}
             </section>
           )}
         </main>
