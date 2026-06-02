@@ -87,7 +87,7 @@ def _build_zepto_order_review(
     order_blockers: List[str] = []
 
     if result.get("status") != "success" or len(matched_items) == 0:
-        order_blockers.append("Zepto cart sync must succeed with at least one matched product.")
+        order_blockers.append("Zepto cart sync must succeed with at least one Zepto cart item.")
     if checkout_context.get("address_error"):
         order_blockers.append("Zepto address options could not be read.")
     if checkout_context.get("payment_error"):

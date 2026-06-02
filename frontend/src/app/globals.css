@@ -432,7 +432,8 @@ button {
 }
 
 .message-markdown {
-  white-space: pre-wrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .message-markdown p {
@@ -3473,10 +3474,10 @@ button {
 
 .zepto-connection-state {
   display: grid;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.68);
+  gap: 5px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: rgba(224, 239, 217, 0.62);
   border: 1px solid rgba(115, 121, 111, 0.14);
   border-radius: 12px;
 }
@@ -3489,28 +3490,6 @@ button {
 .zepto-connection-state span {
   color: var(--ink-soft);
   font-size: 11px;
-  font-weight: 750;
-}
-
-.zepto-move-card code {
-  display: block;
-  overflow-x: auto;
-  margin-bottom: 10px;
-  padding: 9px;
-  color: var(--sage-deep);
-  background: rgba(255, 255, 255, 0.76);
-  border-radius: 10px;
-  font-size: 10px;
-}
-
-.zepto-move-card ul {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 14px;
-  padding: 0;
-  list-style: none;
-  color: var(--ink-soft);
-  font-size: 12px;
   font-weight: 750;
 }
 
@@ -3573,8 +3552,16 @@ button {
 
 .zepto-review-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(280px, 0.8fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
   gap: 14px;
+}
+
+.zepto-review-status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
 }
 
 .zepto-review-status,
@@ -3613,14 +3600,32 @@ button {
   font-weight: 750;
 }
 
+.zepto-review-status p {
+  margin-bottom: 0;
+}
+
+.zepto-review-status .zepto-review-stats {
+  flex: 0 0 auto;
+}
+
+.zepto-cart-list {
+  grid-row: span 2;
+}
+
 .zepto-product-row {
   display: grid;
-  gap: 4px;
-  padding: 10px 0;
+  gap: 8px;
+  padding: 12px 0;
   border-top: 1px solid var(--line-soft);
 }
 
-.zepto-product-row span {
+.zepto-product-main {
+  display: grid;
+  gap: 3px;
+}
+
+.zepto-product-main span,
+.zepto-product-row > span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
@@ -3628,7 +3633,42 @@ button {
 
 .zepto-product-row strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 13.5px;
+  line-height: 1.25;
+}
+
+.zepto-product-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.zepto-product-meta div {
+  min-width: 0;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(195, 200, 189, 0.44);
+  border-radius: 12px;
+}
+
+.zepto-product-meta dt {
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.zepto-product-meta dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
 }
 
 .zepto-product-row.unavailable strong {
@@ -4337,6 +4377,7 @@ button {
   border-radius: 20px;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.5;
   box-shadow: 0 10px 28px rgba(52, 44, 36, 0.08);
   animation: dock-bubble-in 260ms ease both;
 }
@@ -4356,13 +4397,83 @@ button {
   border-bottom-left-radius: 7px;
 }
 
-.smart-chat-bubble span {
+.smart-chat-bubble > .msg-time {
   display: block;
   margin-top: 6px;
   font-size: 10px;
   font-weight: 800;
   opacity: 0.55;
   text-align: right;
+}
+
+.smart-chat-bubble .message-markdown h3,
+.smart-chat-bubble .message-markdown h4,
+.smart-chat-bubble .message-markdown h5,
+.smart-chat-bubble .message-markdown h6 {
+  margin: 0 0 8px;
+  color: inherit;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.smart-chat-bubble .message-markdown p {
+  margin: 0 0 8px;
+}
+
+.smart-chat-bubble .message-markdown p:last-child,
+.smart-chat-bubble .message-markdown ul:last-child,
+.smart-chat-bubble .message-markdown ol:last-child,
+.smart-chat-bubble .message-markdown blockquote:last-child,
+.smart-chat-bubble .message-markdown pre:last-child {
+  margin-bottom: 0;
+}
+
+.smart-chat-bubble .message-markdown ul,
+.smart-chat-bubble .message-markdown ol {
+  margin: 0 0 9px;
+  padding-left: 20px;
+}
+
+.smart-chat-bubble .message-markdown li {
+  margin: 3px 0;
+}
+
+.smart-chat-bubble .message-markdown code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(74, 103, 65, 0.1);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  font-weight: 750;
+}
+
+.smart-chat-bubble.user .message-markdown code {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.smart-chat-bubble .message-markdown pre {
+  max-width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: rgba(30, 27, 24, 0.08);
+}
+
+.smart-chat-bubble .message-markdown pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.smart-chat-bubble .message-markdown blockquote {
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid rgba(74, 103, 65, 0.28);
+  color: var(--muted);
 }
 
 .quick-prompt-row {
@@ -4843,6 +4954,19 @@ button {
   .grocery-execution-layout,
   .zepto-review-grid {
     gap: 14px;
+  }
+
+  .zepto-review-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .zepto-cart-list {
+    grid-row: auto;
+  }
+
+  .zepto-product-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .native-cart-group-header {

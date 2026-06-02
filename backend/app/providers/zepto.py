@@ -141,14 +141,14 @@ class ZeptoProviderAdapter:
                 product = self._first_product(search_result)
 
                 if not product:
-                    unavailable_items.append({"name": item.get("name"), "reason": "No product match returned by Zepto."})
+                    unavailable_items.append({"name": item.get("name"), "reason": "No available Zepto product was returned."})
                     continue
 
                 add_args = self._build_add_args(tools[add_tool], product, item)
                 if not add_args:
                     unavailable_items.append({
                         "name": item.get("name"),
-                        "reason": "Product matched, but Zepto add-to-cart tool arguments could not be inferred.",
+                        "reason": "Zepto found a product, but Kitch could not infer the add-to-cart details.",
                         "matched_product": product,
                     })
                     continue
@@ -200,14 +200,14 @@ class ZeptoProviderAdapter:
 
             product = self._first_product(search_result)
             if not product:
-                unavailable_items.append({"name": item.get("name"), "reason": "No product match returned by Zepto."})
+                unavailable_items.append({"name": item.get("name"), "reason": "No available Zepto product was returned."})
                 continue
 
             cart_item = self._build_zepto_cart_item(product, item)
             if not cart_item:
                 unavailable_items.append({
                     "name": item.get("name"),
-                    "reason": "Product matched, but Zepto cart identifiers were missing.",
+                    "reason": "Zepto found a product, but cart identifiers were missing.",
                     "matched_product": product,
                 })
                 continue
@@ -242,7 +242,7 @@ class ZeptoProviderAdapter:
             "zepto_cart": zepto_cart,
             "checkout_context": checkout_context,
             "available_tools": list(tools.keys()),
-            "message": f"Synced {len(matched_items)} items to Zepto cart." if matched_items else "No Zepto products could be matched.",
+            "message": f"Synced {len(matched_items)} items to Zepto cart." if matched_items else "No Zepto products could be added to the cart.",
         }
 
     async def get_cart(self) -> Dict[str, Any]:

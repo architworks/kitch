@@ -149,9 +149,290 @@ const optionValue = (option, keys, fallback = "") => {
   return fallback;
 };
 
+const textOptionValue = (option, keys, fallback = "") => {
+  const normalizeText = (value) => {
+    if (value === undefined || value === null || value === "") return "";
+    if (typeof value === "string" || typeof value === "number") return String(value).trim();
+    if (Array.isArray(value)) {
+      return value.map(normalizeText).filter(Boolean).join(", ");
+    }
+    return "";
+  };
+
+  for (const key of keys) {
+    const direct = normalizeText(option?.[key]);
+    if (direct) return direct;
+  }
+  return fallback;
+};
+
+const uniqueParts = (parts) => {
+  const seen = new Set();
+  return parts
+    .map(part => String(part || "").trim())
+    .filter(part => {
+      if (!part) return false;
+      const normalized = part.toLowerCase();
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+};
+
+const findNestedTextValue = (value, keys, depth = 0) => {
+  if (!value || depth > 3) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (Array.isArray(value)) {
+    return value.map(item => findNestedTextValue(item, keys, depth + 1)).find(Boolean) || "";
+  }
+  if (typeof value !== "object") return "";
+
+  const direct = textOptionValue(value, keys);
+  if (direct) return direct;
+  for (const child of Object.values(value)) {
+    const nested = findNestedTextValue(child, keys, depth + 1);
+    if (nested) return nested;
+  }
+  return "";
+};
+
+const formatZeptoAddressLabel = (option, fallback = "Saved address") => {
+  const label = textOptionValue(option, [
+    "label",
+    "name",
+    "type",
+    "addressLabel",
+    "address_label",
+    "tag",
+    "title"
+  ], fallback);
+  const fullAddress = findNestedTextValue(option, [
+    "formattedAddress",
+    "formatted_address",
+    "fullAddress",
+    "full_address",
+    "completeAddress",
+    "complete_address",
+    "displayAddress",
+    "display_address",
+    "addressLine",
+    "address_line",
+    "address",
+    "line1",
+    "line_1",
+    "address1"
+  ]);
+  const addressParts = uniqueParts([
+    textOptionValue(option, ["flatDetails", "flat_details", "flat", "house", "houseNumber", "house_number"]),
+    textOptionValue(option, ["buildingName", "building_name", "building", "society"]),
+    textOptionValue(option, ["floor"]),
+    textOptionValue(option, ["landmark"]),
+    textOptionValue(option, ["locality", "area", "neighborhood", "neighbourhood"]),
+    textOptionValue(option, ["shortAddress", "short_address"]),
+    textOptionValue(option, ["city"]),
+    textOptionValue(option, ["state"]),
+    textOptionValue(option, ["pincode", "pinCode", "postalCode", "postal_code"])
+  ]);
+  const addressText = fullAddress || addressParts.join(", ");
+  if (!addressText) return label;
+  if (!label || label.toLowerCase() === addressText.toLowerCase()) return addressText;
+  return `${label} — ${addressText}`;
+};
+
+const zeptoValue = (sources, keys) => {
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    for (const key of keys) {
+      const value = source[key];
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+  return "";
+};
+
+const formatZeptoPrice = (value) => {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "string" && value.includes("₹")) return value;
+  const normalized = typeof value === "string" ? value.replace(/[^\d.]/g, "") : value;
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) return String(value);
+  const rupees = numeric >= 100 ? numeric / 100 : numeric;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: rupees % 1 === 0 ? 0 : 2
+  }).format(rupees);
+};
+
+const formatZeptoCartQuantity = (match) => {
+  const quantity = zeptoValue(
+    [match?.cart_item, match?.add_result, match?.matched_product],
+    ["quantity", "qty", "count"]
+  );
+  if (quantity === "") return "";
+  return String(quantity);
+};
+
+const getZeptoProductMeta = (match) => {
+  const product = match?.matched_product || {};
+  const cartItem = match?.cart_item || {};
+  const native = match?.native_item || {};
+  const price = formatZeptoPrice(zeptoValue([cartItem, product], ["price", "sellingPrice", "selling_price", "discountedPrice"]));
+  const quantity = formatZeptoCartQuantity(match);
+  const packSize = zeptoValue([cartItem, product], ["packSize", "pack_size", "unit", "unitOfQuantity", "unit_of_quantity", "quantityUnit"]);
+  const company = zeptoValue([product, cartItem], [
+    "manufacturer",
+    "manufacturerName",
+    "manufacturer_name",
+    "company",
+    "companyName",
+    "brand",
+    "brandName",
+    "seller",
+    "sellerName"
+  ]);
+  const requested = formatCartQuantity(native.amount, native.unit);
+
+  return [
+    company && ["Company", company],
+    price && ["Price", price],
+    quantity && ["Qty", quantity],
+    packSize && ["Unit of qty", packSize],
+    requested && ["Kitch needed", requested]
+  ].filter(Boolean);
+};
+
 const cartItemKey = (item) => String(item?.id || item?.name || "");
 
 const INITIAL_CHAT = [];
+
+const renderInlineMarkdown = (text, keyPrefix) => {
+  const segments = String(text).split(/(`[^`]+`|\*\*[^*]+?\*\*|\*[^*]+?\*)/g);
+  return segments.map((segment, index) => {
+    const key = `${keyPrefix}-inline-${index}`;
+    if (segment.startsWith("`") && segment.endsWith("`")) {
+      return <code key={key}>{segment.slice(1, -1)}</code>;
+    }
+    if (segment.startsWith("**") && segment.endsWith("**")) {
+      return <strong key={key}>{segment.slice(2, -2)}</strong>;
+    }
+    if (segment.startsWith("*") && segment.endsWith("*")) {
+      return <em key={key}>{segment.slice(1, -1)}</em>;
+    }
+    return segment;
+  });
+};
+
+const renderMarkdownContent = (text) => {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+  let codeFence = null;
+  let codeLines = [];
+
+  const readList = (startIndex, ordered) => {
+    const items = [];
+    let cursor = startIndex;
+    const listRegex = ordered ? /^\s*\d+\.\s+(.+)$/ : /^\s*[-*]\s+(.+)$/;
+    while (cursor < lines.length) {
+      const match = lines[cursor].match(listRegex);
+      if (!match) break;
+      items.push(match[1]);
+      cursor += 1;
+    }
+    return { items, cursor };
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (line.trim().startsWith("```")) {
+      if (codeFence) {
+        blocks.push(
+          <pre key={`code-${index}`}><code>{codeLines.join("\n")}</code></pre>
+        );
+        codeFence = null;
+        codeLines = [];
+      } else {
+        codeFence = line.trim();
+      }
+      index += 1;
+      continue;
+    }
+
+    if (codeFence) {
+      codeLines.push(line);
+      index += 1;
+      continue;
+    }
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = Math.min(heading[1].length + 2, 6);
+      const Tag = `h${level}`;
+      blocks.push(
+        <Tag key={`heading-${index}`}>{renderInlineMarkdown(heading[2], `heading-${index}`)}</Tag>
+      );
+      index += 1;
+      continue;
+    }
+
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+    if (unordered) {
+      const { items, cursor } = readList(index, false);
+      blocks.push(
+        <ul key={`ul-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ul-${index}-${itemIndex}`}>{renderInlineMarkdown(item, `ul-${index}-${itemIndex}`)}</li>
+          ))}
+        </ul>
+      );
+      index = cursor;
+      continue;
+    }
+
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (ordered) {
+      const { items, cursor } = readList(index, true);
+      blocks.push(
+        <ol key={`ol-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ol-${index}-${itemIndex}`}>{renderInlineMarkdown(item, `ol-${index}-${itemIndex}`)}</li>
+          ))}
+        </ol>
+      );
+      index = cursor;
+      continue;
+    }
+
+    const quote = line.match(/^\s*>\s+(.+)$/);
+    if (quote) {
+      blocks.push(
+        <blockquote key={`quote-${index}`}>{renderInlineMarkdown(quote[1], `quote-${index}`)}</blockquote>
+      );
+      index += 1;
+      continue;
+    }
+
+    blocks.push(
+      <p key={`paragraph-${index}`}>{renderInlineMarkdown(line, `paragraph-${index}`)}</p>
+    );
+    index += 1;
+  }
+
+  if (codeFence && codeLines.length) {
+    blocks.push(
+      <pre key="code-open"><code>{codeLines.join("\n")}</code></pre>
+    );
+  }
+
+  return blocks;
+};
 
 export default function Home() {
   // Application core state variables
@@ -966,14 +1247,23 @@ export default function Home() {
     && !isUpdatingZeptoReview;
   const zeptoState = zeptoConnectionStatus?.state || "unknown";
   const zeptoStatusLabel = {
-    configured: "Configured",
-    oauth_bridge_ready: "OAuth bridge ready",
+    configured: "Signed in to Zepto",
+    oauth_bridge_ready: "Signed in to Zepto",
     browser_login_required: "Browser login required",
     not_connected: "Not connected",
     disabled: "Disabled",
-    failed: "Failed",
-    unknown: "Unknown"
+    failed: "Zepto sign-in needs attention",
+    unknown: "Checking Zepto sign-in"
   }[zeptoState] || zeptoState;
+  const zeptoStatusDescription = {
+    configured: "Ready to move selected items into your Zepto cart.",
+    oauth_bridge_ready: "Ready to move selected items into your Zepto cart.",
+    browser_login_required: "Sign in to Zepto in the browser to continue.",
+    not_connected: "Connect Zepto before moving items to cart.",
+    disabled: "Zepto cart sync is not enabled right now.",
+    failed: "Reconnect Zepto and try again.",
+    unknown: "Checking whether Zepto is ready."
+  }[zeptoState] || "";
 
   const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
   const firstPlannedFocusMeal = WEEK_DAYS.map(day => ({
@@ -1734,20 +2024,11 @@ export default function Home() {
                     </div>
                     <div className={`zepto-connection-state ${zeptoState}`}>
                       <b>{zeptoStatusLabel}</b>
-                      <span>{zeptoConnectionStatus?.message || "Zepto status has not been checked yet."}</span>
+                      <span>{zeptoStatusDescription}</span>
                     </div>
-                    {zeptoConnectionStatus?.setup_command && (
-                      <code>{zeptoConnectionStatus.setup_command}</code>
-                    )}
-                    <ul>
-                      <li>Instant delivery depends on live Zepto availability.</li>
-                      <li>Native cart rows stay as Kitch’s source of truth.</li>
-                      <li>Sync replaces the current Zepto cart.</li>
-                    </ul>
                     <button type="button" onClick={syncNativeCartToZepto} disabled={isZeptoSyncing || checkoutItems.length === 0}>
                       {isZeptoSyncing ? "Moving to Zepto..." : "Move to Zepto cart"}
                     </button>
-                    <small>Browser login may open on first Zepto MCP use.</small>
                   </article>
 
                   <article className="grocery-side-card quick-actions-card">
@@ -1771,31 +2052,46 @@ export default function Home() {
                 {!zeptoCartReview ? (
                   <div className="zepto-review-empty">
                     <strong>No Zepto cart review yet.</strong>
-                    <p>Move eligible native cart rows to Zepto to see matched products, unavailable items, address/payment state, and the final approval button.</p>
+                    <p>Move eligible native cart rows to Zepto to review cart items, unavailable items, address/payment state, and the final approval button.</p>
                   </div>
                 ) : (
                   <div className="zepto-review-grid">
                     <article className={`zepto-review-status ${zeptoStatus === "success" ? "success" : "error"}`}>
-                      <span className="eyebrow">Zepto cart</span>
-                      <h3>{zeptoStatus === "success" ? "Cart ready for review" : "Sync needs attention"}</h3>
-                      <p>{zeptoCartReview.message || "Review the latest Zepto MCP result."}</p>
+                      <div>
+                        <span className="eyebrow">Zepto cart</span>
+                        <h3>{zeptoStatus === "success" ? "Cart ready for review" : "Sync needs attention"}</h3>
+                        <p>{zeptoCartReview.message || "Review the latest Zepto cart result."}</p>
+                      </div>
                       <div className="zepto-review-stats">
-                        <div><strong>{zeptoMatchedItems.length}</strong><span>Matched</span></div>
+                        <div><strong>{zeptoMatchedItems.length}</strong><span>In cart</span></div>
                         <div><strong>{zeptoUnavailableItems.length}</strong><span>Unavailable</span></div>
                       </div>
                     </article>
 
-                    <article className="zepto-review-list">
-                      <h3>Matched products</h3>
+                    <article className="zepto-review-list zepto-cart-list">
+                      <h3>Zepto Cart</h3>
                       {zeptoMatchedItems.length === 0 ? (
-                        <p>No Zepto products were matched yet.</p>
+                        <p>No Zepto cart items were added yet.</p>
                       ) : zeptoMatchedItems.map((match, idx) => {
                         const product = match.matched_product || {};
                         const native = match.native_item || {};
+                        const productMeta = getZeptoProductMeta(match);
                         return (
                           <div key={`${native.id || native.name || idx}-zepto-match`} className="zepto-product-row">
-                            <span>{native.name || "Native row"}</span>
-                            <strong>{product.name || product.title || product.product_name || "Matched Zepto product"}</strong>
+                            <div className="zepto-product-main">
+                              <strong>{product.name || product.title || product.product_name || match.cart_item?.name || "Zepto cart item"}</strong>
+                              <span>{native.name ? `From Kitch item: ${native.name}` : "Added to Zepto cart"}</span>
+                            </div>
+                            {productMeta.length > 0 && (
+                              <dl className="zepto-product-meta">
+                                {productMeta.map(([label, value]) => (
+                                  <div key={`${native.id || native.name || idx}-${label}`}>
+                                    <dt>{label}</dt>
+                                    <dd>{value}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
                           </div>
                         );
                       })}
@@ -1829,7 +2125,7 @@ export default function Home() {
                             <option value="">Use Zepto default</option>
                             {zeptoAddressOptions.map((option, idx) => {
                               const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                              const label = optionValue(option, ["label", "name", "address", "address_line", "addressLine", "title"], JSON.stringify(option).slice(0, 90));
+                              const label = formatZeptoAddressLabel(option, `Address ${idx + 1}`);
                               return <option key={`${value}-${idx}`} value={value}>{label}</option>;
                             })}
                           </select>
@@ -1915,17 +2211,9 @@ export default function Home() {
             {visibleChatMessages.map((msg, index) => (
               <div key={`${visibleChatStartIndex + index}-${msg.sender}-${msg.time}`} className={`smart-chat-bubble ${msg.sender}`}>
                 <div className="message-markdown">
-                  {msg.text.split("\n").slice(0, 6).map((line, lidx) => {
-                    const boldRegex = /\*\*(.*?)\*\*/g;
-                    const parts = line.split(boldRegex);
-                    return (
-                      <p key={lidx}>
-                        {parts.map((part, pidx) => pidx % 2 === 1 ? <strong key={pidx}>{part}</strong> : part)}
-                      </p>
-                    );
-                  })}
+                  {renderMarkdownContent(msg.text)}
                 </div>
-                <span>{msg.time}</span>
+                <span className="msg-time">{msg.time}</span>
               </div>
             ))}
             {isChatTyping && (
