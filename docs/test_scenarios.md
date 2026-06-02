@@ -13,7 +13,7 @@ Before testing, the agent code must satisfy these prerequisites:
 
 - [x] **Datetime injection** — Every invocation must inject the current date/time into the
   coordinator's instruction via `before_agent_callback` so the agent knows "today".
-- [x] **Fully Dynamic LLM-Reasoning Grocery Compiler** — The `checkout_exporter` compiles the grocery shopping checklist dynamically in its mind using its own knowledge by querying the planned recipes (`get_weekly_schedule_tool`) and current pantry stock (`get_pantry_stock_tool`), completely eliminating the hardcoded database and static calculator tools.
+- [x] **Recipe+Grocery Planner** — The `recipe_grocery_planner` generates recipe cards and ingredients for the requested scope, queries the weekly schedule only when needed (`get_weekly_schedule_tool`), checks pantry stock (`get_pantry_stock_tool`), saves a `recipe_grocery_plans` artifact, and updates the native cart only for grocery/cart requests.
 - [x] **`update_single_meal_in_schedule` preserves plan** — Swaps and records the new custom recipe name string directly in Supabase under the targeted slot column, preserving the other weekday plan columns.
 - [x] **Natural descriptions** — Sub-agent descriptions guide routing without the user explicitly naming agents in the conversation.
 - [x] **Text-based macro logging** — `vision_scanner` handles plain text meal descriptions (e.g. "I ate 2 rotis and dal for lunch"), not only image uploads.
@@ -70,8 +70,9 @@ Before testing, the agent code must satisfy these prerequisites:
 
 | # | Prompt | Expected Route | Expected Tools | Pass Criteria |
 |---|--------|---------------|----------------|---------------|
-| 5.1 | "What groceries do I need for the week?" | `checkout_exporter` | `get_weekly_schedule_tool`, `get_pantry_stock_tool` | Queries schedule and pantry, scales ingredients dynamically using its own reasoning, and compiles the shopping list. |
-| 5.2 | "Make a shopping list" | `checkout_exporter` | `get_weekly_schedule_tool`, `get_pantry_stock_tool` | Same as 5.1 — natural phrasing compiles shopping checklist dynamically. |
+| 5.1 | "What groceries do I need for the week?" | `recipe_grocery_planner` | `search_household_food_preferences_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool`, `save_recipe_grocery_plan_tool` | Queries only the requested schedule scope and pantry, generates recipe+ingredient artifacts, and saves linked native cart rows. |
+| 5.2 | "Make a shopping list" | `recipe_grocery_planner` | `search_household_food_preferences_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool`, `save_recipe_grocery_plan_tool` | Natural phrasing compiles recipe-backed grocery requirements and updates the native cart. |
+| 5.3 | "Give me a recipe for paneer butter masala" | `recipe_grocery_planner` | `search_household_food_preferences_tool`, `save_recipe_grocery_plan_tool` | Saves a recipe+ingredient artifact with `update_cart=false`; native cart is unchanged. |
 
 ---
 
@@ -79,8 +80,8 @@ Before testing, the agent code must satisfy these prerequisites:
 
 | # | Prompt | Expected Route | Expected Tools | Pass Criteria |
 |---|--------|---------------|----------------|---------------|
-| 6.1 | "I already have eggs and avocado, update the grocery list" | `checkout_exporter` | `add_to_pantry_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool` | Agent logs available ingredients to pantry stock first, then queries plan and stock to dynamically compile the subtracted grocery list. |
-| 6.2 | *[Upload fridge photo]* "What else do I still need to buy?" | `vision_scanner` → `checkout_exporter` | `add_to_pantry_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool` | Vision scans fridge, updates pantry stock, then compiles grocery checklist subtracting active stock. |
+| 6.1 | "I already have eggs and avocado, update the grocery list" | `recipe_grocery_planner` | `add_to_pantry_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool`, `save_recipe_grocery_plan_tool` | Agent logs available ingredients to pantry stock first, then saves a recipe+grocery artifact and pantry-aware cart rows. |
+| 6.2 | *[Upload fridge photo]* "What else do I still need to buy?" | `vision_scanner` -> `recipe_grocery_planner` | `add_to_pantry_tool`, `get_weekly_schedule_tool`, `get_pantry_stock_tool`, `save_recipe_grocery_plan_tool` | Vision scans fridge, updates pantry stock, then recipe+grocery planning subtracts active stock. |
 
 ---
 
@@ -88,9 +89,9 @@ Before testing, the agent code must satisfy these prerequisites:
 
 | # | Prompt | Expected Route | Expected Tools | Pass Criteria |
 |---|--------|---------------|----------------|---------------|
-| 7.1 | "For bread, always get Baker's Dozen whole wheat" | `checkout_exporter` | `set_brand_preference` | Recorded in memory. Future checkouts automatically translate "bread" to "Baker's Dozen whole wheat". |
-| 7.2 | "Never add cereals to my grocery list — only dairy, fruits, and veggies" | `kitch_coordinator` | State update or memory write | Preference is noted. Future dynamically compiled lists respect this exclusion. |
-| 7.3 | "I prefer Amul butter over any other brand" | `checkout_exporter` | `set_brand_preference` | "butter" → "Amul butter" in native memory. |
+| 7.1 | "We prefer not to use tofu" | `recipe_grocery_planner` | `set_household_food_preference_tool` | Recorded in household memory. Future recipe+grocery plans avoid tofu. |
+| 7.2 | "Never add cereals to my grocery list — only dairy, fruits, and veggies" | `recipe_grocery_planner` | `set_household_food_preference_tool` | Preference is saved. Future recipe-backed grocery lists respect this exclusion. |
+| 7.3 | "I prefer Amul butter over any other brand" | Provider/API flow | `set_brand_preference` or provider memory mapping | Brand preference remains supported for provider search mapping, but it is not part of recipe generation. |
 
 ---
 

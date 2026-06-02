@@ -47,8 +47,8 @@ flowchart TD
     Parent -->|Delegates photo snaps| SubVision
     SubVision -->|Returns logs| Parent
     
-    Parent -->|Delegates checkout| SubCart
-    SubCart -->|Returns sync status| Parent
+    Parent -->|Delegates recipe and grocery| SubCart
+    SubCart -->|Returns recipe plus cart status| Parent
     
     %% Specialized Spoke Dependencies
     SubChef -->|DB Tools| DB[(Supabase DB<br>meal_plans)]
@@ -57,7 +57,7 @@ flowchart TD
     SubVision -->|Log Tools| DB[(Supabase DB<br>macro_diary & pantry_stock)]
     
     SubCart -->|search_memory| MemorySvc
-    SubCart -->|Payload Preview Tool| Payload[Blinkit / Zepto Payload Preview]
+    SubCart -->|Artifact and Cart Tools| RecipeCart[recipe_grocery_plans and grocery_cart_items]
 ```
 
 ### 1. Dynamic Database Weekly Planner Integration
@@ -67,12 +67,14 @@ flowchart TD
 *   **Dynamic Update Single Meal**: `update_single_meal_in_schedule` targets a single weekday slot, substituting its name in Supabase while preserving other days and slots perfectly.
 
 ### 2. LLM-Based Culinary Reasoning & Scaling
-*   **Dynamic Recipes**: The `chef_planner` agent generates balanced, nutritional meal plans and custom recipes dynamically from its own mind, customizing them to user dietary preferences (keto, vegan, balanced, Indian). Portions are scaled dynamically in conversation.
-*   **Dynamic Grocery Calculations**: Instead of static algorithms, the `checkout_exporter` agent compiles shopping lists dynamically:
-    1. It calls `get_weekly_schedule_tool` to fetch current recipe names planned for the week.
-    2. It calls `get_pantry_stock_tool` to fetch the household's current pantry stock.
-    3. Using its own culinary reasoning, it compiles required ingredients, scales them for the household size, subtracts pantry stock, and formulates the final required list.
-    4. It displays this shopping list to the user in a beautiful markdown format and can pass items (name, amount, unit) directly to `export_to_delivery`.
+*   **Dynamic Meal Schedules**: The `chef_planner` agent generates balanced weekly meal-name schedules dynamically from its own reasoning and saves those names to `meal_plans`.
+*   **Recipe+Grocery Planning**: The `recipe_grocery_planner` owns detailed recipes, ingredients, pantry-aware grocery planning, and native cart persistence:
+    1. It calls `search_household_food_preferences_tool` before recipe or grocery generation.
+    2. It calls `get_weekly_schedule_tool` only for schedule-based scopes such as tonight, tomorrow, next two days, or the full week.
+    3. It calls `get_pantry_stock_tool` before grocery planning.
+    4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
+    5. It updates `grocery_cart_items` only when the user asked for groceries/cart/buy/order, preserving manual cart rows.
+*   **Provider Boundary**: Zepto/Blinkit cart translation is no longer part of the recipe+grocery agent. Zepto sync remains available through backend provider endpoints.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: We updated the FastAPI `/api/state/{user_name}` endpoint in [main.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/main.py) to fetch the live database meal plan using a new `get_weekly_schedule_dict` helper and return it in the state payload.

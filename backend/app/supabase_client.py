@@ -1,6 +1,8 @@
 # Kitch: Supabase Production Client Wrapper
 
 import os
+from datetime import datetime, timezone
+import json
 from typing import Dict, List, Any
 from uuid import uuid4
 from dotenv import load_dotenv
@@ -25,6 +27,20 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 _grocery_cart_fallback: List[Dict[str, Any]] = []
+_recipe_grocery_plan_fallback: List[Dict[str, Any]] = []
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _coerce_json(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return value
 
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
@@ -57,6 +73,7 @@ def _normalize_grocery_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
         "checked": _coerce_bool(item.get("checked", False)),
         "alreadyStocked": _coerce_bool(item.get("alreadyStocked", item.get("already_stocked", False))),
         "stockNote": str(item.get("stockNote") or item.get("stock_note") or "").strip(),
+        "recipeGroceryPlanId": item.get("recipeGroceryPlanId") or item.get("recipe_grocery_plan_id"),
     }
 
 def _set_grocery_fallback(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -77,13 +94,14 @@ def _grocery_rows_to_items(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "checked": row.get("checked"),
             "already_stocked": row.get("already_stocked"),
             "stock_note": row.get("stock_note"),
+            "recipe_grocery_plan_id": row.get("recipe_grocery_plan_id"),
         })
         if item:
             mapped.append(item)
     return mapped
 
-def _grocery_item_to_row(item: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
-    return {
+def _grocery_item_to_row(item: Dict[str, Any], profile_id: str, recipe_grocery_plan_id: str | None = None) -> Dict[str, Any]:
+    row = {
         "profile_id": profile_id,
         "ingredient_name": item["name"],
         "amount": item["amount"],
@@ -93,6 +111,158 @@ def _grocery_item_to_row(item: Dict[str, Any], profile_id: str) -> Dict[str, Any
         "checked": item["checked"],
         "already_stocked": item["alreadyStocked"],
         "stock_note": item["stockNote"],
+    }
+    plan_id = item.get("recipeGroceryPlanId") or item.get("recipe_grocery_plan_id") or recipe_grocery_plan_id
+    if plan_id:
+        row["recipe_grocery_plan_id"] = plan_id
+    return row
+
+def _recipe_card_ingredients(recipe_cards: List[Dict[str, Any]]) -> List[Any]:
+    ingredients: List[Any] = []
+    for card in recipe_cards:
+        if isinstance(card, dict):
+            card_ingredients = card.get("ingredients") or card.get("ingredientList") or card.get("ingredient_list") or []
+            if isinstance(card_ingredients, list):
+                ingredients.extend(card_ingredients)
+    return ingredients
+
+def _normalize_recipe_grocery_plan(plan: Dict[str, Any], cart_items: List[Dict[str, Any]] | None = None, update_cart: bool = False) -> Dict[str, Any] | None:
+    if not isinstance(plan, dict):
+        return None
+
+    scope = _coerce_json(plan.get("scope") or plan.get("scope_metadata") or {}, {})
+    if not isinstance(scope, dict):
+        scope = {"label": str(scope)}
+
+    raw_cards = (
+        plan.get("recipeCards")
+        or plan.get("recipe_cards")
+        or plan.get("recipes")
+        or plan.get("recipe")
+        or []
+    )
+    if isinstance(raw_cards, dict):
+        raw_cards = [raw_cards]
+    if not isinstance(raw_cards, list):
+        raw_cards = []
+
+    recipe_cards = []
+    for card in raw_cards:
+        if isinstance(card, dict):
+            recipe_cards.append(card)
+        elif str(card).strip():
+            recipe_cards.append({"title": str(card).strip()})
+
+    ingredients = (
+        plan.get("ingredients")
+        or plan.get("ingredientList")
+        or plan.get("ingredient_list")
+        or _recipe_card_ingredients(recipe_cards)
+    )
+    if isinstance(ingredients, dict):
+        ingredients = [ingredients]
+    if not isinstance(ingredients, list):
+        ingredients = []
+
+    pantry_considerations = (
+        plan.get("pantryConsiderations")
+        or plan.get("pantry_considerations")
+        or plan.get("pantryNotes")
+        or plan.get("pantry_notes")
+        or []
+    )
+    if isinstance(pantry_considerations, str):
+        pantry_considerations = [pantry_considerations]
+    if not isinstance(pantry_considerations, list):
+        pantry_considerations = []
+
+    household = get_household_profile()
+    try:
+        household_size = int(plan.get("householdSize") or plan.get("household_size") or household.get("household_size") or DEFAULT_HOUSEHOLD_SIZE)
+    except (TypeError, ValueError):
+        household_size = DEFAULT_HOUSEHOLD_SIZE
+
+    created_at = plan.get("createdAt") or plan.get("created_at") or _now_iso()
+    updated_at = plan.get("updatedAt") or plan.get("updated_at") or created_at
+
+    return {
+        "id": str(plan.get("id") or uuid4()),
+        "scope": scope,
+        "scopeLabel": str(plan.get("scopeLabel") or plan.get("scope_label") or scope.get("label") or scope.get("type") or "Recipe + grocery plan"),
+        "request": str(plan.get("request") or plan.get("requestText") or plan.get("request_text") or "").strip(),
+        "recipeCards": recipe_cards,
+        "ingredients": ingredients,
+        "pantryConsiderations": pantry_considerations,
+        "householdSize": household_size,
+        "notes": str(plan.get("notes") or plan.get("instructions") or "").strip(),
+        "source": str(plan.get("source") or "agent").strip().lower() or "agent",
+        "createdAt": created_at,
+        "updatedAt": updated_at,
+        "updatesCart": bool(update_cart),
+        "cartItemCount": len(cart_items or []),
+    }
+
+def _recipe_plan_to_row(plan: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
+    return {
+        "id": plan["id"],
+        "profile_id": profile_id,
+        "scope": plan["scope"],
+        "request_text": plan["request"],
+        "recipe_cards": plan["recipeCards"],
+        "ingredients": plan["ingredients"],
+        "pantry_considerations": plan["pantryConsiderations"],
+        "household_size": plan["householdSize"],
+        "notes": plan["notes"],
+        "source": plan["source"],
+        "updates_cart": plan["updatesCart"],
+        "cart_item_count": plan["cartItemCount"],
+        "created_at": plan["createdAt"],
+        "updated_at": plan["updatedAt"],
+    }
+
+def _recipe_rows_to_plans(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    plans = []
+    for row in rows or []:
+        scope = _coerce_json(row.get("scope"), {})
+        recipe_cards = _coerce_json(row.get("recipe_cards"), [])
+        ingredients = _coerce_json(row.get("ingredients"), [])
+        pantry_considerations = _coerce_json(row.get("pantry_considerations"), [])
+        plan = {
+            "id": str(row.get("id")),
+            "scope": scope if isinstance(scope, dict) else {},
+            "scopeLabel": (scope or {}).get("label") if isinstance(scope, dict) else "Recipe + grocery plan",
+            "request": row.get("request_text") or "",
+            "recipeCards": recipe_cards if isinstance(recipe_cards, list) else [],
+            "ingredients": ingredients if isinstance(ingredients, list) else [],
+            "pantryConsiderations": pantry_considerations if isinstance(pantry_considerations, list) else [],
+            "householdSize": row.get("household_size") or DEFAULT_HOUSEHOLD_SIZE,
+            "notes": row.get("notes") or "",
+            "source": row.get("source") or "agent",
+            "updatesCart": bool(row.get("updates_cart", False)),
+            "cartItemCount": row.get("cart_item_count"),
+            "createdAt": row.get("created_at"),
+            "updatedAt": row.get("updated_at"),
+        }
+        plan["recipeCount"] = len(plan["recipeCards"])
+        plan["ingredientCount"] = len(plan["ingredients"])
+        plans.append(plan)
+    return plans
+
+def _recipe_plan_metadata(plan: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not plan:
+        return None
+    return {
+        "id": plan.get("id"),
+        "scope": plan.get("scope") or {},
+        "scopeLabel": plan.get("scopeLabel") or "Recipe + grocery plan",
+        "request": plan.get("request") or "",
+        "householdSize": plan.get("householdSize") or DEFAULT_HOUSEHOLD_SIZE,
+        "recipeCount": len(plan.get("recipeCards") or []),
+        "ingredientCount": len(plan.get("ingredients") or []),
+        "updatesCart": bool(plan.get("updatesCart")),
+        "cartItemCount": plan.get("cartItemCount"),
+        "createdAt": plan.get("createdAt"),
+        "updatedAt": plan.get("updatedAt"),
     }
 
 # 2. Profiles CRUD
@@ -245,7 +415,11 @@ def get_grocery_cart(user_name: str | None = None) -> List[Dict[str, Any]]:
         print(f"Error fetching grocery cart, using process fallback: {e}")
         return [dict(item) for item in _grocery_cart_fallback]
 
-def replace_planned_grocery_cart(items: List[Dict[str, Any]], user_name: str | None = None) -> List[Dict[str, Any]]:
+def replace_planned_grocery_cart(
+    items: List[Dict[str, Any]],
+    user_name: str | None = None,
+    recipe_grocery_plan_id: str | None = None
+) -> List[Dict[str, Any]]:
     """
     Replaces agent-planned grocery cart rows while preserving manual rows.
 
@@ -263,13 +437,22 @@ def replace_planned_grocery_cart(items: List[Dict[str, Any]], user_name: str | N
     try:
         supabase.table("grocery_cart_items").delete().eq("profile_id", profile_id).eq("source", "agent").execute()
         if normalized:
-            supabase.table("grocery_cart_items").insert([
-                _grocery_item_to_row(item, profile_id) for item in normalized
-            ]).execute()
+            rows = [_grocery_item_to_row(item, profile_id, recipe_grocery_plan_id) for item in normalized]
+            try:
+                supabase.table("grocery_cart_items").insert(rows).execute()
+            except Exception as insert_error:
+                if recipe_grocery_plan_id and "recipe_grocery_plan_id" in str(insert_error):
+                    for row in rows:
+                        row.pop("recipe_grocery_plan_id", None)
+                    supabase.table("grocery_cart_items").insert(rows).execute()
+                else:
+                    raise
         return get_grocery_cart()
     except Exception as e:
         print(f"Error replacing planned grocery cart, using process fallback: {e}")
         manual_rows = [item for item in _grocery_cart_fallback if item.get("source") == "manual"]
+        if recipe_grocery_plan_id:
+            normalized = [{**item, "recipeGroceryPlanId": recipe_grocery_plan_id} for item in normalized]
         return _set_grocery_fallback([*manual_rows, *normalized])
 
 def add_grocery_cart_item(item: Dict[str, Any], user_name: str | None = None) -> Dict[str, Any]:
@@ -355,7 +538,102 @@ def clear_planned_grocery_cart(user_name: str | None = None) -> bool:
         _grocery_cart_fallback[:] = [item for item in _grocery_cart_fallback if item.get("source") != "agent"]
         return True
 
-# 5. Macro Intake Diary CRUD
+# 5. Recipe + Grocery Plan Artifacts
+def save_recipe_grocery_plan(
+    plan: Dict[str, Any],
+    cart_items: List[Dict[str, Any]] | None = None,
+    update_cart: bool = False,
+    user_name: str | None = None
+) -> Dict[str, Any]:
+    """
+    Persists a recipe+ingredient artifact. Grocery requests may also replace
+    agent-generated native cart rows linked back to this artifact.
+    """
+    profile_id = get_household_profile_id()
+    cart_items = cart_items or []
+    normalized_plan = _normalize_recipe_grocery_plan(plan, cart_items, update_cart)
+    if not normalized_plan:
+        return {}
+
+    saved_plan = dict(normalized_plan)
+    try:
+        response = supabase.table("recipe_grocery_plans").upsert(
+            _recipe_plan_to_row(normalized_plan, profile_id)
+        ).execute()
+        saved_rows = _recipe_rows_to_plans(response.data or [])
+        if saved_rows:
+            saved_plan = {**saved_plan, **saved_rows[0], "updatesCart": bool(update_cart), "cartItemCount": len(cart_items)}
+    except Exception as e:
+        print(f"Error saving recipe grocery plan, using process fallback: {e}")
+        existing_index = next(
+            (idx for idx, item in enumerate(_recipe_grocery_plan_fallback) if str(item.get("id")) == str(saved_plan["id"])),
+            None
+        )
+        if existing_index is None:
+            _recipe_grocery_plan_fallback.append(saved_plan)
+        else:
+            _recipe_grocery_plan_fallback[existing_index] = saved_plan
+
+    if update_cart:
+        saved_plan["cart"] = replace_planned_grocery_cart(
+            cart_items,
+            user_name=user_name,
+            recipe_grocery_plan_id=saved_plan["id"]
+        )
+    return saved_plan
+
+def get_recipe_grocery_plan(plan_id: str, user_name: str | None = None) -> Dict[str, Any] | None:
+    """Fetches one recipe+grocery artifact by id."""
+    profile_id = get_household_profile_id()
+    try:
+        response = (
+            supabase.table("recipe_grocery_plans")
+            .select("*")
+            .eq("profile_id", profile_id)
+            .eq("id", plan_id)
+            .limit(1)
+            .execute()
+        )
+        plans = _recipe_rows_to_plans(response.data or [])
+        return plans[0] if plans else None
+    except Exception as e:
+        print(f"Error fetching recipe grocery plan, using process fallback: {e}")
+        return next((dict(plan) for plan in _recipe_grocery_plan_fallback if str(plan.get("id")) == str(plan_id)), None)
+
+def list_recipe_grocery_plans(limit: int = 10, user_name: str | None = None) -> List[Dict[str, Any]]:
+    """Lists recent recipe+grocery artifacts for the shared household."""
+    profile_id = get_household_profile_id()
+    try:
+        safe_limit = max(1, min(int(limit or 10), 50))
+    except (TypeError, ValueError):
+        safe_limit = 10
+    try:
+        response = (
+            supabase.table("recipe_grocery_plans")
+            .select("*")
+            .eq("profile_id", profile_id)
+            .order("created_at", desc=True)
+            .limit(safe_limit)
+            .execute()
+        )
+        return _recipe_rows_to_plans(response.data or [])
+    except Exception as e:
+        print(f"Error listing recipe grocery plans, using process fallback: {e}")
+        return [
+            dict(plan)
+            for plan in sorted(
+                _recipe_grocery_plan_fallback,
+                key=lambda item: str(item.get("createdAt") or ""),
+                reverse=True
+            )[:safe_limit]
+        ]
+
+def get_latest_recipe_grocery_plan_metadata(user_name: str | None = None) -> Dict[str, Any] | None:
+    """Returns compact metadata for the latest recipe+grocery artifact."""
+    plans = list_recipe_grocery_plans(limit=1, user_name=user_name)
+    return _recipe_plan_metadata(plans[0]) if plans else None
+
+# 6. Macro Intake Diary CRUD
 def get_macro_diary(user_name: str) -> List[Dict[str, Any]]:
     """Fetches macro log records from Supabase."""
     profile_id = get_user_id(user_name)

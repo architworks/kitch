@@ -1,6 +1,6 @@
 # Kitch: Current AI Architecture
 
-Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents perform reasoning and intent routing. Python tools perform side effects. Supabase stores structured application state. ADK memory stores flexible household brand preferences.
+Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents reason and route intent. Python tools perform side effects. Supabase stores structured application state. ADK memory stores flexible household preferences.
 
 ---
 
@@ -15,14 +15,14 @@ flowchart LR
     App --> Coordinator[kitch_coordinator]
     Coordinator --> Chef[chef_planner]
     Coordinator --> Vision[vision_scanner]
-    Coordinator --> Checkout[checkout_exporter]
+    Coordinator --> RecipeGrocery[recipe_grocery_planner]
     Chef --> Tools[Python Tools]
     Vision --> Tools
-    Checkout --> Tools
+    RecipeGrocery --> Tools
     Tools --> Supabase[(Supabase)]
-    Checkout --> Memory[ADK InMemoryMemoryService]
+    RecipeGrocery --> Memory[ADK InMemoryMemoryService]
     Runner --> Sessions[ADK InMemorySessionService]
-    Checkout --> Zepto[Zepto MCP Adapter]
+    API --> Zepto[ZeptoProviderAdapter]
 ```
 
 The browser never calls agents directly. It calls FastAPI. FastAPI creates ADK-compatible messages, runs the ADK `Runner`, and returns the final agent response plus any state-sync hint.
@@ -57,26 +57,26 @@ Parent triage agent.
 Responsibilities:
 
 - Understand the user's intent.
-- Route meal planning and schedule questions to `chef_planner`.
+- Route weekly schedule creation, schedule lookup, and swaps to `chef_planner`.
 - Route food logging, macro diary, pantry, and image tasks to `vision_scanner`.
-- Route grocery, shopping list, brand preference, and Zepto/Blinkit requests to `checkout_exporter`.
+- Route recipes, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
 - Answer simple general chat directly.
 
 ### `chef_planner`
 
-Meal planning and recipe reasoning agent.
+Lightweight meal scheduling agent.
 
 Responsibilities:
 
-- Generate dynamic meal plans.
+- Generate dynamic weekly meal schedules.
 - Treat "next week" as the upcoming Monday-Sunday planning window.
 - Include exact dates in meal-plan responses.
 - Save structured weekly meal plans to Supabase.
-- Store actual recipe names, not recipe IDs.
+- Store actual meal names, not recipe IDs.
 - Update one meal slot without rewriting the rest of the plan.
 - Answer schedule questions such as "what's for dinner tonight?"
 
-There is no static recipe database.
+There is no static recipe database. The weekly planner does not save ingredients or detailed recipes for every meal upfront.
 
 ### `vision_scanner`
 
@@ -90,30 +90,30 @@ Responsibilities:
 - Detect pantry/fridge items from text or photos.
 - Add detected stock to the shared household pantry.
 
-If a fridge photo is submitted with a grocery request, the API first runs the photo/pantry update turn, then runs a follow-up grocery-planning turn against the updated pantry.
+If a fridge photo is submitted with a grocery request, the API first runs the photo/pantry update turn, then runs a follow-up recipe+grocery turn against the updated pantry.
 
-### `checkout_exporter`
+### `recipe_grocery_planner`
 
-Grocery planning, brand preference, and provider-prep agent.
+Recipe, ingredient, and native grocery planning agent.
 
 Responsibilities:
 
-- Read the shared weekly plan.
-- Read shared pantry stock.
-- Infer ingredients from dynamic recipe names or one-off dish requests.
-- Scale grocery requirements for household size.
-- Save structured native grocery cart rows with `save_grocery_cart_tool`.
-- Include pantry-covered rows with `alreadyStocked=true`.
+- Generate recipe cards and structured ingredients for recipe-only requests.
+- Save recipe-only outputs as `recipe_grocery_plans` without touching the native grocery cart.
+- Generate recipe cards and structured ingredients for grocery requests.
+- Read only the requested meal/day scope from the weekly schedule.
+- Read pantry stock before grocery planning.
+- Save pantry-aware native cart rows derived from the same recipe cards.
+- Link native cart rows to the source recipe+grocery artifact.
 - Preserve manual cart rows by replacing only `source=agent` rows.
-- Store household brand preferences in ADK memory.
-- Sync native cart rows to Zepto when the user asks for Zepto.
-- Never place an order from chat.
+- Store and search household food preferences in ADK memory.
+- Avoid Zepto/Blinkit/provider tools.
 
 ---
 
 ## Tool Boundary
 
-Meal tools:
+Meal schedule tools:
 
 - `get_weekly_schedule_tool`
 - `save_weekly_plan_tool`
@@ -127,20 +127,22 @@ Pantry and macro tools:
 - `log_macros_tool`
 - `get_macro_diary_tool`
 
-Grocery and provider tools:
+Recipe+grocery tools:
 
 - `get_grocery_cart_tool`
-- `save_grocery_cart_tool`
 - `clear_planned_grocery_cart_tool`
-- `set_brand_preference`
-- `get_brand_preference`
-- `sync_native_cart_to_zepto_tool`
-- `get_zepto_cart_tool`
-- `place_zepto_order_tool`
-- `export_to_delivery`
+- `save_recipe_grocery_plan_tool`
+- `get_recipe_grocery_plan_tool`
+- `list_recipe_grocery_plans_tool`
+- `set_household_food_preference_tool`
+- `search_household_food_preferences_tool`
+- `get_pantry_stock_tool`
+- `add_to_pantry_tool`
 
-Safety note:
+Provider tools and adapters:
 
+- `sync_native_cart_to_zepto_tool`, `get_zepto_cart_tool`, `place_zepto_order_tool`, and `export_to_delivery` remain in backend code for HTTP/provider flows and legacy preview support.
+- They are not part of the `recipe_grocery_planner` tool list.
 - `place_zepto_order_tool` is intentionally non-executing from chat. Real order placement happens only through the backend approval endpoint after a frontend button click.
 
 ---
@@ -171,7 +173,8 @@ This lets agents reason about today's real date separately from the upcoming pla
 
 Supabase stores structured app state:
 
-- Meal plans.
+- Meal schedules.
+- Recipe+grocery artifacts.
 - Pantry stock.
 - Grocery cart rows.
 - Macro logs.
@@ -179,10 +182,11 @@ Supabase stores structured app state:
 
 ADK memory stores flexible household preferences:
 
-- Brand preferences such as `butter: Amul butter`.
-- Provider search mapping hints.
+- Food preferences such as "we prefer not to use tofu".
+- Category exclusions such as "avoid mushrooms".
+- Provider/brand preferences such as `butter: Amul butter`.
 
-Brand memory affects provider search terms, not the generic native cart row. Example: the native cart row remains `butter`, while Zepto search may use `Amul butter`.
+Food preferences affect recipe and ingredient generation. Brand memory affects provider search terms, not the generic native cart row.
 
 ---
 

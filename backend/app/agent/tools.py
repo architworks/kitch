@@ -12,6 +12,9 @@ from app.supabase_client import (
     get_grocery_cart as db_get_grocery_cart,
     replace_planned_grocery_cart as db_replace_planned_grocery_cart,
     clear_planned_grocery_cart as db_clear_planned_grocery_cart,
+    save_recipe_grocery_plan as db_save_recipe_grocery_plan,
+    get_recipe_grocery_plan as db_get_recipe_grocery_plan,
+    list_recipe_grocery_plans as db_list_recipe_grocery_plans,
     supabase
 )
 from app.providers.zepto import ZeptoProviderAdapter
@@ -61,8 +64,7 @@ def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
       plan_dict[day] = {
         "breakfast": row.get("breakfast_recipe_id") or "",
         "lunch": row.get("lunch_recipe_id") or "",
-        "dinner": row.get("dinner_recipe_id") or "",
-        "snack": row.get("snack_recipe_id") or ""
+        "dinner": row.get("dinner_recipe_id") or ""
       }
       
     # Fill in missing days with empty meal slots
@@ -71,8 +73,7 @@ def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
         plan_dict[day] = {
           "breakfast": "",
           "lunch": "",
-          "dinner": "",
-          "snack": ""
+          "dinner": ""
         }
     return plan_dict
   except Exception as e:
@@ -114,7 +115,6 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
       breakfast = meals.get("breakfast", "")
       lunch = meals.get("lunch", "")
       dinner = meals.get("dinner", "")
-      snack = meals.get("snack", "")
       
       supabase.table("meal_plans").upsert({
           "profile_id": profile_id,
@@ -122,7 +122,7 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
           "breakfast_recipe_id": str(breakfast).strip(),
           "lunch_recipe_id": str(lunch).strip(),
           "dinner_recipe_id": str(dinner).strip(),
-          "snack_recipe_id": str(snack).strip()
+          "snack_recipe_id": ""
       }, on_conflict="profile_id,day").execute()
       
     return {"status": "success", "message": "Successfully synchronized weekly plan to database."}
@@ -166,8 +166,7 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
     col_map = {
         "breakfast": "breakfast_recipe_id",
         "lunch": "lunch_recipe_id",
-        "dinner": "dinner_recipe_id",
-        "snack": "snack_recipe_id"
+        "dinner": "dinner_recipe_id"
     }
     
     target_col = col_map.get(meal_category)
@@ -221,6 +220,144 @@ def clear_planned_grocery_cart_tool(user_name: str = "") -> Dict[str, Any]:
   """
   ok = db_clear_planned_grocery_cart()
   return {"status": "success" if ok else "error"}
+
+def save_recipe_grocery_plan_tool(
+    plan: Dict[str, Any],
+    cart_items: List[Dict[str, Any]] | None = None,
+    update_cart: bool = False,
+    user_name: str = ""
+) -> Dict[str, Any]:
+  """
+  Save a recipe+ingredient artifact. For grocery requests, also replace
+  agent-generated native cart rows with rows derived from the same recipe cards.
+
+  Args:
+      plan: Structured recipe+grocery artifact. Include scope, request,
+            recipeCards, ingredients, pantryConsiderations, householdSize, notes.
+      cart_items: Structured native cart rows derived from the plan's ingredients.
+      update_cart: True only when the user asked for groceries/cart/buy/order.
+      user_name: Ignored for now. Artifacts are shared household state.
+  """
+  plan = _ensure_dict(plan)
+  cart_items = _ensure_dict(cart_items or [])
+
+  if not isinstance(plan, dict):
+    return {"status": "error", "message": f"Expected a dict for plan, got {type(plan).__name__}"}
+  if not isinstance(cart_items, list):
+    return {"status": "error", "message": f"Expected a list for cart_items, got {type(cart_items).__name__}"}
+
+  saved = db_save_recipe_grocery_plan(plan=plan, cart_items=cart_items, update_cart=bool(update_cart), user_name=user_name)
+  if not saved:
+    return {"status": "error", "message": "Recipe+grocery plan could not be saved."}
+
+  return {
+    "status": "success",
+    "message": (
+      "Saved recipe+ingredient artifact"
+      + (" and updated the native household grocery cart." if update_cart else ".")
+    ),
+    "plan": saved,
+    "cart": saved.get("cart")
+  }
+
+def get_recipe_grocery_plan_tool(plan_id: str) -> Dict[str, Any]:
+  """
+  Fetch a saved recipe+grocery artifact by id.
+  """
+  plan = db_get_recipe_grocery_plan(str(plan_id).strip())
+  if not plan:
+    return {"status": "not_found", "plan": None}
+  return {"status": "success", "plan": plan}
+
+def list_recipe_grocery_plans_tool(limit: int = 10) -> Dict[str, Any]:
+  """
+  List recent saved recipe+grocery artifacts.
+  """
+  try:
+    safe_limit = max(1, min(int(limit or 10), 50))
+  except (TypeError, ValueError):
+    safe_limit = 10
+  return {"status": "success", "plans": db_list_recipe_grocery_plans(limit=safe_limit)}
+
+def _resolve_memory_service(tool_context: ToolContext = None):
+  mem_svc = None
+  if tool_context:
+    if hasattr(tool_context, "get_invocation_context"):
+      try:
+        mem_svc = tool_context.get_invocation_context().memory_service
+      except Exception:
+        pass
+    elif hasattr(tool_context, "_invocation_context"):
+      try:
+        mem_svc = tool_context._invocation_context.memory_service
+      except Exception:
+        pass
+
+  if not mem_svc:
+    try:
+      from app.agent.core import memory_service as fallback_mem_svc
+      mem_svc = fallback_mem_svc
+    except ImportError:
+      pass
+  return mem_svc
+
+async def set_household_food_preference_tool(preference_text: str, tool_context: ToolContext = None) -> Dict[str, Any]:
+  """
+  Store a household-level food preference, dislike, exclusion, or planning style
+  in ADK memory as plain text.
+  """
+  preference = str(preference_text or "").strip()
+  if not preference:
+    return {"status": "error", "message": "No preference text was provided."}
+
+  try:
+    from google.adk.events import Event
+    from google.genai.types import Content, Part
+    import time
+
+    mem_svc = _resolve_memory_service(tool_context)
+    if mem_svc:
+      event = Event(
+          id=f"food_pref_{int(time.time())}",
+          content=Content(parts=[Part(text=f"food_preference: {preference}")]),
+          author="system",
+          timestamp=time.time()
+      )
+      await mem_svc.add_events_to_memory(
+          app_name="kitch",
+          user_id="shared_household",
+          events=[event]
+      )
+
+    return {"status": "success", "message": f"Saved household food preference: {preference}"}
+  except Exception as e:
+    return {"status": "error", "message": f"Failed to save household food preference: {str(e)}"}
+
+async def search_household_food_preferences_tool(query: str, tool_context: ToolContext = None) -> Dict[str, Any]:
+  """
+  Search household food preferences before recipe and grocery generation.
+  """
+  mem_svc = _resolve_memory_service(tool_context)
+  if not mem_svc:
+    return {"status": "success", "preferences": []}
+
+  try:
+    memory_result = await mem_svc.search_memory(
+        app_name="kitch",
+        user_id="shared_household",
+        query=f"household food preference recipe grocery dislike avoid prefer {query}"
+    )
+    preferences = []
+    for memory in memory_result.memories or []:
+      try:
+        text = memory.content.parts[0].text
+      except Exception:
+        text = ""
+      if text:
+        preferences.append(text)
+    return {"status": "success", "preferences": preferences}
+  except Exception as e:
+    return {"status": "error", "message": f"Failed to search household food preferences: {str(e)}", "preferences": []}
 
 async def sync_native_cart_to_zepto_tool(tool_context: ToolContext = None) -> Dict[str, Any]:
   """

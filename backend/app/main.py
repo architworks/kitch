@@ -28,6 +28,9 @@ from app.supabase_client import (
     update_grocery_cart_item,
     delete_grocery_cart_item,
     clear_planned_grocery_cart,
+    get_recipe_grocery_plan,
+    list_recipe_grocery_plans,
+    get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
     update_household_profile
 )
@@ -148,6 +151,7 @@ async def chat_endpoint(payload: ChatRequest):
         weekly_plan_before = get_weekly_schedule_dict()
         pantry_before = get_pantry_stock()
         grocery_cart_before = get_grocery_cart()
+        latest_recipe_plan_before = get_latest_recipe_grocery_plan_metadata()
         
         # 3. Construct a standard Content message for the ADK runner
         user_message = Content(
@@ -168,6 +172,7 @@ async def chat_endpoint(payload: ChatRequest):
         weekly_plan_after = get_weekly_schedule_dict()
         pantry_after = get_pantry_stock()
         grocery_cart_after = get_grocery_cart()
+        latest_recipe_plan_after = get_latest_recipe_grocery_plan_metadata()
 
         # Detect persisted state changes first; text phrasing is only a fallback.
         action = None
@@ -179,6 +184,8 @@ async def chat_endpoint(payload: ChatRequest):
             action = {"type": "UPDATE_PANTRY"}
         elif grocery_cart_after != grocery_cart_before:
             action = {"type": "UPDATE_GROCERY_CART"}
+        elif latest_recipe_plan_after != latest_recipe_plan_before:
+            action = {"type": "UPDATE_RECIPE_GROCERY"}
         elif (
             "swapped" in text_lower
             or "modified your meal plan" in text_lower
@@ -282,8 +289,9 @@ async def upload_photo_endpoint(
                 parts=[Part(text=(
                     "The user's fridge/pantry photo has just been processed and pantry stock has been updated. "
                     f"Now answer this grocery request using the updated pantry state: {user_context}\n\n"
-                    "Route to grocery management. Compile the grocery requirements, account for pantry-covered items, "
-                    "save structured native grocery cart rows, and sync to Zepto only if the user explicitly asked for Zepto."
+                    "Route to recipe_grocery_planner. Generate the requested recipe+ingredient artifact, "
+                    "account for pantry-covered items, and save structured native grocery cart rows when this is a grocery request. "
+                    "Do not sync to Zepto or Blinkit from chat."
                 ))],
                 role="user"
             )
@@ -324,13 +332,15 @@ async def get_state_endpoint(user_name: str):
         diary = get_macro_diary(active_user)
         weekly_plan = get_weekly_schedule_dict()
         grocery_cart = get_grocery_cart()
+        latest_recipe_grocery_plan = get_latest_recipe_grocery_plan_metadata()
         
         return {
             "profile": profile,
             "pantry_stock": pantry,
             "macro_diary": diary,
             "weekly_plan": weekly_plan,
-            "grocery_cart": grocery_cart
+            "grocery_cart": grocery_cart,
+            "latest_recipe_grocery_plan": latest_recipe_grocery_plan
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -421,7 +431,38 @@ async def clear_planned_grocery_cart_endpoint():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 5. Dynamic Pantry Calculations Route
+# 5. Recipe + Grocery Artifact Routes
+@app.get("/api/recipe-grocery/plans")
+async def list_recipe_grocery_plans_endpoint(limit: int = 10):
+    """Returns recent recipe+ingredient artifacts for future recipe UI surfaces."""
+    try:
+        return {"plans": list_recipe_grocery_plans(limit=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/recipe-grocery/plans/latest")
+async def latest_recipe_grocery_plan_endpoint():
+    """Returns the latest full recipe+ingredient artifact."""
+    try:
+        plans = list_recipe_grocery_plans(limit=1)
+        return {"plan": plans[0] if plans else None}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/recipe-grocery/plans/{plan_id}")
+async def get_recipe_grocery_plan_endpoint(plan_id: str):
+    """Returns one recipe+ingredient artifact by id."""
+    try:
+        plan = get_recipe_grocery_plan(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Recipe+grocery plan not found.")
+        return {"plan": plan}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 6. Dynamic Pantry Calculations Route
 @app.post("/api/grocery/calculate")
 async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     """
@@ -434,7 +475,7 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 6. Blinkit / Zepto Brand-Mapped Exporter Route
+# 7. Blinkit / Zepto Brand-Mapped Exporter Route
 @app.post("/api/grocery/export")
 async def export_grocery_endpoint(payload: Dict[str, Any]):
     """

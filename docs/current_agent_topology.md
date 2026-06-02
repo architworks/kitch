@@ -6,12 +6,12 @@ This document focuses only on agent roles, routing, tools, memory boundaries, an
 
 ## Topology Overview
 
-Kitch uses a hub-and-spoke ADK topology:
+Kitch uses a hub-and-spoke Google ADK 2.0 topology:
 
 - One parent coordinator agent.
 - Three specialist sub-agents.
-- Explicit Python tools for database, memory, and provider side effects.
-- Shared household state for plans, pantry, grocery cart, and brand preferences.
+- Python tools for database, memory, and app-state side effects.
+- Shared household state for schedules, recipe+grocery plans, pantry, native cart, and food preferences.
 - Individual state for macro diary logging.
 
 ```mermaid
@@ -23,23 +23,27 @@ flowchart TD
     subgraph Agents[Specialist Agents]
         Chef[chef_planner]
         Vision[vision_scanner]
-        Checkout[checkout_exporter]
+        RecipeGrocery[recipe_grocery_planner]
     end
 
     Coordinator --> Chef
     Coordinator --> Vision
-    Coordinator --> Checkout
+    Coordinator --> RecipeGrocery
 
-    Chef --> MealTools[Meal Plan Tools]
+    Chef --> MealTools[Meal Schedule Tools]
     Vision --> IntakeTools[Pantry and Macro Tools]
-    Checkout --> GroceryTools[Grocery, Brand, Provider Tools]
+    RecipeGrocery --> RecipeTools[Recipe, Grocery, Memory Tools]
 
     MealTools --> Supabase[(Supabase)]
     IntakeTools --> Supabase
-    GroceryTools --> Supabase
-    GroceryTools --> Memory[ADK Memory]
-    GroceryTools --> Zepto[Zepto MCP Adapter]
+    RecipeTools --> Supabase
+    RecipeTools --> Memory[ADK Memory]
+
+    API --> ProviderAdapters[Provider Adapters]
+    ProviderAdapters --> Zepto[Zepto MCP]
 ```
+
+Provider sync is not part of the recipe+grocery agent. The Zepto adapter remains behind backend HTTP endpoints and can later move behind a dedicated provider agent.
 
 ---
 
@@ -52,9 +56,9 @@ Role:
 Responsibilities:
 
 - Interpret natural language intent.
-- Route meal planning and schedule questions to `chef_planner`.
-- Route food logging, macro diary, pantry, and image requests to `vision_scanner`.
-- Route groceries, shopping lists, brand preferences, and provider cart actions to `checkout_exporter`.
+- Route weekly schedule creation, schedule lookup, and meal swaps to `chef_planner`.
+- Route food logging, macro diary, pantry scanning, and image requests to `vision_scanner`.
+- Route recipes, cooking steps, ingredients, grocery planning, and food preferences to `recipe_grocery_planner`.
 - Answer simple general chat directly.
 
 Tools:
@@ -76,18 +80,17 @@ State available:
 
 Role:
 
-- Household meal planner and recipe generator.
+- Lightweight household meal scheduler.
 
 Responsibilities:
 
-- Generate dynamic weekly meal plans.
+- Generate dynamic weekly meal schedules.
 - Plan "next week" as the upcoming Monday-Sunday date window.
 - Include exact dates in meal-plan responses.
 - Save structured weekly plans.
 - Read existing weekly plans.
 - Change one meal slot without rewriting the week.
 - Answer schedule questions such as "what's for dinner tonight?"
-- Scale portions conversationally for household size or guests.
 
 Tools:
 
@@ -100,14 +103,14 @@ Persistence:
 
 - Writes to Supabase `meal_plans`.
 - Meal plans are shared household state.
-- Meal slots store recipe name strings, not recipe IDs.
+- Meal slots store meal name strings, not recipe IDs.
 
 Constraints:
 
 - No static recipe database.
 - No local recipe IDs.
-- Full plan creation should save all seven days.
-- Single-slot edits should preserve the rest of the plan.
+- No snack planning.
+- Detailed recipes, ingredients, and groceries are not generated here.
 
 ---
 
@@ -142,29 +145,28 @@ Persistence:
 Photo-plus-grocery behavior:
 
 - Fridge photos remain a `vision_scanner` responsibility.
-- If the same upload also asks for groceries, FastAPI runs grocery planning after the pantry update completes.
+- If the same upload also asks for groceries, FastAPI runs recipe+grocery planning after the pantry update completes.
 
 ---
 
-## `checkout_exporter`
+## `recipe_grocery_planner`
 
 Role:
 
-- Grocery planner, brand preference manager, and provider cart coordinator.
+- Recipe, ingredient, pantry-aware grocery, native cart, and household food-preference planner.
 
 Responsibilities:
 
-- Compile grocery requirements from saved meal plans, scoped days, single meals, or standalone dishes.
-- Read shared pantry stock before planning.
-- Infer ingredients from dynamic recipe name strings.
-- Scale quantities for household size.
-- Save native grocery cart rows.
-- Include needed rows and pantry-covered rows.
-- Preserve manual rows across agent replanning.
-- Save and apply household brand preferences.
-- Sync unchecked, non-stocked native cart rows to Zepto when requested.
-- Report Zepto matches, unavailable items, and provider errors.
-- Never place a real order from ordinary chat.
+- Generate recipe cards and ingredients for recipe-only requests.
+- Generate recipe cards and ingredients for grocery requests.
+- Resolve only the requested scope: a dish, tonight's dinner, tomorrow, next N days, or the full week if explicitly requested.
+- Read the weekly schedule only for schedule-based grocery/recipe requests.
+- Read pantry stock before grocery planning.
+- Save every recipe+ingredient output as a `recipe_grocery_plans` artifact.
+- Save native grocery cart rows only when the user asks for groceries/cart/buy/order.
+- Link agent-created cart rows to the source recipe+grocery artifact.
+- Preserve manual cart rows across agent replanning.
+- Save and search flexible household food preferences in ADK memory.
 
 Tools:
 
@@ -172,30 +174,45 @@ Tools:
 - `get_pantry_stock_tool`
 - `add_to_pantry_tool`
 - `get_grocery_cart_tool`
-- `save_grocery_cart_tool`
 - `clear_planned_grocery_cart_tool`
-- `set_brand_preference`
-- `get_brand_preference`
-- `sync_native_cart_to_zepto_tool`
-- `get_zepto_cart_tool`
-- `place_zepto_order_tool`
-- `export_to_delivery`
+- `save_recipe_grocery_plan_tool`
+- `get_recipe_grocery_plan_tool`
+- `list_recipe_grocery_plans_tool`
+- `set_household_food_preference_tool`
+- `search_household_food_preferences_tool`
 - `get_current_datetime`
 
 Persistence and memory:
 
-- Reads meal plans from Supabase.
-- Reads/writes pantry through Supabase.
+- Reads meal names from Supabase `meal_plans`.
+- Reads/writes pantry through Supabase `pantry_stock`.
+- Writes recipe+ingredient artifacts to Supabase `recipe_grocery_plans`.
 - Writes native grocery rows to Supabase `grocery_cart_items`.
-- Writes brand preferences to ADK memory using `user_id="shared_household"`.
-- Brand preferences influence provider search terms, not native row names.
+- Writes household food preferences to ADK memory using `user_id="shared_household"`.
 
-Provider boundary:
+Constraints:
 
-- Native cart is the Kitch source of truth.
-- Zepto MCP is reached only through `ZeptoProviderAdapter`.
-- Zepto cart sync may add items after the user asks for Zepto.
-- Order placement requires a separate frontend approval button.
+- Recipe-only requests do not update the native grocery cart.
+- Grocery requests save both the artifact and native cart rows.
+- Cart rows must be derived from the same recipe cards.
+- Pantry-covered rows remain in the cart with `alreadyStocked=true`.
+- The agent does not call Zepto, Blinkit, provider sync, export, or order-placement tools.
+
+---
+
+## Provider Boundary
+
+Provider behavior is outside the current agent topology.
+
+Current backend-owned provider behavior:
+
+- Native cart remains the Kitch source of truth.
+- `ZeptoProviderAdapter` can sync unchecked, non-stocked native cart rows to Zepto through backend HTTP routes.
+- Real order placement requires a separate frontend approval button.
+
+Future direction:
+
+- Provider cart translation can move behind a separate provider agent if the product needs agentic catalog/substitution reasoning.
 
 ---
 
@@ -205,9 +222,10 @@ Shared household state:
 
 - Weekly meal plan.
 - Planning week date window.
+- Recipe+grocery artifacts.
 - Pantry/fridge stock.
 - Native grocery cart.
-- Brand preferences.
+- Household food preferences.
 - Household size and planning diet profile.
 
 Individual state:
@@ -230,4 +248,4 @@ Planned production replacements:
 - `VertexAISessionService`
 - `VertexAIMemoryBank`
 
-Brand memory remains flexible text for agent reference. It is intentionally not modeled as a rigid brand preference database.
+Food and brand preferences remain flexible text for agent reference. They are intentionally not modeled as rigid preference tables.
