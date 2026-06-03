@@ -36,9 +36,9 @@ flowchart TD
     
     %% Multi-Agent Routing & Delegation (3-Spoke Topology)
     subgraph Agent_Team [Kitch Collaborative Spoke Team]
-        SubChef[Chef Planner Agent<br>Nutritionist & Chef]
+        SubChef[Chef Planner Agent<br>Lightweight Meal Scheduler]
         SubVision[Vision Scanner Agent<br>Multimodal OCR]
-        SubCart[Checkout Exporter Agent<br>Logistics & Brand Memory]
+        SubCart[Recipe Grocery Planner Agent<br>Recipes, Ingredients & Native Cart]
     end
     
     Parent -->|Delegates meal plans| SubChef
@@ -48,7 +48,7 @@ flowchart TD
     SubVision -->|Returns logs| Parent
     
     Parent -->|Delegates recipe and grocery| SubCart
-    SubCart -->|Returns recipe plus cart status| Parent
+    SubCart -->|Returns recipe plus native cart status| Parent
     
     %% Specialized Spoke Dependencies
     SubChef -->|DB Tools| DB[(Supabase DB<br>meal_plans)]
@@ -56,7 +56,7 @@ flowchart TD
     SubVision -->|Multimodal Ingestion| LLM[OpenAI-Compatible LLM Gateway via ADK LiteLlm]
     SubVision -->|Log Tools| DB[(Supabase DB<br>macro_diary & pantry_stock)]
     
-    SubCart -->|search_memory| MemorySvc
+    SubCart -->|food and brand preferences| MemorySvc
     SubCart -->|Artifact and Cart Tools| RecipeCart[recipe_grocery_plans and grocery_cart_items]
 ```
 

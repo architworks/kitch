@@ -1,159 +1,243 @@
-# Kitch: Product Vision & Requirements Document
+# Kitch: Product Vision and Requirements
 
-> [!NOTE]
-> **Kitch** is a next-generation, AI-driven culinary assistant, personal chef, and smart household grocery manager. By blending conversational intelligence, multimodal computer vision, and local workspace file memory, it takes the cognitive load out of nourishing yourself, your family, and your household.
-
----
-
-## 1. Executive Summary & Vision
-
-Modern life demands split-second decisions about what we eat, yet managing nutrition, dietary preferences, household scaling, and grocery shopping remains a highly fragmented and stressful chore. 
-
-**Kitch** bridges this gap. It acts as an empathetic, intelligent agent that:
-1. **Understands your household’s unique palate and health targets.**
-2. **Generates balanced, dynamic weekly meal plans** that scale perfectly to your household size (optimized for a 3-person home).
-3. **Subtracts ingredients you already own** (pantry/fridge stock) from the weekly grocery orders to eliminate redundant buying.
-4. **Maintains a platform-agnostic, Intermediary Native Grocery List** in its local database, separating planned needs from delivery logistics.
-5. **Logs nutrition with zero friction** on an *individualized* basis using simple photo uploads.
-6. **Remembers your precise ingredient brand preferences** using agent-native plain-text memory that can later move to Vertex AI Memory Bank without forcing rigid relational schemas.
-7. **Syncs native groceries to delivery providers through adapters**, starting with Zepto MCP cart sync while keeping real order placement behind explicit user approval.
-
-```mermaid
-graph TD
-    User([User]) <--> ChatAgent[Kitch Conversational Agent]
-    User <--> WebDash[Web Dashboard]
-    ChatAgent <--> CoreAI[Kitch GenAI Core]
-    WebDash <--> CoreAI
-    
-    CoreAI --> Planner[Dynamic Weekly Planner]
-    CoreAI --> VisionEngine[Plate & Fridge Vision Scanner]
-    CoreAI --> PantryStock[Shared Pantry Inventory]
-    CoreAI --> NativeList[Intermediary Native Grocery List]
-    CoreAI <-->|Natively Reads & Writes| BrandPref[ADK Memory: Plain-Text Brand Preferences]
-    
-    NativeList -->|Modular Adapter Layer| DeliveryRouter{Delivery Provider Router}
-    DeliveryRouter -->|Legacy Preview| ProviderPayload[Provider Payload Review]
-    DeliveryRouter -->|Current Adapter| ZeptoMCP[Zepto MCP Cart]
-    DeliveryRouter -->|Future Adapter| BlinkitMCP[Blinkit MCP Cart]
-    DeliveryRouter -->|Future Adapters| OtherAPI[Instacart / BigBasket API]
-```
+This document describes what Kitch is trying to become, what the product does today, and why several product and architecture choices were made. A new developer or coding agent should read this first to understand the direction of the app before changing implementation details.
 
 ---
 
-## 2. Core Pillars & User Experience
+## Product Vision
 
-### 🥗 Pillar 1: Dynamic Weekly Meal Planning & Pantry Subtraction
-*No more redundant buying or "What's for dinner?" arguments.*
-*   **Tailored to the Household:** Scales recipes and ingredient counts automatically for a 3-person home.
-*   **Pantry Subtraction Logic:** Rather than buying raw recipe volumes every week, the system cross-references your current **Pantry & Fridge Stock**. Required ordering volumes are calculated dynamically:
-    $$Shopping = \max(0, Required - Stock)$$
-    If you already have enough, the item is labeled as *Stocked* and omitted from the order cart.
-*   **Visual Fridge Scanning:** Simply take a photo of your fridge interior shelves. The computer vision engine segments shelves, detects items (e.g. cabbage, eggs, milk), and automatically inserts them into your Pantry Inventory.
+Kitch is an AI household kitchen companion for planning meals, preparing recipes, managing pantry-aware groceries, syncing a reviewed cart to delivery providers, and tracking individual nutrition.
 
-### 📊 Pillar 2: Platform-Agnostic Intermediary Grocery List
-*Decoupling recipe requirements from delivery providers.*
-*   **Intermediary Native List**: The database maintains a native, provider-agnostic shopping list. This list aggregates scaled ingredients, tracks ticked items, and adjusts for pantry stock.
-*   **Modular Delivery Adapters**: Delivery integrations are treated as modular plugins (the *Provider Pattern*). 
-*   **Zepto, Blinkit, and More**: Users can review their native list on the dashboard and sync eligible rows to a provider cart. The backend adapter maps native ingredients (e.g. "cabbage 1 piece") to merchant catalog products dynamically.
+The app is designed for a shared household where people eat from the same meal plan and pantry, but still keep individual nutrition logs. The current prototype household is prefilled as Archit, Anubhav, and Naman. Multi-household registration is intentionally deferred until the core household workflow is stable.
 
-### 📈 Pillar 3: Context-Isolated Household vs. Individual "Minds"
-*Shared collaborative assets alongside private personal health tracking.*
-*   **The Shared Household Mind (Pantry & Weekly Schedule):** Pantry inventories, weekly recipe calendars, and intermediary grocery lists are collaborative household assets. All housemates see, edit, and subtract from the *same* physical inventory.
-*   **The Individual Minds (Macro Diaries & User Preferences):** Calorie progress dials, daily macronutrient logs (Protein, Carbs, Fats, Fiber), and health journals are isolated **independently** per household member. 
-*   **Frictionless Personal Logs:** If the active member snaps a photo of their lunch, it logs macros only to that member's target diary. Other members' personal diaries remain separate.
+Kitch should reduce the day-to-day cognitive load of:
 
-### 📸 Pillar 4: Snap & Log (Computer Vision OCR)
-*Say goodbye to tedious manual logging.*
-*   **Photo-Based Estimation:** Snap a picture of your plate after eating. The multimodal GenAI identifies ingredients, estimates portion sizes, and logs personal macro/micro values.
-*   **Interactive Refinement:** The AI presents its best estimate ("Looks like 150g grilled chicken, 100g quinoa. Correct?") and lets you confirm or adjust with a simple tap.
-
-### 📝 Pillar 5: Agent-Native Brand Preferences
-*No redundant relational table overhead. The agent manages its own records.*
-*   **Plain-Text Preference Memory:** Rather than storing brand preferences in strict database tables, Kitch records specific brand settings as flexible text in ADK memory.
-*   **Active Conversational Updates:** If you casually tell Kitch during a chat: *"Oh, remember to always buy Country Delight milk from now on,"* the agent stores that preference for later grocery preparation.
-*   **Checkout Consulting:** When preparing a provider cart, the agent consults brand memory to translate generic native ingredients (e.g. "paneer 200g") into favored branded search terms (e.g. "Amul Malai Paneer 200g").
-*   **Deployment Path:** Local testing currently uses ADK in-memory services. Deployment should replace that with Vertex AI Memory Bank for persistence.
-
-### 💬 Pillar 6: Conversational Chat & Delivery Preparation
-*An agent that lives in your ecosystem and prepares delivery-ready grocery carts.*
-*   **Zepto Cart Sync:** Finalized native grocery rows can be synced into a real Zepto cart through the Zepto MCP adapter after the user asks for it.
-*   **Human-in-the-loop Order Approval:** Cart sync does not place an order. The app must show the Zepto cart summary and require a final approval button before order placement.
-*   **Conversational Chat (Telegram/WhatsApp):** Interact with Kitch on-the-go:
-    *   *“We have chicken and spinach in the fridge, what can we make for the 3 of us tonight?”*
-    *   *“Remember that our household prefers strictly organic whole wheat bread.”*
-    *   *“Export my shopping list to Blinkit.”*
+- Deciding what to cook.
+- Remembering what is already in the kitchen.
+- Turning meal plans into recipes and groceries.
+- Avoiding accidental duplicate purchases.
+- Preparing a delivery cart without letting an agent place real orders by itself.
+- Tracking personal macro intake without turning it into a manual spreadsheet task.
 
 ---
 
-## 3. Product Features & Functional Requirements
+## Product Principles
 
-### Feature Set 1: User & Household Profiling
-| Feature ID | Feature Name | Description | User Impact |
-| :--- | :--- | :--- | :--- |
-| **REQ-001** | Household Scaling | Configures household size (default: 3 people), dietary profiles (keto, vegan, balanced), and ingredient exclusions (allergies). | Scales all planned recipe grocery lists. |
-| **REQ-002** | Multi-User Macro Logs | Isolates macro logs, target calorie dials, and meal journals independently for each household member. | Accurate individual health tracking. |
+### 1. Shared household planning, individual nutrition
 
-### Feature Set 2: Pantry & Fridge Inventory Subtracted Planner
-| Feature ID | Feature Name | Description | User Impact |
-| :--- | :--- | :--- | :--- |
-| **REQ-003** | Auto-Planner | Creates a cohesive, balanced 7-day meal schedule scaling all ingredients by household size. | Eliminates decision fatigue. |
-| **REQ-004** | Shared Pantry Stock | A living shared inventory representing available ingredients in the home, editable manually or via natural language chats. | Tracks what the household already owns. |
-| **REQ-005** | Cart Subtraction Engine | Compares weekly recipe requirements against pantry stock, reducing ordering quantities mathematically. | Prevents food waste and saves money. |
+The household shares one weekly meal plan, one pantry, one recipe+grocery artifact history, and one native grocery cart.
 
-### Feature Set 3: Multimodal Vision Scanners
-| Feature ID | Feature Name | Description | User Impact |
-| :--- | :--- | :--- | :--- |
-| **REQ-006** | Plate Macro OCR | Users upload post-meal plates. GenAI estimates portions and logs values to the *active member's* profile. | Zero-barrier macro tracking. |
-| **REQ-007** | Fridge OCR Scan | Users upload fridge shelf layouts. GenAI detects ingredient volumes and appends them to the Shared Pantry Inventory. | Hands-free pantry stock logs. |
+Macro logging remains individual. If Archit logs a plate photo, it affects Archit's diary only. It should not change Anubhav or Naman's nutrition state.
 
-### Feature Set 4: Workspace File Memory & MCP Delivery
-| Feature ID | Feature Name | Description | User Impact |
-| :--- | :--- | :--- | :--- |
-| **REQ-008** | Brand Preference Memory | Agent maintains conversational plain-text brand preferences in ADK memory, later migratable to Vertex AI Memory Bank. | Customizes grocery payload preparation without rigid schema rules. |
-| **REQ-009** | Native Intermediary List | Maintains a unified, provider-agnostic required shopping list in the database. | Decouples groceries from merchants. |
-| **REQ-010** | Modular Provider Boundary | Exposes pluggable delivery adapter boundaries (Zepto, Blinkit, etc.) to map native items to merchant carts. | Keeps provider logic separate from Kitch's native cart. |
-| **REQ-011** | Human-in-the-loop Order Approval | Displays the real provider cart summary and requires final UI approval before order placement. | High security and error prevention. |
+**Why:** food planning and grocery purchasing are household operations, while nutrition tracking is personal. Treating pantry and meal plan as per-user state made the product incoherent because three people in one home would see different versions of the same dinner.
 
----
+### 2. Meal planning stays lightweight
 
-## 4. User Journey Scenarios
+The weekly planner stores meal names for breakfast, lunch, and dinner. It does not pre-generate recipes, ingredients, or grocery rows for every meal.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Archit as Archit (Telegram)
-    participant Agent as Kitch Agent
-    participant Memory as ADK Memory
-    participant DB as Supabase DB
-    participant Zepto as Zepto MCP Adapter
-    
-    Note over Archit, Memory: Scenario A: Updating Brand Preferences
-    Archit->>Agent: "Remember to always order bread of brand Bakers Dozen."
-    Agent->>Memory: Save preference ("bread" -> "Bakers Dozen Whole Wheat")
-    Memory-->>Agent: Preference saved successfully
-    Agent->>Archit: "Got it. I've updated household brand memory. I'll map bread to Bakers Dozen."
-    
-    Note over Archit, DB: Scenario B: Shared Subtracted List Compilation
-    Archit->>Agent: "Compile our grocery list."
-    Agent->>DB: Pull planned ingredients, subtract shared pantry, write required items
-    DB->>Agent: Shared native list compiled
-    Agent->>Archit: "Household Shopping List compiled in your database."
-    
-    Note over Archit, Zepto: Scenario C: Brand-Mapped Zepto Cart Sync
-    Archit->>Agent: "Add our grocery list to Zepto."
-    Agent->>Memory: Read brand preferences
-    Memory-->>Agent: Brand maps returned
-    Agent->>Zepto: Clear Zepto cart, search products, add best matches
-    Zepto->>Archit: Show Zepto cart summary and unavailable items
-    Archit->>Zepto: Click [Place Order]
-    Zepto->>Agent: Order placement requested after final approval
-```
+**Why:** recipes and ingredients are best generated when the user needs them. Pre-generating full recipes for a week makes meal planning slower, increases token cost, creates stale ingredients, and overwhelms the planner with work that may never be used.
+
+### 3. Recipe and grocery planning stay connected
+
+When the user asks for groceries for a meal or dish, Kitch generates a recipe+ingredient artifact first, then derives native cart rows from that same artifact.
+
+**Why:** grocery lists that are inferred separately from recipes can drift from the actual cooking plan. Keeping recipe and grocery outputs connected prevents buying ingredients that the recipe does not use, or missing ingredients that the recipe needs.
+
+### 4. Native grocery cart is the source of truth
+
+Kitch owns a provider-agnostic native cart. Zepto/Blinkit/etc. are provider translations of that native cart, not the source of truth.
+
+**Why:** delivery providers differ in catalog structure, package sizes, availability, auth, address selection, and payment flows. A native cart lets Kitch reason about household grocery needs before any provider-specific mapping happens.
+
+### 5. Real orders require explicit UI approval
+
+Chat text can plan groceries and prepare a provider cart. Chat text must not place a real order. Order placement is only allowed through the final frontend approval control after the user has reviewed the provider cart.
+
+**Why:** Zepto is a real consumer-facing service. Catalog substitutions, payment state, address state, and accidental orders are high-risk. Human-in-the-loop final approval is a product safety requirement, not a UI preference.
+
+### 6. Preferences stay flexible in memory
+
+Food preferences and brand preferences are stored as household-level plain-text memory, not strict preference tables.
+
+Examples:
+
+- "We prefer not to use tofu."
+- "Avoid mushrooms."
+- "Prefer high-protein dinners."
+- "Always buy Amul butter."
+
+**Why:** preferences are naturally conversational and often messy. A rigid schema would force the agent into brittle syntax and premature product assumptions. Structured storage is reserved for things that must be deterministic, such as meal plans and grocery rows.
 
 ---
 
-## 5. Success Metrics & Design Directives
+## Current Product Surface
 
-### 💫 Design Directives
-*   **Vibrant, Glassmorphic Dashboard**: Dark backgrounds combined with glowing sage greens, warm honey highlights, and multi-user profile quick toggles.
-*   **Transparent MCP Terminal Logs**: Clearly formats JSON tool structures on checkouts, giving users confidence in agent actions.
-*   **Empathetic Tone**: Proactively supports culinary routines, celebrating nutrient goals and helping coordinate family diets smoothly.
+### Household page
+
+The main household page gives a high-level view of:
+
+- Current time-aware meal focus.
+- Upcoming weekly plan.
+- Shared household state.
+- Nutrition summary for the active user.
+- Floating chat input for agent interaction.
+
+### Recipes page
+
+The Recipes page shows the latest recipe+grocery artifact:
+
+- Recipe card.
+- Ingredients.
+- Cooking steps.
+- Nutrition/tips sections where available.
+- A side panel for ingredients and recipe-derived grocery rows.
+
+**Why this is separate from Groceries:** recipe exploration and grocery execution are different jobs. The Recipes page explains what to cook. The Groceries page manages what to buy.
+
+### Groceries page
+
+The Groceries page is the operational checkout-prep screen:
+
+- Review native grocery cart rows.
+- Add manual rows.
+- Edit quantities and units.
+- Select which eligible rows should move to Zepto.
+- Sync selected rows to Zepto.
+- Review actual Zepto cart items and unavailable items.
+- Choose address/payment state if exposed.
+- Confirm order only through a final approval action.
+
+**Why this page exists:** native cart review, provider sync, and order approval need one clear operational flow. Hiding this inside the recipe page made it hard to understand what would actually be bought.
+
+### Floating chat input
+
+The floating chat input is the primary mode of interaction. It supports:
+
+- Text prompts.
+- Plate/photo attachments.
+- Fridge scan attachments.
+- Expanded chat history.
+- Markdown-rendered agent replies.
+
+**Why:** users should not have to learn a complex form system to ask for a meal plan, recipe, grocery list, pantry scan, or macro log.
+
+---
+
+## Functional Requirements
+
+### Household and profile requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-001 | Prefill prototype members as Archit, Anubhav, and Naman through configuration, not hardcoded UI logic. | Keeps the prototype useful while leaving room for real household registration later. |
+| REQ-002 | Use one shared household profile id for meal plans, pantry, recipe+grocery artifacts, and native cart until household entities exist. | The product needs shared household state before it needs full account management. |
+| REQ-003 | Keep macro logs individual to the active user. | Nutrition tracking is personal even when the meal plan is shared. |
+| REQ-004 | Defer multi-household registration and authentication-backed membership. | The core planning/cart loop is still being validated. Building registration first would slow the product without proving the main value. |
+
+### Meal planning requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-010 | Generate a 7-day breakfast/lunch/dinner plan for the upcoming Monday-Sunday window when the user asks for "next week." | Users expect "next week" to be a future planning window, not today's weekday repeated into a generated plan. |
+| REQ-011 | Store meal names directly in the weekly schedule. | Meal names are enough for planning, display, and later recipe lookup. |
+| REQ-012 | Do not use a static recipe database or static recipe ids. | Kitch moved to agent-generated meal plans so it can adapt to preferences and household context. |
+| REQ-013 | Do not plan snacks. | The product currently focuses on breakfast, lunch, and dinner only. |
+| REQ-014 | Include exact dates in agent meal-plan responses and UI state. | Prevents misleading "today" highlighting when the visible plan is for a future week. |
+
+### Recipe and grocery requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-020 | Recipe-only requests save a recipe+ingredient artifact and do not update the native cart. | Asking how to cook something is not the same as asking to buy ingredients. |
+| REQ-021 | Grocery requests generate recipe cards and ingredient rows for only the requested scope. | Avoids pushing the full weekly plan through recipe generation when the user asked about tonight or tomorrow only. |
+| REQ-022 | Grocery requests update native cart rows derived from the same recipe artifact. | Keeps recipes and groceries consistent. |
+| REQ-023 | New agent grocery plans replace prior agent-generated cart rows but preserve manual rows. | Lets the user add household staples manually without losing them every time the agent replans groceries. |
+| REQ-024 | Pantry-covered rows remain visible but disabled/muted and excluded from provider sync. | Users should see why something was not ordered instead of wondering whether it was forgotten. |
+| REQ-025 | Fridge-photo grocery requests update pantry first, then plan groceries against the updated pantry. | Prevents reordering things the user just showed Kitch they already have. |
+
+### Pantry and vision requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-030 | Plate photos log macros to the active user's diary. | Photo logging should reduce manual macro tracking friction. |
+| REQ-031 | Fridge photos update shared pantry stock. | Pantry is a physical household resource. |
+| REQ-032 | Photo uploads may include text. | Users often attach a photo and then explain context; submitting immediately on image attach removed that option. |
+
+### Provider and order requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-040 | Keep provider sync behind backend adapters. | Provider APIs/MCP tools are external systems and should not leak into recipe/grocery planning. |
+| REQ-041 | Use Zepto MCP for live Zepto cart sync. | Zepto MCP exposes search/cart/order tools that are suitable for testing native-cart-to-provider-cart translation. |
+| REQ-042 | Before provider sync, show "not synced" rather than fake prices. | Fake totals would create false confidence. Prices and fees come from the provider response. |
+| REQ-043 | Moving items to Zepto may replace the existing Zepto cart after the user clicks the sync action. | The user explicitly asked to move selected Kitch rows to Zepto, and replacing avoids ambiguous merges. |
+| REQ-044 | Order placement requires a saved review snapshot and confirmation token. | Ensures the order is based on exactly what the user reviewed. |
+| REQ-045 | The app must surface unavailable or unresolved provider items. | Silent failures would lead to missing groceries. |
+| REQ-046 | Blinkit provider sync is deferred. | No Blinkit MCP connection is currently configured. |
+
+---
+
+## Architecture Decisions That Affect Product Behavior
+
+### Google ADK instead of Antigravity SDK
+
+Kitch uses Google ADK 2.0 as the app runtime.
+
+**Why:** ADK provides the production agent primitives this app needs: `LlmAgent`, `Runner`, tools, callbacks, session services, memory services, multimodal message handling, and a path toward Vertex AI managed memory/session services. Antigravity SDK was useful as an agent-development environment, but Kitch needs a stable application runtime that can be documented, deployed, and handed to future developers without relying on an experimental development harness as the product substrate.
+
+### In-memory ADK services for now
+
+Kitch currently uses:
+
+- `InMemorySessionService`
+- `InMemoryMemoryService`
+
+**Why:** local development needs fast iteration, easy restarts, and low setup overhead while the product loop is still being tested. The data that must survive now is already stored in Supabase. Conversational memory and sessions can reset on backend restart during this phase.
+
+**Deferred path:** after deployment and testing, replace them with:
+
+- `VertexAISessionService`
+- `VertexAIMemoryBank`
+
+This will make sessions and long-term memory persistent without changing the agent topology.
+
+### Supabase for deterministic state
+
+Supabase stores structured app state: meal plans, recipe+grocery artifacts, pantry stock, native cart rows, profiles, and macro logs.
+
+**Why:** these are deterministic product records that the UI must render reliably. They should not live only in LLM memory.
+
+### Plain-text memory for preferences
+
+ADK memory stores flexible household preference text.
+
+**Why:** preferences are not yet stable enough for a strict schema, and the agent benefits from natural-language preference context.
+
+---
+
+## Non-Goals and Deferred Work
+
+- Full user auth and household registration.
+- Multiple households.
+- Persistent Vertex AI sessions and memory.
+- Blinkit live cart sync.
+- Autonomous order placement from chat.
+- Static recipe database.
+- Snack planning.
+- Full pantry quantity reconciliation across arbitrary units.
+- Hard-coded user names outside configuration.
+
+---
+
+## Success Criteria
+
+Kitch is working when:
+
+- A user can ask for next week's meal plan and the UI shows the generated future-dated plan.
+- All household members see the same plan, pantry, recipe+grocery artifacts, and grocery cart.
+- Each user keeps their own macro diary.
+- Recipe requests produce recipe artifacts without changing the cart.
+- Grocery requests produce recipe artifacts and native cart rows together.
+- Pantry-covered items are visible but excluded from provider sync.
+- The user can sync selected native rows to Zepto and see actual Zepto cart details.
+- The user cannot place a real order without explicit final approval.

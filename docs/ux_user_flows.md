@@ -278,7 +278,7 @@ Example prompts:
 4. Kitch scales quantities for household size.
 5. Kitch subtracts what is already available.
 6. Kitch presents a categorized grocery requirement list.
-7. Kitch saves the native household grocery cart so the Pantry/Grocery page reflects the plan.
+7. Kitch saves the native household grocery cart so the Groceries page reflects the plan.
 
 ### Functional UX Requirements
 
@@ -290,7 +290,7 @@ Example prompts:
 
 ### Current Product Boundary
 
-The native grocery cart is now structured backend state. The product still needs refinement around item editing, quantities, substitutions, and partial provider sync.
+The native grocery cart is structured backend state. The Groceries page supports item review, manual rows, quantity edits, row exclusion for Zepto sync, and provider review. Provider substitution review should continue to improve as Zepto/Blinkit integrations mature.
 
 ---
 
@@ -310,18 +310,18 @@ Example prompts:
 
 1. User requests provider preparation.
 2. Kitch uses the native cart as the source of truth.
-3. Kitch excludes checked and pantry-covered rows.
+3. Kitch excludes rows the user has removed from Zepto sync and rows covered by pantry stock.
 4. Kitch applies brand preferences where known.
 5. Kitch clears/replaces the Zepto cart.
-6. Kitch auto-matches Zepto products and adds best matches.
-7. The app shows matched products, unavailable items, and the resulting Zepto cart summary.
+6. Kitch selects Zepto products and adds them to the Zepto cart.
+7. The app shows the actual Zepto cart, unavailable items, and address/payment review state.
 8. The user must click a final approval button before any order is placed.
 
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
 - The experience may indicate that the Zepto cart changed only after sync succeeds.
-- The user should see enough information to trust the matched Zepto products.
+- The user should see enough information to trust the actual Zepto cart contents.
 - Brand substitutions should be visible.
 - Order placement must require explicit user approval.
 - Auth, payment, address, and OTP issues should surface as recoverable states.
@@ -511,7 +511,7 @@ These are future product areas:
 - Auth-backed household membership.
 - Persistent Vertex AI memory.
 - Blinkit MCP cart insertion.
-- Rich grocery item editing and substitution review.
+- Richer provider substitution review.
 
 ---
 

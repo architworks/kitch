@@ -3,7 +3,7 @@
 This document records the programmatic integration tests run against the **live full-stack application** (FastAPI backend endpoints and live Supabase persistence) as of **2026-05-30 21:31:09**.
 
 > [!NOTE]
-> Checkout-related rows validate brand-memory mapping and provider payload preparation. Live Blinkit/Zepto MCP cart insertion is not currently implemented and is intentionally deferred until a provider MCP connection is configured.
+> These results are a historical snapshot from 2026-05-30. Since then, Kitch has added a backend Zepto MCP adapter, native-cart-to-Zepto sync, Zepto cart review snapshots, and explicit frontend order approval. Blinkit live cart insertion remains deferred until a Blinkit MCP connection is configured.
 
 ## 🏆 Overall Outcome: 20 / 21 PASS, 1 PARTIAL
 
@@ -74,11 +74,11 @@ Below is the verification trace for all 20 live scenarios:
 
 | Scenario | User Prompt | Outcome & Live Supabase Verification | Status |
 |---|---|---|---|
-| **7.1** | "For bread, always get Baker's Dozen whole wheat" | Saved brand preference in native ADK memory. Brand mapping active in delivery payload preparation: mapped bread to Baker's Dozen Whole Wheat Bread. Live MCP cart insertion was not part of this validation. | **✅ PASS** |
+| **7.1** | "For bread, always get Baker's Dozen whole wheat" | Saved brand preference in native ADK memory. Brand mapping active in provider payload preparation. This historical run did not include live MCP cart insertion. | **✅ PASS** |
 | **7.2** | "Never add cereals or cookies to my grocery list — only dairy, fruits, and veggies." | Agent acknowledged category exclusion preference: 'Got it ✅ I’ll **never add cereals or cookies** to your grocery lists.
 
 I’ll also keep future grocery lists focused on **dairy, fruits, and vegetables ...' | **✅ PASS** |
-| **7.3** | "I prefer Amul butter over any other brand" | Successfully recorded Amul butter brand preference and applied it to Zepto-style payload preparation. Live MCP cart insertion was not part of this validation. | **✅ PASS** |
+| **7.3** | "I prefer Amul butter over any other brand" | Successfully recorded Amul butter brand preference and applied it to Zepto-style payload preparation. This historical run did not include live MCP cart insertion. | **✅ PASS** |
 
 ### 8. 🕐 Datetime Awareness
 

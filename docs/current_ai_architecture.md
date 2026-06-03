@@ -1,6 +1,6 @@
 # Kitch: Current AI Architecture
 
-Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents reason and route intent. Python tools perform side effects. Supabase stores structured application state. ADK memory stores flexible household preferences.
+Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents handle culinary reasoning and call Python tools. Python tools perform deterministic side effects. Supabase persists structured records. ADK memory stores flexible household preferences.
 
 ---
 
@@ -20,16 +20,37 @@ flowchart LR
     Vision --> Tools
     RecipeGrocery --> Tools
     Tools --> Supabase[(Supabase)]
-    RecipeGrocery --> Memory[ADK InMemoryMemoryService]
-    Runner --> Sessions[ADK InMemorySessionService]
-    API --> Zepto[ZeptoProviderAdapter]
+    RecipeGrocery --> Memory[ADK Memory Service]
+    Runner --> Sessions[ADK Session Service]
+    API --> ProviderAdapters[Backend Provider Adapters]
 ```
 
-The browser never calls agents directly. It calls FastAPI. FastAPI creates ADK-compatible messages, runs the ADK `Runner`, and returns the final agent response plus any state-sync hint.
+The browser never calls agents directly. It calls FastAPI. FastAPI creates ADK-compatible content, runs the ADK `Runner`, and returns the final response plus state-sync hints.
 
 ---
 
-## ADK Primitives
+## Why Google ADK 2.0
+
+Kitch previously explored agent development through Antigravity-oriented workflows, but the application runtime is now Google ADK 2.0.
+
+**Why ADK:**
+
+- `LlmAgent` gives explicit agent responsibilities and tool lists.
+- `Runner` gives a standard execution path for chat turns and multimodal turns.
+- `App` supports callbacks and context compaction.
+- ADK has first-class session and memory service abstractions.
+- ADK can later move to Vertex AI managed memory/session services.
+- ADK keeps the runtime understandable for new developers and coding agents.
+
+**Why not Antigravity SDK as runtime:**
+
+- Antigravity is better treated as a development/agent-building environment.
+- Kitch needs a stable app runtime with service abstractions, docs, and deployment paths.
+- The product should not depend on a dev harness for production chat/session/memory behavior.
+
+---
+
+## ADK Primitives in Use
 
 Location: `backend/app/agent/core.py`
 
@@ -42,9 +63,13 @@ Current primitives:
 - `InMemoryMemoryService`
 - `EventsCompactionConfig`
 - `LlmEventSummarizer`
-- ADK Gemini or LiteLLM model adapters, selected by environment variables.
+- Native ADK `Gemini` model adapter or ADK `LiteLlm` model adapter, selected by environment variables.
 
-The local in-memory services are intentional for development. They will be replaced by Vertex AI managed session and memory services after deployment testing.
+Why model configuration is environment-driven:
+
+- Local testing has used OpenAI-compatible/LiteLLM settings.
+- Production is intended to use Gemini.
+- The app should not hardcode one model provider into agent definitions.
 
 ---
 
@@ -56,11 +81,15 @@ Parent triage agent.
 
 Responsibilities:
 
-- Understand the user's intent.
+- Understand user intent.
 - Route weekly schedule creation, schedule lookup, and swaps to `chef_planner`.
 - Route food logging, macro diary, pantry, and image tasks to `vision_scanner`.
 - Route recipes, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
 - Answer simple general chat directly.
+
+Why:
+
+- A coordinator keeps user conversation natural while keeping side-effect tools on specialist agents.
 
 ### `chef_planner`
 
@@ -76,7 +105,10 @@ Responsibilities:
 - Update one meal slot without rewriting the rest of the plan.
 - Answer schedule questions such as "what's for dinner tonight?"
 
-There is no static recipe database. The weekly planner does not save ingredients or detailed recipes for every meal upfront.
+Why lightweight:
+
+- Weekly schedule creation should not become recipe and grocery generation for 21 meals.
+- Recipe details are generated only when the user asks for them.
 
 ### `vision_scanner`
 
@@ -90,7 +122,10 @@ Responsibilities:
 - Detect pantry/fridge items from text or photos.
 - Add detected stock to the shared household pantry.
 
-If a fridge photo is submitted with a grocery request, the API first runs the photo/pantry update turn, then runs a follow-up recipe+grocery turn against the updated pantry.
+Why separated:
+
+- Vision and macro logging are different from recipe/grocery reasoning.
+- Pantry updates from photos should happen before grocery planning.
 
 ### `recipe_grocery_planner`
 
@@ -108,6 +143,11 @@ Responsibilities:
 - Preserve manual cart rows by replacing only `source=agent` rows.
 - Store and search household food preferences in ADK memory.
 - Avoid Zepto/Blinkit/provider tools.
+
+Why recipe+grocery together:
+
+- Grocery rows should be based on the recipe the user will actually cook.
+- Separate recipe and grocery agents created a risk of mismatched ingredients.
 
 ---
 
@@ -139,11 +179,16 @@ Recipe+grocery tools:
 - `get_pantry_stock_tool`
 - `add_to_pantry_tool`
 
-Provider tools and adapters:
+Provider tools/adapters:
 
-- `sync_native_cart_to_zepto_tool`, `get_zepto_cart_tool`, `place_zepto_order_tool`, and `export_to_delivery` remain in backend code for HTTP/provider flows and legacy preview support.
+- Zepto sync, Zepto cart reads, and Zepto order placement exist behind backend routes and adapter code.
 - They are not part of the `recipe_grocery_planner` tool list.
-- `place_zepto_order_tool` is intentionally non-executing from chat. Real order placement happens only through the backend approval endpoint after a frontend button click.
+- `place_zepto_order_tool` is intentionally non-executing from chat.
+
+Why:
+
+- Agents should not be able to place real orders through ordinary conversation.
+- Provider actions need explicit UI review and approval.
 
 ---
 
@@ -165,13 +210,16 @@ The before-agent callback injects:
 - `planning_week_end`
 - `planning_week_dates`
 
-This lets agents reason about today's real date separately from the upcoming planning week.
+Why:
+
+- Agents need today's real date and the upcoming planning week as separate concepts.
+- This prevents the UI and agent from treating a future Saturday in the generated plan as "today."
 
 ---
 
 ## Memory Model
 
-Supabase stores structured app state:
+Supabase stores structured state:
 
 - Meal schedules.
 - Recipe+grocery artifacts.
@@ -182,11 +230,42 @@ Supabase stores structured app state:
 
 ADK memory stores flexible household preferences:
 
-- Food preferences such as "we prefer not to use tofu".
-- Category exclusions such as "avoid mushrooms".
-- Provider/brand preferences such as `butter: Amul butter`.
+- Food preferences such as "we prefer not to use tofu."
+- Category exclusions such as "avoid mushrooms."
+- Planning styles such as "prefer high protein dinners."
+- Provider/brand preferences such as "butter: Amul butter."
 
-Food preferences affect recipe and ingredient generation. Brand memory affects provider search terms, not the generic native cart row.
+Why this split:
+
+- Structured UI records need deterministic storage and schema.
+- Preferences need natural-language flexibility.
+
+---
+
+## Current Session and Memory Services
+
+Current services:
+
+- `InMemorySessionService`
+- `InMemoryMemoryService`
+
+Planned services:
+
+- `VertexAISessionService`
+- `VertexAIMemoryBank`
+
+Why in-memory now:
+
+- Local development is faster.
+- Resetting session/memory on backend restart is acceptable during prototyping.
+- Supabase persists the records the UI depends on.
+- Managed memory will be easier to validate after the deployed app flow is stable.
+
+Why Vertex later:
+
+- Deployed users need memory and sessions to survive backend restarts.
+- Vertex aligns with ADK service abstractions.
+- The agent graph can stay the same while swapping service implementations.
 
 ---
 
@@ -199,4 +278,9 @@ Current settings:
 - `compaction_interval=4`
 - `overlap_size=1`
 
-This keeps long-running sessions from growing without bound while preserving recent conversational context.
+Why:
+
+- Long-running household conversations can grow quickly.
+- Compaction keeps session context bounded while preserving recent conversation state.
+
+This is separate from product persistence. Meal plans, recipes, groceries, pantry, and macro logs are stored in Supabase, not only in compacted chat context.
