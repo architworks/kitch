@@ -3,7 +3,7 @@
 This document describes the current end-to-end system design: frontend, backend gateway, ADK runtime, persistence, provider adapters, and approval boundaries.
 
 For product intent, read `vision_and_requirements.md`.
-For agent roles, read `current_agent_topology.md`.
+For AI runtime and agent roles, read `current_ai_agent_architecture.md`.
 For concrete stack/configuration, read `current_technology_stack.md`.
 
 ---

@@ -4,7 +4,7 @@ This document describes the concrete implementation stack, local development com
 
 For product direction, read `vision_and_requirements.md`.
 For system design, read `current_architecture.md`.
-For agent routing, read `current_agent_topology.md`.
+For AI runtime and agent routing, read `current_ai_agent_architecture.md`.
 
 ---
 
