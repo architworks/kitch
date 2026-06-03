@@ -2,6 +2,8 @@
 
 Kitch is an AI household kitchen companion for shared meal planning, pantry-aware recipe and grocery preparation, delivery-cart review, and individual nutrition logging.
 
+![Kitch product demo](static/Product%20Demo.png)
+
 The product is built around a simple distinction: meal plans, pantry stock, recipes, and grocery carts are shared household state, while nutrition logs remain personal to the active household member. The current prototype household is configured as Archit, Anubhav, and Naman while full auth-backed household registration is deferred.
 
 ## What Is Kitch
@@ -18,21 +20,26 @@ The app combines conversational control with structured, reviewable state. Users
 
 ## What Can Kitch Do
 
-- Generate a Monday-Sunday meal plan for the upcoming planning week.
-- Store meal names in a lightweight weekly schedule without pre-generating every recipe.
-- Modify one meal slot without rewriting the rest of the plan.
-- Answer schedule questions such as "what's for dinner tonight?"
-- Generate recipe cards, ingredients, and cooking steps on demand.
-- Derive grocery rows from the same recipe artifact so recipes and groceries stay aligned.
-- Track shared household pantry and fridge stock from text or fridge photos.
-- Mark pantry-covered grocery rows as visible but excluded from provider sync.
-- Preserve manual native-cart rows when the agent replans grocery requirements.
-- Sync selected, non-stocked native cart rows to Zepto for review.
-- Surface actual Zepto cart items and unavailable or unresolved provider items.
-- Require explicit frontend approval before placing a real order.
-- Log personal meals and estimated macros from text or plate photos.
-- Keep macro diaries scoped to the active user.
-- Store flexible household food and brand preferences in ADK memory.
+Kitch supports the full household food loop: plan meals, understand what is already stocked, turn recipes into groceries, prepare a Zepto cart for review, and keep personal macro logs separate.
+
+```mermaid
+flowchart LR
+    Plan[Plan the week] --> Recipe[Generate recipes]
+    Recipe --> Pantry[Check pantry]
+    Pantry --> Cart[Build native grocery cart]
+    Cart --> Zepto[Sync to Zepto for review]
+    Zepto --> Approval[Explicit order approval]
+
+    Intake[Text or plate photo] --> Macros[Personal macro diary]
+    Fridge[Fridge photo or pantry text] --> Pantry
+```
+
+In practice, users can ask Kitch to:
+
+- Plan or change household meals.
+- Generate recipes and pantry-aware grocery requirements.
+- Review and sync selected grocery rows to Zepto.
+- Log personal food intake from text or photos.
 
 ## How Kitch Works
 
@@ -50,14 +57,38 @@ The browser does not call the model, ADK, Supabase admin APIs, or Zepto MCP dire
 
 ### Agent Topology
 
-Kitch uses a Google ADK hub-and-spoke topology:
+Kitch uses a Google ADK 2.0 hub-and-spoke topology:
 
-- `kitch_coordinator`: parent triage agent. It interprets natural language, routes work to specialists, and avoids direct side effects.
-- `chef_planner`: lightweight household meal scheduler. It generates weekly meal-name plans, reads plans, answers schedule questions, and updates individual slots.
-- `vision_scanner`: food intake and pantry/fridge scanner. It estimates macros from text or plate photos, logs meals to the active user, and updates shared pantry stock from text or fridge photos.
-- `recipe_grocery_planner`: recipe, ingredient, pantry-aware grocery, native-cart, and preference planner. It generates recipe artifacts, reads pantry, derives native cart rows, preserves manual rows, and stores/searches household preferences.
+```mermaid
+flowchart TD
+    User[Household Member] --> API[FastAPI Gateway]
+    API --> Runner[ADK Runner]
+    Runner --> Coordinator[kitch_coordinator]
 
-Agents call Python tools for deterministic reads and writes. Supabase is the source of truth for structured app state; ADK memory is used for flexible household preference text such as "avoid tofu" or "prefer Amul butter."
+    subgraph AgentTeam[ADK Agent Team]
+        Chef[chef_planner]
+        Vision[vision_scanner]
+        RecipeGrocery[recipe_grocery_planner]
+    end
+
+    Coordinator --> Chef
+    Coordinator --> Vision
+    Coordinator --> RecipeGrocery
+
+    Chef --> MealTools[Meal Schedule Tools]
+    Vision --> VisionTools[Macro and Pantry Tools]
+    RecipeGrocery --> RecipeTools[Recipe, Grocery, Preference Tools]
+
+    MealTools --> Supabase[(Supabase)]
+    VisionTools --> Supabase
+    RecipeTools --> Supabase
+    RecipeTools --> Memory[ADK Memory]
+
+    API --> ProviderAdapters[Backend Provider Adapters]
+    ProviderAdapters --> Zepto[Zepto MCP]
+```
+
+Provider sync is intentionally outside the `recipe_grocery_planner`. The agent owns native recipe+grocery planning. The backend owns provider cart sync and order approval boundaries.
 
 ### Zepto MCP Integration
 
