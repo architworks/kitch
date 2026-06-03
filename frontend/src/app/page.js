@@ -54,58 +54,155 @@ const ABOUT_WORKFLOW_STEPS = [
   }
 ];
 
+const ABOUT_STEP_TONES = {
+  calendar: "sage",
+  pot: "amber",
+  bag: "green",
+  cart: "violet",
+  scooter: "rose"
+};
+
 const DEFAULT_MEAL_SLOT = "breakfast";
 const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
 
-const AboutStepIcon = ({ name }) => {
-  if (name === "calendar") {
-    return (
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        <rect x="10" y="12" width="26" height="26" rx="4" />
-        <path d="M16 8v8M30 8v8M10 20h26M16 27h4M24 27h4M16 33h4" />
-        <circle cx="35" cy="35" r="7" />
-        <path d="m31.5 35 2.3 2.3 4.5-5" />
-      </svg>
+const AboutIconBadge = ({ name, tone = "sage", className = "" }) => {
+  const badgeClass = `about-icon-badge tone-${tone} about-icon-${name} ${className}`.trim();
+
+  let icon = null;
+
+  if (name === "people") {
+    icon = (
+      <>
+        <circle className="icon-fill-soft" cx="14" cy="21" r="5" />
+        <circle className="icon-fill-soft" cx="34" cy="21" r="5" />
+        <circle className="icon-fill-main" cx="24" cy="18" r="6" />
+        <path className="icon-fill-soft" d="M5 38c1.2-7.1 5-11 11.8-11 2.5 0 4.7.8 6.4 2.2-2.3 1.8-3.7 4.8-4.2 8.8H5Z" />
+        <path className="icon-fill-soft" d="M29 38c-.5-4-1.9-7-4.2-8.8 1.7-1.4 3.9-2.2 6.4-2.2 5.8 0 9.6 3.9 10.8 11H29Z" />
+        <path className="icon-fill-main" d="M13 39c1.2-8.4 5.2-12.2 11-12.2S33.8 30.6 35 39H13Z" />
+      </>
+    );
+  } else if (name === "pantry") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M17 17h14l-1.1 22H18.1L17 17Z" />
+        <path className="icon-stroke" d="M16 17h16M19 12h10l2 5H17l2-5ZM18 22h12M20 39h8" />
+        <path className="icon-fill-accent" d="M17 31c4.4-3.9 8.2-4 11.3-.2-3.8 3.8-7.6 4-11.3.2Z" />
+        <circle className="icon-fill-main" cx="25" cy="28" r="2.5" />
+        <circle className="icon-fill-main" cx="30" cy="31" r="2.2" />
+      </>
+    );
+  } else if (name === "nutrition") {
+    icon = (
+      <>
+        <circle className="icon-fill-soft" cx="24" cy="18" r="7" />
+        <path className="icon-fill-accent" d="M12 40c1.4-8.3 5.7-12.5 12-12.5S34.6 31.7 36 40H12Z" />
+        <path className="icon-stroke" d="M17 39c1.1-5.1 3.5-7.7 7-7.7s5.9 2.6 7 7.7" />
+      </>
+    );
+  } else if (name === "calendar") {
+    icon = (
+      <>
+        <rect className="icon-fill-soft" x="11" y="13" width="26" height="25" rx="5" />
+        <path className="icon-stroke" d="M16 9v8M32 9v8M11 21h26M18 28h4M26 28h4M18 34h4" />
+        <circle className="icon-fill-main" cx="36" cy="36" r="7" />
+        <path className="icon-stroke-light" d="m32.8 36 2 2 4.2-5" />
+      </>
+    );
+  } else if (name === "pot") {
+    icon = (
+      <>
+        <path className="icon-stroke" d="M18 10c-1.9 2-1.9 4 0 6M24 8.5c-2 2.2-2 4.9 0 7.1M30 10c-1.9 2-1.9 4 0 6" />
+        <path className="icon-fill-soft" d="M14 25h20l-1.8 11.5a4.3 4.3 0 0 1-4.2 3.6h-8a4.3 4.3 0 0 1-4.2-3.6L14 25Z" />
+        <path className="icon-stroke" d="M13 22h22M11 26H7M37 26h4M20 22v-3h8v3" />
+        <circle className="icon-fill-accent" cx="24" cy="31.5" r="3" />
+      </>
+    );
+  } else if (name === "bag") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M12 19h24l-2 21H14l-2-21Z" />
+        <path className="icon-stroke" d="M12 19h24l-2 21H14l-2-21ZM18 19c0-5.2 2.4-8.2 6-8.2s6 3 6 8.2" />
+        <circle className="icon-fill-main" cx="20" cy="28" r="3.8" />
+        <circle className="icon-fill-accent" cx="28" cy="27" r="4.3" />
+        <path className="icon-fill-main" d="M24 35c-5-1.1-7.3-4.6-4.6-8.1 5.2 1 7.2 4.4 4.6 8.1Z" />
+        <path className="icon-fill-accent" d="M28 35c5.3-1.5 6.5-5.2 3.2-8.2-4.6 1.1-5.9 4.7-3.2 8.2Z" />
+      </>
+    );
+  } else if (name === "cart") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M17 18h22l-4 14H20l-3-14Z" />
+        <path className="icon-stroke" d="M8 12h5l4.5 20h17l4.5-14H17M21 24h15M25 18v14M33 18v14" />
+        <circle className="icon-fill-main" cx="21" cy="38" r="3.2" />
+        <circle className="icon-fill-main" cx="35" cy="38" r="3.2" />
+      </>
+    );
+  } else if (name === "scooter") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M13 31h19l5-8h-9l-5-7h-8l-2 15Z" />
+        <path className="icon-stroke" d="M12 31h20l5-8h-9l-5-7h-8M29 23h8l2-7h4M20 23h-7" />
+        <circle className="icon-fill-main" cx="15" cy="36" r="4" />
+        <circle className="icon-fill-main" cx="34" cy="36" r="4" />
+        <path className="icon-stroke" d="M22 14c2-4 5.2-5.1 9-3.2" />
+      </>
+    );
+  } else if (name === "chef") {
+    icon = (
+      <>
+        <path className="icon-stroke" d="M17 30.5h14v7H17v-7Z" />
+        <path className="icon-stroke" d="M16.5 30.5c-4.8-1.4-6.7-8.4-.8-10.7 1.2-5.9 8.9-6.9 11.5-1.8 5.7-1.8 10.3 4.9 6.8 9.4-1 1.4-2.4 2.4-4 3.1" />
+        <path className="icon-stroke" d="M20 35h8" />
+      </>
+    );
+  } else if (name === "chat") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M11 16h26v17H22l-8 5v-5h-3V16Z" />
+        <path className="icon-stroke" d="M11 16h26v17H22l-8 5v-5h-3V16Z" />
+        <circle className="icon-fill-main" cx="20" cy="24.5" r="2" />
+        <circle className="icon-fill-main" cx="26" cy="24.5" r="2" />
+        <circle className="icon-fill-main" cx="32" cy="24.5" r="2" />
+      </>
+    );
+  } else if (name === "brain") {
+    icon = (
+      <>
+        <path className="icon-stroke" d="M19 12c-4 0-7 3.1-7 7 0 1.2.3 2.3.8 3.2A6.4 6.4 0 0 0 11 27c0 4.2 3.3 7.5 7.5 7.5H21V12h-2Z" />
+        <path className="icon-stroke" d="M29 12c4 0 7 3.1 7 7 0 1.2-.3 2.3-.8 3.2A6.4 6.4 0 0 1 37 27c0 4.2-3.3 7.5-7.5 7.5H27V12h2Z" />
+        <path className="icon-stroke" d="M17 22h4M27 22h4M18 29h3M27 29h3M24 13v23" />
+      </>
+    );
+  } else if (name === "suggestions") {
+    icon = (
+      <>
+        <circle className="icon-fill-soft" cx="24" cy="21" r="7" />
+        <path className="icon-stroke" d="M24 8v4M24 31v4M11 21H7M41 21h-4M14.8 11.8l2.8 2.8M33.2 29.2l2.8 2.8M36 11.8l-2.8 2.8M17.6 29.2 14.8 32" />
+        <path className="icon-stroke" d="M20 38h8M21.5 34h5" />
+      </>
+    );
+  } else if (name === "shield") {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M24 8 38 14v10c0 9-5.4 15.2-14 18-8.6-2.8-14-9-14-18V14l14-6Z" />
+        <path className="icon-stroke" d="M24 8 38 14v10c0 9-5.4 15.2-14 18-8.6-2.8-14-9-14-18V14l14-6Z" />
+        <path className="icon-stroke" d="m18 25 4 4 8-9" />
+      </>
+    );
+  } else {
+    icon = (
+      <>
+        <path className="icon-fill-soft" d="M14 12h20v25H14V12Z" />
+        <path className="icon-stroke" d="M14 12h20v25H14V12ZM18 19h12M18 25h12M18 31h7" />
+      </>
     );
   }
-  if (name === "pot") {
-    return (
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        <path d="M17 10c-2 2-2 4 0 6M24 8c-2.2 2.4-2.2 5 0 7.4M31 10c-2 2-2 4 0 6" />
-        <path d="M15 22h18M12 25h24l-2 12a4 4 0 0 1-4 3H18a4 4 0 0 1-4-3l-2-12Z" />
-        <path d="M10 27H6M38 27h4M20 22v-3h8v3" />
-        <circle cx="24" cy="32" r="3" />
-      </svg>
-    );
-  }
-  if (name === "bag") {
-    return (
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        <path d="M12 18h24l-2 22H14l-2-22Z" />
-        <path d="M18 18c0-5 2.4-8 6-8s6 3 6 8" />
-        <path d="M20 30c-4-4-2.5-8 3-7 2 2 1.6 5.4-3 7ZM29 31c5-4 4.5-9-1-9-2.2 2-2.3 5.8 1 9ZM22 34h9" />
-      </svg>
-    );
-  }
-  if (name === "cart") {
-    return (
-      <svg viewBox="0 0 48 48" aria-hidden="true">
-        <path d="M8 12h5l4 19h17l5-14H16" />
-        <path d="M20 23h16M24 17v14M32 17v14" />
-        <circle cx="20" cy="38" r="3" />
-        <circle cx="34" cy="38" r="3" />
-      </svg>
-    );
-  }
+
   return (
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <path d="M15 31h17l5-8h-9l-5-7h-7" />
-      <path d="M12 31h5M28 23h-7M34 23l2-7h4" />
-      <circle cx="16" cy="36" r="4" />
-      <circle cx="34" cy="36" r="4" />
-      <path d="M22 14c2-4 5-5 9-3" />
-    </svg>
+    <span className={badgeClass} aria-hidden="true">
+      <svg viewBox="0 0 48 48">{icon}</svg>
+    </span>
   );
 };
 
@@ -1577,9 +1674,18 @@ export default function Home() {
                 <div className="about-hero-visual" aria-hidden="true">
                   <div className="about-blob"></div>
                   <Image src="/group_of_people.png" alt="" fill sizes="(max-width: 900px) 92vw, 50vw" priority unoptimized />
-                  <span className="about-float-card plan">Plan</span>
-                  <span className="about-float-card pantry">Pantry</span>
-                  <span className="about-float-card cart">Cart</span>
+                  <span className="about-float-card plan">
+                    <AboutIconBadge name="calendar" tone="sage" className="about-float-icon" />
+                    Plan
+                  </span>
+                  <span className="about-float-card pantry">
+                    <AboutIconBadge name="bag" tone="green" className="about-float-icon" />
+                    Pantry
+                  </span>
+                  <span className="about-float-card cart">
+                    <AboutIconBadge name="cart" tone="violet" className="about-float-icon" />
+                    Cart
+                  </span>
                 </div>
               </section>
 
@@ -1590,17 +1696,17 @@ export default function Home() {
                 </div>
                 <div className="about-feature-grid">
                   <article>
-                    <span className="about-icon people" aria-hidden="true"></span>
+                    <AboutIconBadge name="people" tone="sage" />
                     <h4>Shared planning</h4>
                     <p>One meal plan for breakfast, lunch, and dinner across the whole home.</p>
                   </article>
                   <article>
-                    <span className="about-icon pantry" aria-hidden="true"></span>
+                    <AboutIconBadge name="pantry" tone="green" />
                     <h4>Shared pantry</h4>
                     <p>Track what is stocked, avoid duplicate buys, and waste less.</p>
                   </article>
                   <article>
-                    <span className="about-icon nutrition" aria-hidden="true"></span>
+                    <AboutIconBadge name="nutrition" tone="amber" />
                     <h4>Individual nutrition</h4>
                     <p>Each member keeps their own macro diary and daily progress.</p>
                   </article>
@@ -1613,16 +1719,13 @@ export default function Home() {
                   <p>From planning to checkout prep, Kitch keeps every step reviewable.</p>
                 </div>
                 <div className="about-step-row">
-                  {[
-                    ["1", "Plan meals", "Create a weekly household plan."],
-                    ["2", "Get recipes", "Ask for cooking steps when needed."],
-                    ["3", "Add ingredients", "Turn recipes into native cart rows."],
-                    ["4", "Review groceries", "Edit, exclude, and approve what moves."],
-                    ["5", "Order carefully", "Place orders only after final approval."]
-                  ].map(([number, title, body]) => (
+                  {ABOUT_WORKFLOW_STEPS.map(({ number, icon, title, body }) => (
                     <article key={title}>
-                      <span>{number}</span>
-                      <h4>{title}</h4>
+                      <AboutIconBadge name={icon} tone={ABOUT_STEP_TONES[icon]} className="about-step-icon" />
+                      <div className="about-step-title">
+                        <span className="about-step-number">{number}</span>
+                        <h4>{title}</h4>
+                      </div>
                       <p>{body}</p>
                     </article>
                   ))}
@@ -1636,29 +1739,37 @@ export default function Home() {
                     <p>Use natural language, share photos, scan the fridge, or ask what to cook next.</p>
                   </div>
                   <div className="about-chat-thread" aria-label="Example Kitch conversation">
-                    <p className="assistant">What can we cook for dinner?</p>
-                    <p className="user">We have paneer, capsicum, and peas.</p>
-                    <p className="assistant">I can suggest recipes and add missing ingredients to your cart.</p>
+                    <div className="about-chat-message assistant">
+                      <AboutIconBadge name="chef" tone="orange" className="about-chat-avatar" />
+                      <p>What can we cook for dinner?</p>
+                    </div>
+                    <div className="about-chat-message user">
+                      <p>We have paneer, capsicum, and peas.</p>
+                    </div>
+                    <div className="about-chat-message assistant">
+                      <AboutIconBadge name="chef" tone="orange" className="about-chat-avatar" />
+                      <p>I can suggest recipes and add missing ingredients to your cart.</p>
+                    </div>
                   </div>
                 </article>
 
                 <article className="about-card about-intelligence-card">
                   <div className="about-mini-feature">
-                    <span className="about-mini-dot natural" aria-hidden="true"></span>
+                    <AboutIconBadge name="chat" tone="sage" className="about-mini-icon" />
                     <div>
                       <h4>Natural conversations</h4>
                       <p>Ask in your own words.</p>
                     </div>
                   </div>
                   <div className="about-mini-feature">
-                    <span className="about-mini-dot memory" aria-hidden="true"></span>
+                    <AboutIconBadge name="brain" tone="violet" className="about-mini-icon" />
                     <div>
                       <h4>Household context</h4>
                       <p>Kitch remembers food preferences during a session.</p>
                     </div>
                   </div>
                   <div className="about-mini-feature">
-                    <span className="about-mini-dot suggestions" aria-hidden="true"></span>
+                    <AboutIconBadge name="suggestions" tone="amber" className="about-mini-icon" />
                     <div>
                       <h4>Helpful suggestions</h4>
                       <p>Plans adapt to pantry, taste, and goals.</p>
@@ -1669,7 +1780,9 @@ export default function Home() {
 
               <section className="about-card about-control-card">
                 <div className="about-control-art" aria-hidden="true">
+                  <AboutIconBadge name="shield" tone="sage" className="about-control-shield" />
                   <div className="about-phone-mock">
+                    <AboutIconBadge name="cart" tone="violet" className="about-phone-icon" />
                     <span>Zepto Cart</span>
                     <strong>Review before order</strong>
                     <em>Never automatic</em>

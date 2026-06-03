@@ -4914,10 +4914,11 @@ button {
 .about-float-card {
   position: absolute;
   z-index: 1;
-  min-height: 38px;
+  min-height: 42px;
   display: inline-flex;
   align-items: center;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 0 14px 0 8px;
   color: var(--sage-deep);
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(195, 200, 189, 0.54);
@@ -4925,6 +4926,17 @@ button {
   box-shadow: 0 14px 30px rgba(52, 44, 36, 0.08);
   font-size: 12px;
   font-weight: 900;
+}
+
+.about-float-icon {
+  width: 30px;
+  height: 30px;
+  box-shadow: none;
+}
+
+.about-float-icon svg {
+  width: 23px;
+  height: 23px;
 }
 
 .about-float-card.plan {
@@ -5007,75 +5019,92 @@ button {
   border-left: 1px solid rgba(115, 121, 111, 0.16);
 }
 
-.about-icon {
-  position: relative;
+.about-icon-badge {
+  --icon-bg: rgba(224, 239, 217, 0.82);
+  --icon-main: var(--sage);
+  --icon-soft: #cfe5c5;
+  --icon-accent: var(--sage-deep);
+  --icon-light: #ffffff;
   width: 70px;
   height: 70px;
-  display: block;
-  background: rgba(224, 239, 217, 0.78);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-main);
+  background: var(--icon-bg);
+  border: 1px solid rgba(255, 255, 255, 0.76);
   border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 12px 26px rgba(52, 44, 36, 0.08);
 }
 
-.about-icon::before,
-.about-icon::after {
-  content: "";
-  position: absolute;
+.about-icon-badge svg {
+  width: 52px;
+  height: 52px;
+  overflow: visible;
 }
 
-.about-icon.people::before {
-  width: 16px;
-  height: 16px;
-  left: 27px;
-  top: 18px;
-  background: var(--sage);
-  border-radius: 999px;
-  box-shadow: -17px 4px 0 var(--sage), 17px 4px 0 var(--sage);
+.about-icon-badge .icon-stroke {
+  fill: none;
+  stroke: var(--icon-main);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.about-icon.people::after {
-  width: 46px;
-  height: 17px;
-  left: 12px;
-  bottom: 18px;
-  background: var(--sage);
-  border-radius: 16px 16px 8px 8px;
+.about-icon-badge .icon-stroke-light {
+  fill: none;
+  stroke: var(--icon-light);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.about-icon.pantry::before {
-  width: 28px;
-  height: 36px;
-  left: 21px;
-  top: 18px;
-  background: var(--oak-soft);
-  border: 3px solid var(--sage);
-  border-radius: 9px 9px 12px 12px;
+.about-icon-badge .icon-fill-main {
+  fill: var(--icon-main);
 }
 
-.about-icon.pantry::after {
-  width: 36px;
-  height: 12px;
-  right: 10px;
-  bottom: 17px;
-  background: rgba(140, 79, 26, 0.28);
-  border-radius: 999px;
+.about-icon-badge .icon-fill-soft {
+  fill: var(--icon-soft);
 }
 
-.about-icon.nutrition::before {
-  width: 32px;
-  height: 32px;
-  left: 19px;
-  top: 14px;
-  background: var(--oak-soft);
-  border-radius: 999px;
+.about-icon-badge .icon-fill-accent {
+  fill: var(--icon-accent);
 }
 
-.about-icon.nutrition::after {
-  width: 46px;
-  height: 20px;
-  left: 12px;
-  bottom: 13px;
-  background: var(--oak);
-  border-radius: 22px 22px 12px 12px;
+.about-icon-badge.tone-green {
+  --icon-bg: rgba(224, 239, 217, 0.78);
+  --icon-main: #4a6741;
+  --icon-soft: #efe0b7;
+  --icon-accent: #6fa05f;
+}
+
+.about-icon-badge.tone-amber {
+  --icon-bg: rgba(253, 172, 111, 0.24);
+  --icon-main: #9f5717;
+  --icon-soft: #f4c797;
+  --icon-accent: #e9782e;
+}
+
+.about-icon-badge.tone-violet {
+  --icon-bg: rgba(223, 215, 248, 0.72);
+  --icon-main: #6749a8;
+  --icon-soft: #c7b8ef;
+  --icon-accent: #7a5ec9;
+}
+
+.about-icon-badge.tone-rose {
+  --icon-bg: rgba(255, 218, 214, 0.74);
+  --icon-main: #b55246;
+  --icon-soft: #f1b8ac;
+  --icon-accent: #e86f59;
+}
+
+.about-icon-badge.tone-orange {
+  --icon-bg: rgba(255, 247, 239, 0.98);
+  --icon-main: #ff6b1a;
+  --icon-soft: #fff2e7;
+  --icon-accent: #fdac6f;
 }
 
 .about-steps-card {
@@ -5098,7 +5127,7 @@ button {
 .about-step-row::before {
   content: "";
   position: absolute;
-  top: 33px;
+  top: 35px;
   left: 9%;
   right: 9%;
   height: 2px;
@@ -5113,19 +5142,37 @@ button {
   text-align: center;
 }
 
-.about-step-row span {
+.about-step-icon {
   width: 66px;
   height: 66px;
+  border: 8px solid var(--surface-card);
+  box-shadow: 0 8px 20px rgba(52, 44, 36, 0.08);
+}
+
+.about-step-icon svg {
+  width: 46px;
+  height: 46px;
+}
+
+.about-step-title {
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px;
+  align-items: center;
+  justify-items: center;
+}
+
+.about-step-number {
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--sage-deep);
-  background: rgba(224, 239, 217, 0.88);
-  border: 8px solid var(--surface-card);
+  background: rgba(224, 239, 217, 0.92);
   border-radius: 999px;
-  box-shadow: 0 8px 20px rgba(52, 44, 36, 0.08);
   font-family: var(--font-head);
-  font-size: 15px;
+  font-size: 10px;
   font-weight: 900;
 }
 
@@ -5153,7 +5200,19 @@ button {
   gap: 12px;
 }
 
-.about-chat-thread p {
+.about-chat-message {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.about-chat-message.user {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: end;
+}
+
+.about-chat-message p {
   width: fit-content;
   max-width: min(360px, 92%);
   padding: 12px 14px;
@@ -5163,10 +5222,22 @@ button {
   box-shadow: 0 10px 26px rgba(52, 44, 36, 0.06);
 }
 
-.about-chat-thread .user {
-  justify-self: end;
+.about-chat-message.user p {
   color: var(--sage-deep);
   background: rgba(224, 239, 217, 0.68);
+}
+
+.about-chat-avatar {
+  width: 34px;
+  height: 34px;
+  align-self: center;
+  border-color: rgba(255, 107, 26, 0.14);
+  box-shadow: 0 8px 18px rgba(52, 44, 36, 0.06);
+}
+
+.about-chat-avatar svg {
+  width: 25px;
+  height: 25px;
 }
 
 .about-intelligence-card {
@@ -5177,7 +5248,7 @@ button {
 
 .about-mini-feature {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 52px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
 }
@@ -5187,37 +5258,14 @@ button {
   gap: 4px;
 }
 
-.about-mini-dot {
-  width: 48px;
-  height: 48px;
-  position: relative;
-  display: block;
-  background: rgba(224, 239, 217, 0.8);
-  border-radius: 999px;
+.about-mini-icon {
+  width: 50px;
+  height: 50px;
 }
 
-.about-mini-dot::before {
-  content: "";
-  position: absolute;
-  inset: 14px;
-  border: 3px solid var(--sage);
-  border-radius: 999px;
-}
-
-.about-mini-dot.memory {
-  background: rgba(220, 232, 239, 0.9);
-}
-
-.about-mini-dot.memory::before {
-  border-color: var(--slate);
-}
-
-.about-mini-dot.suggestions {
-  background: rgba(253, 172, 111, 0.24);
-}
-
-.about-mini-dot.suggestions::before {
-  border-color: var(--oak);
+.about-mini-icon svg {
+  width: 36px;
+  height: 36px;
 }
 
 .about-control-card {
@@ -5239,40 +5287,31 @@ button {
   overflow: hidden;
 }
 
-.about-control-art::before {
-  content: "";
+.about-control-shield {
   position: absolute;
-  width: 112px;
-  height: 112px;
-  left: 40px;
-  top: 38px;
-  background: var(--sage);
-  border-radius: 30px;
-  transform: rotate(45deg);
-  opacity: 0.9;
+  z-index: 2;
+  width: 106px;
+  height: 106px;
+  left: 36px;
+  top: 40px;
+  border: 0;
+  box-shadow: 0 18px 34px rgba(52, 44, 36, 0.14);
 }
 
-.about-control-art::after {
-  content: "";
-  position: absolute;
-  width: 74px;
-  height: 36px;
-  left: 58px;
-  top: 76px;
-  border-left: 8px solid #fff;
-  border-bottom: 8px solid #fff;
-  transform: rotate(-45deg);
-  border-radius: 3px;
+.about-control-shield svg {
+  width: 82px;
+  height: 82px;
 }
 
 .about-phone-mock {
   position: relative;
-  z-index: 1;
+  z-index: 3;
   width: 150px;
   min-height: 186px;
   display: grid;
   align-content: center;
-  gap: 10px;
+  justify-items: center;
+  gap: 8px;
   margin-left: 120px;
   padding: 20px 16px;
   color: var(--ink);
@@ -5281,6 +5320,18 @@ button {
   border-radius: 26px;
   box-shadow: 0 18px 34px rgba(52, 44, 36, 0.18);
   text-align: center;
+}
+
+.about-phone-icon {
+  width: 42px;
+  height: 42px;
+  margin-bottom: 2px;
+  box-shadow: none;
+}
+
+.about-phone-icon svg {
+  width: 31px;
+  height: 31px;
 }
 
 .about-phone-mock span,
