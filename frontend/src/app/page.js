@@ -239,6 +239,19 @@ const formatZeptoAddressLabel = (option, fallback = "Saved address") => {
   return `${label} — ${addressText}`;
 };
 
+const formatZeptoAddressParts = (option, fallback = "Saved address") => {
+  const display = formatZeptoAddressLabel(option, fallback);
+  const separator = " — ";
+  const separatorIndex = display.indexOf(separator);
+  if (separatorIndex < 0) {
+    return { title: display || fallback, detail: "" };
+  }
+  return {
+    title: display.slice(0, separatorIndex) || fallback,
+    detail: display.slice(separatorIndex + separator.length)
+  };
+};
+
 const zeptoValue = (sources, keys) => {
   for (const source of sources) {
     if (!source || typeof source !== "object") continue;
@@ -855,6 +868,11 @@ export default function Home() {
       setIsUpdatingZeptoReview(false);
     }
     return null;
+  };
+
+  const selectZeptoAddressOption = (value) => {
+    setSelectedZeptoAddress(value);
+    updateZeptoReview({ selected_address_id: value || null });
   };
 
   const placeZeptoOrder = async () => {
@@ -2097,65 +2115,85 @@ export default function Home() {
                       })}
                     </article>
 
-                    <article className="zepto-review-list">
+                    <article className="zepto-review-list zepto-unavailable-panel">
                       <h3>Unavailable or unresolved</h3>
-                      {zeptoUnavailableItems.length === 0 ? (
-                        <p>No unavailable items reported by Zepto MCP.</p>
-                      ) : zeptoUnavailableItems.map((item, idx) => (
-                        <div key={`${item.name || idx}-zepto-unavailable`} className="zepto-product-row unavailable">
-                          <strong>{item.name || "Unknown item"}</strong>
-                          <span>{item.reason || "Zepto did not return a usable match."}</span>
-                        </div>
-                      ))}
+                      <div className="zepto-unavailable-content">
+                        {zeptoUnavailableItems.length === 0 ? (
+                          <p>No unavailable items reported by Zepto.</p>
+                        ) : zeptoUnavailableItems.map((item, idx) => (
+                          <div key={`${item.name || idx}-zepto-unavailable`} className="zepto-product-row unavailable">
+                            <strong>{item.name || "Unknown item"}</strong>
+                            <span>{item.reason || "Zepto did not return a usable match."}</span>
+                          </div>
+                        ))}
+                      </div>
                     </article>
 
                     <article className="zepto-approval-card">
-                      <h3>Address and payment</h3>
+                      <div className="zepto-approval-heading">
+                        <h3>Address and payment</h3>
+                        <p>Select the Zepto address to use for this reviewed cart.</p>
+                      </div>
                       {zeptoAddressOptions.length > 0 ? (
-                        <label>
-                          Address
-                          <select
-                            value={selectedZeptoAddress}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setSelectedZeptoAddress(value);
-                              updateZeptoReview({ selected_address_id: value || null });
-                            }}
+                        <div className="zepto-address-options" role="radiogroup" aria-label="Zepto delivery address">
+                          <button
+                            type="button"
+                            className={`zepto-address-option ${selectedZeptoAddress ? "" : "selected"}`}
+                            aria-checked={!selectedZeptoAddress}
+                            role="radio"
+                            disabled={isUpdatingZeptoReview}
+                            onClick={() => selectZeptoAddressOption("")}
                           >
-                            <option value="">Use Zepto default</option>
-                            {zeptoAddressOptions.map((option, idx) => {
-                              const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                              const label = formatZeptoAddressLabel(option, `Address ${idx + 1}`);
-                              return <option key={`${value}-${idx}`} value={value}>{label}</option>;
-                            })}
-                          </select>
-                        </label>
+                            <span>Zepto default</span>
+                            <small>Use the current/default Zepto account address.</small>
+                          </button>
+                          {zeptoAddressOptions.map((option, idx) => {
+                            const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                            const address = formatZeptoAddressParts(option, `Address ${idx + 1}`);
+                            return (
+                              <button
+                                key={`${value}-${idx}`}
+                                type="button"
+                                className={`zepto-address-option ${selectedZeptoAddress === value ? "selected" : ""}`}
+                                aria-checked={selectedZeptoAddress === value}
+                                role="radio"
+                                disabled={isUpdatingZeptoReview}
+                                onClick={() => selectZeptoAddressOption(value)}
+                              >
+                                <span>{address.title}</span>
+                                {address.detail && <small>{address.detail}</small>}
+                              </button>
+                            );
+                          })}
+                        </div>
                       ) : (
-                        <p>Zepto MCP did not expose selectable address options. Kitch will use the current/default Zepto account address if you confirm.</p>
+                        <p className="zepto-address-empty">Zepto did not expose selectable address options. Kitch will use the current/default Zepto account address if you confirm.</p>
                       )}
 
-                      {zeptoPaymentOptions.length > 0 ? (
-                        <label>
-                          Payment
-                          <select
-                            value={selectedZeptoPaymentMethod}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setSelectedZeptoPaymentMethod(value);
-                              updateZeptoReview({ selected_payment_method_id: value || null });
-                            }}
-                          >
-                            <option value="">Use Zepto default</option>
-                            {zeptoPaymentOptions.map((option, idx) => {
-                              const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${idx}`);
-                              const label = optionValue(option, ["label", "name", "payment_method", "paymentMethod", "method", "title"], JSON.stringify(option).slice(0, 90));
-                              return <option key={`${value}-${idx}`} value={value}>{label}</option>;
-                            })}
-                          </select>
-                        </label>
-                      ) : (
-                        <p>Zepto MCP did not expose selectable payment options. Kitch will use the current/default Zepto account payment method if you confirm.</p>
-                      )}
+                      <div className="zepto-payment-control">
+                        {zeptoPaymentOptions.length > 0 ? (
+                          <label>
+                            Payment
+                            <select
+                              value={selectedZeptoPaymentMethod}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setSelectedZeptoPaymentMethod(value);
+                                updateZeptoReview({ selected_payment_method_id: value || null });
+                              }}
+                            >
+                              <option value="">Use Zepto default</option>
+                              {zeptoPaymentOptions.map((option, idx) => {
+                                const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${idx}`);
+                                const label = optionValue(option, ["label", "name", "payment_method", "paymentMethod", "method", "title"], JSON.stringify(option).slice(0, 90));
+                                return <option key={`${value}-${idx}`} value={value}>{label}</option>;
+                              })}
+                            </select>
+                          </label>
+                        ) : (
+                          <p>Zepto did not expose selectable payment options. Kitch will use the current/default Zepto account payment method if you confirm.</p>
+                        )}
+                      </div>
 
                       <label className="approval-checkbox">
                         <input
