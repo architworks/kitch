@@ -21,9 +21,93 @@ const MEAL_SLOT_LABELS = {
   dinner: "Dinner"
 };
 
+const ABOUT_WORKFLOW_STEPS = [
+  {
+    number: "1",
+    icon: "calendar",
+    title: "Plan meals",
+    body: "Create your weekly plan in seconds."
+  },
+  {
+    number: "2",
+    icon: "pot",
+    title: "Get recipes",
+    body: "View step-by-step recipes for any meal."
+  },
+  {
+    number: "3",
+    icon: "bag",
+    title: "Add ingredients",
+    body: "Ingredients from recipes are added to your native cart."
+  },
+  {
+    number: "4",
+    icon: "cart",
+    title: "Review groceries",
+    body: "Review, edit, and add anything you need."
+  },
+  {
+    number: "5",
+    icon: "scooter",
+    title: "Order with confidence",
+    body: "Move to Zepto and place the order only after approval."
+  }
+];
+
 const DEFAULT_MEAL_SLOT = "breakfast";
 const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
+
+const AboutStepIcon = ({ name }) => {
+  if (name === "calendar") {
+    return (
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="10" y="12" width="26" height="26" rx="4" />
+        <path d="M16 8v8M30 8v8M10 20h26M16 27h4M24 27h4M16 33h4" />
+        <circle cx="35" cy="35" r="7" />
+        <path d="m31.5 35 2.3 2.3 4.5-5" />
+      </svg>
+    );
+  }
+  if (name === "pot") {
+    return (
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M17 10c-2 2-2 4 0 6M24 8c-2.2 2.4-2.2 5 0 7.4M31 10c-2 2-2 4 0 6" />
+        <path d="M15 22h18M12 25h24l-2 12a4 4 0 0 1-4 3H18a4 4 0 0 1-4-3l-2-12Z" />
+        <path d="M10 27H6M38 27h4M20 22v-3h8v3" />
+        <circle cx="24" cy="32" r="3" />
+      </svg>
+    );
+  }
+  if (name === "bag") {
+    return (
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M12 18h24l-2 22H14l-2-22Z" />
+        <path d="M18 18c0-5 2.4-8 6-8s6 3 6 8" />
+        <path d="M20 30c-4-4-2.5-8 3-7 2 2 1.6 5.4-3 7ZM29 31c5-4 4.5-9-1-9-2.2 2-2.3 5.8 1 9ZM22 34h9" />
+      </svg>
+    );
+  }
+  if (name === "cart") {
+    return (
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M8 12h5l4 19h17l5-14H16" />
+        <path d="M20 23h16M24 17v14M32 17v14" />
+        <circle cx="20" cy="38" r="3" />
+        <circle cx="34" cy="38" r="3" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path d="M15 31h17l5-8h-9l-5-7h-7" />
+      <path d="M12 31h5M28 23h-7M34 23l2-7h4" />
+      <circle cx="16" cy="36" r="4" />
+      <circle cx="34" cy="36" r="4" />
+      <path d="M22 14c2-4 5-5 9-3" />
+    </svg>
+  );
+};
 
 const getTimeBasedMealSlot = (date = new Date()) => {
   const hour = date.getHours();
@@ -1379,7 +1463,8 @@ export default function Home() {
             ["planner", "household", "Household"],
             ["recipes", "recipes", "Recipes"],
             ["groceries", "pantry", "Groceries"],
-            ["analytics", "nutrition", "Nutrition"]
+            ["analytics", "nutrition", "Nutrition"],
+            ["about", "about", "About Kitch"]
           ].map(([key, icon, label]) => (
             <button
               key={key}
@@ -1398,6 +1483,9 @@ export default function Home() {
                 )}
                 {icon === "nutrition" && (
                   <svg viewBox="0 0 24 24"><path d="M4 19h16M5 15l4-4 3 3 6-8M5 5v14"/></svg>
+                )}
+                {icon === "about" && (
+                  <svg viewBox="0 0 24 24"><path d="M12 19v-8M12 7h.01M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0Z"/></svg>
                 )}
               </span>
               {label}
@@ -1470,6 +1558,149 @@ export default function Home() {
         </header>
 
         <main className="page-canvas">
+          {activeTab === "about" && (
+            <section className="page-view about-page" aria-label="About Kitch">
+              <section className="about-hero">
+                <div className="about-hero-copy">
+                  <span className="eyebrow">About Kitch</span>
+                  <h2>Your AI kitchen companion for real life.</h2>
+                  <p>Kitch helps your household plan meals, cook better, shop smarter, and track nutrition without turning the kitchen into another spreadsheet.</p>
+                  <div className="about-hero-actions">
+                    <button type="button" className="primary-action" onClick={() => setActiveTab("planner")}>
+                      Open household plan
+                    </button>
+                    <button type="button" onClick={() => setChatInput("Plan next week for the whole household")}>
+                      Ask Kitch to plan
+                    </button>
+                  </div>
+                </div>
+                <div className="about-hero-visual" aria-hidden="true">
+                  <div className="about-blob"></div>
+                  <Image src="/group_of_people.png" alt="" fill sizes="(max-width: 900px) 92vw, 50vw" priority unoptimized />
+                  <span className="about-float-card plan">Plan</span>
+                  <span className="about-float-card pantry">Pantry</span>
+                  <span className="about-float-card cart">Cart</span>
+                </div>
+              </section>
+
+              <section className="about-card about-household-card">
+                <div>
+                  <h3>Built for real households</h3>
+                  <p>Food is shared, but goals are personal. Kitch keeps household planning together and individual nutrition separate.</p>
+                </div>
+                <div className="about-feature-grid">
+                  <article>
+                    <span className="about-icon people" aria-hidden="true"></span>
+                    <h4>Shared planning</h4>
+                    <p>One meal plan for breakfast, lunch, and dinner across the whole home.</p>
+                  </article>
+                  <article>
+                    <span className="about-icon pantry" aria-hidden="true"></span>
+                    <h4>Shared pantry</h4>
+                    <p>Track what is stocked, avoid duplicate buys, and waste less.</p>
+                  </article>
+                  <article>
+                    <span className="about-icon nutrition" aria-hidden="true"></span>
+                    <h4>Individual nutrition</h4>
+                    <p>Each member keeps their own macro diary and daily progress.</p>
+                  </article>
+                </div>
+              </section>
+
+              <section className="about-card about-steps-card">
+                <div className="about-section-heading">
+                  <h3>How Kitch works</h3>
+                  <p>From planning to checkout prep, Kitch keeps every step reviewable.</p>
+                </div>
+                <div className="about-step-row">
+                  {[
+                    ["1", "Plan meals", "Create a weekly household plan."],
+                    ["2", "Get recipes", "Ask for cooking steps when needed."],
+                    ["3", "Add ingredients", "Turn recipes into native cart rows."],
+                    ["4", "Review groceries", "Edit, exclude, and approve what moves."],
+                    ["5", "Order carefully", "Place orders only after final approval."]
+                  ].map(([number, title, body]) => (
+                    <article key={title}>
+                      <span>{number}</span>
+                      <h4>{title}</h4>
+                      <p>{body}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="about-conversation-grid">
+                <article className="about-card about-chat-card">
+                  <div>
+                    <h3>Talk to Kitch like you talk to family</h3>
+                    <p>Use natural language, share photos, scan the fridge, or ask what to cook next.</p>
+                  </div>
+                  <div className="about-chat-thread" aria-label="Example Kitch conversation">
+                    <p className="assistant">What can we cook for dinner?</p>
+                    <p className="user">We have paneer, capsicum, and peas.</p>
+                    <p className="assistant">I can suggest recipes and add missing ingredients to your cart.</p>
+                  </div>
+                </article>
+
+                <article className="about-card about-intelligence-card">
+                  <div className="about-mini-feature">
+                    <span className="about-mini-dot natural" aria-hidden="true"></span>
+                    <div>
+                      <h4>Natural conversations</h4>
+                      <p>Ask in your own words.</p>
+                    </div>
+                  </div>
+                  <div className="about-mini-feature">
+                    <span className="about-mini-dot memory" aria-hidden="true"></span>
+                    <div>
+                      <h4>Household context</h4>
+                      <p>Kitch remembers food preferences during a session.</p>
+                    </div>
+                  </div>
+                  <div className="about-mini-feature">
+                    <span className="about-mini-dot suggestions" aria-hidden="true"></span>
+                    <div>
+                      <h4>Helpful suggestions</h4>
+                      <p>Plans adapt to pantry, taste, and goals.</p>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <section className="about-card about-control-card">
+                <div className="about-control-art" aria-hidden="true">
+                  <div className="about-phone-mock">
+                    <span>Zepto Cart</span>
+                    <strong>Review before order</strong>
+                    <em>Never automatic</em>
+                  </div>
+                </div>
+                <div className="about-control-copy">
+                  <h3>You are always in control</h3>
+                  <ul>
+                    <li>Kitch prepares your native cart.</li>
+                    <li>You review and make changes.</li>
+                    <li>You approve and place the order on Zepto.</li>
+                  </ul>
+                  <p>Kitch never places orders on your behalf from chat.</p>
+                </div>
+              </section>
+
+              <section className="about-cta">
+                <div>
+                  <h3>Ready to make your kitchen easier?</h3>
+                  <p>Plan your first meal and let Kitch handle the rest.</p>
+                </div>
+                <button type="button" className="primary-action" onClick={() => setChatInput("Create a balanced meal plan for next week")}>
+                  Create your first meal plan →
+                </button>
+                <div className="about-bowl-art" aria-hidden="true">
+                  <Image src="/food_bowl.png" alt="" fill sizes="(max-width: 900px) 38vw, 220px" unoptimized />
+                </div>
+              </section>
+            </section>
+          )}
+
           {activeTab === "planner" && (
             <section className="page-view planner-page" aria-label="Weekly meal planner">
               <section className="meal-landing-hero">
