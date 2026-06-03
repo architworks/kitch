@@ -1674,18 +1674,6 @@ export default function Home() {
                 <div className="about-hero-visual" aria-hidden="true">
                   <div className="about-blob"></div>
                   <Image src="/group_of_people.png" alt="" fill sizes="(max-width: 900px) 92vw, 50vw" priority unoptimized />
-                  <span className="about-float-card plan">
-                    <AboutIconBadge name="calendar" tone="sage" className="about-float-icon" />
-                    Plan
-                  </span>
-                  <span className="about-float-card pantry">
-                    <AboutIconBadge name="bag" tone="green" className="about-float-icon" />
-                    Pantry
-                  </span>
-                  <span className="about-float-card cart">
-                    <AboutIconBadge name="cart" tone="violet" className="about-float-icon" />
-                    Cart
-                  </span>
                 </div>
               </section>
 

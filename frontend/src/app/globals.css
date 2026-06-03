@@ -4895,6 +4895,7 @@ button {
   position: relative;
   min-height: 340px;
   isolation: isolate;
+  overflow: hidden;
 }
 
 .about-hero-visual::before {
@@ -4909,49 +4910,8 @@ button {
 .about-hero-visual img {
   object-fit: contain;
   object-position: center bottom;
-}
-
-.about-float-card {
-  position: absolute;
-  z-index: 1;
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px 0 8px;
-  color: var(--sage-deep);
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(195, 200, 189, 0.54);
-  border-radius: 12px;
-  box-shadow: 0 14px 30px rgba(52, 44, 36, 0.08);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.about-float-icon {
-  width: 30px;
-  height: 30px;
-  box-shadow: none;
-}
-
-.about-float-icon svg {
-  width: 23px;
-  height: 23px;
-}
-
-.about-float-card.plan {
-  top: 58px;
-  left: 18%;
-}
-
-.about-float-card.pantry {
-  top: 72px;
-  right: 16%;
-}
-
-.about-float-card.cart {
-  right: 12%;
-  bottom: 84px;
+  transform: scale(1.36);
+  transform-origin: center center;
 }
 
 .about-card {
