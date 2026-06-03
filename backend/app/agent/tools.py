@@ -50,7 +50,8 @@ def get_current_datetime() -> str:
 def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """
   Queries Supabase to fetch the household's current planned meal schedule.
-  Transforms DB rows into frontend's expected dictionary mapping weekdays to meal categories and recipe names.
+  Transforms persisted DB rows into a dictionary mapping weekdays to meal categories and recipe names.
+  Only weekdays with at least one planned meal are returned; missing weekdays are unplanned.
   """
   try:
     profile_id = get_household_profile_id()
@@ -61,20 +62,14 @@ def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
       day = row.get("day", "").strip().capitalize()
       if not day:
         continue
-      plan_dict[day] = {
-        "breakfast": row.get("breakfast_recipe_id") or "",
-        "lunch": row.get("lunch_recipe_id") or "",
-        "dinner": row.get("dinner_recipe_id") or ""
+      planned_meals = {
+        "breakfast": str(row.get("breakfast_recipe_id") or "").strip(),
+        "lunch": str(row.get("lunch_recipe_id") or "").strip(),
+        "dinner": str(row.get("dinner_recipe_id") or "").strip()
       }
-      
-    # Fill in missing days with empty meal slots
-    for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
-      if day not in plan_dict:
-        plan_dict[day] = {
-          "breakfast": "",
-          "lunch": "",
-          "dinner": ""
-        }
+      if not any(planned_meals.values()):
+        continue
+      plan_dict[day] = planned_meals
     return plan_dict
   except Exception as e:
     print(f"Error fetching weekly schedule dict: {e}")
@@ -84,7 +79,8 @@ def get_weekly_schedule_tool(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """
   Fetch the current week's planned meal schedule for the household.
   Returns a dictionary mapping day of week to meal slots and their recipe names.
-  If slots are empty, it means no meal plan has been created yet.
+  Only weekdays with at least one persisted planned meal are returned.
+  An empty dictionary means no meal plan has been created yet; a missing weekday means that day is unplanned.
   """
   return get_weekly_schedule_dict(user_name)
 

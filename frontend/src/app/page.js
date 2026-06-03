@@ -10,7 +10,6 @@ import {
   MEAL_SLOTS,
   WEEK_DAYS,
   createEmptyPlanningWeekDates,
-  createEmptyWeeklyPlan,
   createUserProfiles,
   getUpcomingPlanningWeekDates
 } from "./householdConfig.js";
@@ -228,6 +227,8 @@ const getMealTitle = (meal, fallback = "No recipe set") => {
   if (typeof meal === "string") return meal || fallback;
   return meal.name || meal.title || meal.recipe_name || fallback;
 };
+
+const hasMealTitle = (meal) => Boolean(String(getMealTitle(meal, "")).trim());
 
 const getRecipeCardTitle = (recipe, fallback = "Recipe details pending") => {
   if (!recipe) return fallback;
@@ -639,7 +640,7 @@ export default function Home() {
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
   const [userProfiles, setUserProfiles] = useState(createUserProfiles);
   const [pantryStock, setPantryStock] = useState([]);
-  const [weeklyPlan, setWeeklyPlan] = useState(createEmptyWeeklyPlan);
+  const [weeklyPlan, setWeeklyPlan] = useState({});
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
   const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
   const chatMessagesRef = useRef(null);
@@ -698,8 +699,8 @@ export default function Home() {
         setHouseholdSize(data.profile.household_size);
       }
     }
-    if (data.weekly_plan) {
-      setWeeklyPlan(data.weekly_plan);
+    if (Object.prototype.hasOwnProperty.call(data, "weekly_plan")) {
+      setWeeklyPlan(data.weekly_plan || {});
     }
     if (data.grocery_cart) {
       setCustomGroceryItems(data.grocery_cart);
@@ -1464,30 +1465,56 @@ export default function Home() {
     unknown: "Checking whether Zepto is ready."
   }[zeptoState] || "";
 
+  const plannedWeekDays = useMemo(() => (
+    WEEK_DAYS.filter(day => MEAL_SLOTS.some(slot => hasMealTitle(weeklyPlan[day]?.[slot])))
+  ), [weeklyPlan]);
+  const hasWeeklyPlan = plannedWeekDays.length > 0;
+  const activePlannerDay = hasWeeklyPlan && plannedWeekDays.includes(selectedPlannerDay)
+    ? selectedPlannerDay
+    : plannedWeekDays[0] || selectedPlannerDay;
+  const plannedDateLabels = plannedWeekDays
+    .map(day => planningWeekDates[day]?.label)
+    .filter(Boolean);
+  const plannerDateRangeLabel = !hasWeeklyPlan
+    ? "No saved plan yet"
+    : plannedDateLabels.length > 1
+      ? `${plannedDateLabels[0]} - ${plannedDateLabels[plannedDateLabels.length - 1]}`
+      : plannedDateLabels[0] || "Saved plan";
+
   const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
-  const firstPlannedFocusMeal = WEEK_DAYS.map(day => ({
+  const firstPlannedFocusMeal = plannedWeekDays.map(day => ({
     day,
     date: planningWeekDates[day] || {},
     slot: currentMealSlot,
     title: getMealTitle(weeklyPlan[day]?.[currentMealSlot], "")
-  })).find(item => item.title) || {
-    day: "Monday",
-    date: planningWeekDates.Monday || {},
+  })).find(item => item.title) || plannedWeekDays.flatMap(day => (
+    MEAL_SLOTS.map(slot => ({
+      day,
+      date: planningWeekDates[day] || {},
+      slot,
+      title: getMealTitle(weeklyPlan[day]?.[slot], "")
+    }))
+  )).find(item => item.title) || {
+    day: "",
+    date: {},
     slot: currentMealSlot,
     title: `Ask Kitch to plan the first household ${currentMealLabel.toLowerCase()}`
   };
 
   const pantryPreview = pantryStock.slice(0, 3);
-  const selectedDayDate = planningWeekDates[selectedPlannerDay] || {};
+  const selectedDayDate = planningWeekDates[activePlannerDay] || {};
   const selectedDayMealList = MEAL_SLOTS.map(slot => ({
     slot,
-    key: `${selectedPlannerDay}-${slot}`,
-    title: getMealTitle(weeklyPlan[selectedPlannerDay]?.[slot], `${MEAL_SLOT_LABELS[slot]} not set`)
+    key: `${activePlannerDay}-${slot}`,
+    title: getMealTitle(weeklyPlan[activePlannerDay]?.[slot], `${MEAL_SLOT_LABELS[slot]} not set`)
   }));
   const focusMealDateText = firstPlannedFocusMeal.date.longLabel || firstPlannedFocusMeal.date.label || "Upcoming week";
   const focusMealTitle = firstPlannedFocusMeal.title;
+  const focusMealSlotLabel = MEAL_SLOT_LABELS[firstPlannedFocusMeal.slot] || currentMealLabel;
   const heroGreeting = `${getTimeBasedGreeting()}, ${activeUser}!`;
-  const focusMealContext = `${currentMealLabel} for ${focusMealDateText}`;
+  const focusMealContext = hasWeeklyPlan
+    ? `${focusMealSlotLabel} for ${focusMealDateText}`
+    : "No household meal plan yet";
   const nutritionSummary = loggedCal > 0
     ? `${calPercentage}% of daily target`
     : "No meals logged yet";
@@ -1817,15 +1844,41 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="hero-actions">
-                      <button type="button" className="primary-action" onClick={() => setChatInput(`Show me the recipe for ${focusMealTitle}`)}>
-                        View details →
-                      </button>
-                      <button type="button" onClick={() => draftMealSwapPrompt(firstPlannedFocusMeal.day, currentMealSlot)}>
-                        Swap meal
-                      </button>
-                      <button type="button" onClick={() => setChatInput(`Log ${focusMealTitle} for ${activeUser}`)}>
-                        Log meal
-                      </button>
+                      {hasWeeklyPlan ? (
+                        <>
+                          <button type="button" className="primary-action" onClick={() => setChatInput(`Show me the recipe for ${focusMealTitle}`)}>
+                            View details →
+                          </button>
+                          <button type="button" onClick={() => draftMealSwapPrompt(firstPlannedFocusMeal.day, firstPlannedFocusMeal.slot)}>
+                            Swap meal
+                          </button>
+                          <button type="button" onClick={() => setChatInput(`Log ${focusMealTitle} for ${activeUser}`)}>
+                            Log meal
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="primary-action"
+                            onClick={() => {
+                              setChatInput("Plan next week for the whole household");
+                              setSmartDockExpanded(true);
+                            }}
+                          >
+                            Plan next week
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChatInput("Help me choose meals for this household");
+                              setSmartDockExpanded(true);
+                            }}
+                          >
+                            Ask Kitch to plan
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="meal-hero-art">
@@ -1852,59 +1905,87 @@ export default function Home() {
                       <span className="eyebrow">Your household plan</span>
                       <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
                     </div>
-                    <p>{planningWeekDates.Monday?.label && planningWeekDates.Sunday?.label ? `${planningWeekDates.Monday.label} - ${planningWeekDates.Sunday.label}` : "Upcoming Monday - Sunday"}</p>
+                    <p>{plannerDateRangeLabel}</p>
                   </div>
-                  <div id="weekly-plan-grid" className="weekly-plan-board">
-                    <div className="week-date-rail" aria-label="Select planning day">
-                      {WEEK_DAYS.map(day => {
-                        const dateMeta = planningWeekDates[day] || {};
-                        return (
-                          <button
-                            key={day}
-                            type="button"
-                            className={`week-date-card ${selectedPlannerDay === day ? "active" : ""}`}
-                            onClick={() => {
-                              setSelectedPlannerDay(day);
-                              setExpandedMealKey(`${day}-${currentMealSlot}`);
-                            }}
-                          >
-                            <span>{day.slice(0, 3)}</span>
-                            <div>
-                              <strong>{dateMeta.label || "Soon"}</strong>
-                              <em>{selectedPlannerDay === day ? "Selected" : ""}</em>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  {hasWeeklyPlan ? (
+                    <div id="weekly-plan-grid" className="weekly-plan-board">
+                      <div className="week-date-rail" aria-label="Select planning day">
+                        {plannedWeekDays.map(day => {
+                          const dateMeta = planningWeekDates[day] || {};
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              className={`week-date-card ${activePlannerDay === day ? "active" : ""}`}
+                              onClick={() => {
+                                setSelectedPlannerDay(day);
+                                setExpandedMealKey(`${day}-${currentMealSlot}`);
+                              }}
+                            >
+                              <span>{day.slice(0, 3)}</span>
+                              <div>
+                                <strong>{dateMeta.label || day}</strong>
+                                <em>{activePlannerDay === day ? "Selected" : ""}</em>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                    <article className="selected-week-meals">
-                      <div className="selected-week-heading">
+                      <article className="selected-week-meals">
+                        <div className="selected-week-heading">
+                          <div>
+                            <h3>{selectedDayDate.longLabel || activePlannerDay}</h3>
+                          </div>
+                        </div>
+
+                        <div className="selected-meal-list">
+                          {selectedDayMealList.map(({ slot, key, title }) => (
+                            <button
+                              key={key}
+                              type="button"
+                              className={`selected-meal-row ${slot} ${expandedMealKey === key ? "active" : ""}`}
+                              onClick={() => {
+                                setExpandedMealKey(key);
+                                setChatInput(`Show details for ${title} on ${activePlannerDay}`);
+                              }}
+                            >
+                              <span className={`meal-time-icon ${slot}`} aria-hidden="true"><span></span></span>
+                              <span>{MEAL_SLOT_LABELS[slot]}</span>
+                              <strong>{title}</strong>
+                              <em>+</em>
+                            </button>
+                          ))}
+                        </div>
+                      </article>
+                    </div>
+                  ) : (
+                    <article id="weekly-plan-grid" className="planner-empty-state" aria-label="No saved household meal plan">
+                      <div className="planner-empty-copy">
+                        <span className="eyebrow">No plan yet</span>
+                        <h3>Start with a weekly household plan.</h3>
+                        <p>Planned days will appear here after Kitch creates meals for the household.</p>
+                        <button
+                          type="button"
+                          className="planner-empty-cta"
+                          onClick={() => {
+                            setChatInput("Plan next week for the whole household");
+                            setSmartDockExpanded(true);
+                          }}
+                        >
+                          Plan next week
+                        </button>
+                      </div>
+                      <div className="planner-empty-preview" aria-hidden="true">
+                        <AboutIconBadge name="calendar" tone="sage" />
                         <div>
-                          <h3>{selectedDayDate.longLabel || selectedPlannerDay}</h3>
+                          <span>Breakfast</span>
+                          <span>Lunch</span>
+                          <span>Dinner</span>
                         </div>
                       </div>
-
-                      <div className="selected-meal-list">
-                        {selectedDayMealList.map(({ slot, key, title }) => (
-                          <button
-                            key={key}
-                            type="button"
-                            className={`selected-meal-row ${slot} ${expandedMealKey === key ? "active" : ""}`}
-                            onClick={() => {
-                              setExpandedMealKey(key);
-                              setChatInput(`Show details for ${title} on ${selectedPlannerDay}`);
-                            }}
-                          >
-                            <span className={`meal-time-icon ${slot}`} aria-hidden="true"><span></span></span>
-                            <span>{MEAL_SLOT_LABELS[slot]}</span>
-                            <strong>{title}</strong>
-                            <em>+</em>
-                          </button>
-                        ))}
-                      </div>
                     </article>
-                  </div>
+                  )}
                 </section>
 
                 <aside className="weekly-side-rail" aria-label="Household planning status">

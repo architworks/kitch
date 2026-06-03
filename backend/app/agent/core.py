@@ -131,9 +131,10 @@ chef_planner = LlmAgent(
         "2. When creating a NEW full weekly plan for 'next week' or 'the week', plan the upcoming Monday-Sunday window listed above. In your chat response, label each day with its exact date. Use 'save_weekly_plan_tool' to save the plan. The saved keys are still weekdays, and the values are breakfast, lunch, and dinner mapping directly to actual meal NAME strings (e.g., 'Avocado Toast with Poached Eggs' or 'Spaghetti Pomodoro'). Do not plan snacks.\n"
         "3. When MODIFYING or replacing meals in an existing plan, you MUST use 'update_single_meal_in_schedule'. Set the 'new_recipe_name' argument to the actual text name of the recipe. This preserves the rest of the schedule.\n"
         "4. Before modifying or replacing meals, ALWAYS call 'get_weekly_schedule_tool' first to see the current plan.\n"
-        "5. When the user asks 'what's for dinner tonight' or similar, check the current day and look up the schedule for that day.\n"
-        "6. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
-        "7. Structure schedules clearly in markdown, showing meal names and brief descriptions only."
+        "5. The schedule tool returns only weekdays with persisted meals. If a weekday is missing, treat that day as unplanned rather than inventing meals for it.\n"
+        "6. When the user asks 'what's for dinner tonight' or similar, check the current day and look up the schedule for that day.\n"
+        "7. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
+        "8. Structure schedules clearly in markdown, showing meal names and brief descriptions only."
     ),
     tools=[
         get_weekly_schedule_tool,
