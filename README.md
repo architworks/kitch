@@ -241,7 +241,37 @@ OPENAI_API_KEY=...
 OPENAI_API_BASE=...
 ```
 
-### 5. Configure Zepto MCP (Optional)
+### 5. Configure ADK Tracing (Optional)
+
+Kitch runs ADK programmatically behind FastAPI, so tracing is configured with OpenTelemetry environment variables before the ADK runner is created.
+
+For a local trace viewer, start Jaeger with OTLP HTTP enabled:
+
+```bash
+docker run --rm --name kitch-jaeger \
+  -p 16686:16686 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:latest
+```
+
+Then add this to `backend/.env`:
+
+```bash
+KITCH_ADK_TRACING_ENABLED=true
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
+OTEL_SERVICE_NAME=kitch-backend
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=kitch,deployment.environment=local
+```
+
+Restart the backend, run a chat turn, then open:
+
+```text
+http://127.0.0.1:16686
+```
+
+ADK emits spans for agent invocation, model calls, workflow execution, and tool execution. You can also point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at any OTLP-compatible collector, or use `OTEL_EXPORTER_OTLP_ENDPOINT` if you want one endpoint for multiple telemetry signals.
+
+### 6. Configure Zepto MCP (Optional)
 
 Leave Zepto disabled for basic local development:
 
@@ -279,7 +309,7 @@ ZEPTO_MCP_REMOTE_COMMAND=npx
 ZEPTO_MCP_REMOTE_ARGS='["-y","mcp-remote","https://mcp.zepto.co.in/mcp"]'
 ```
 
-### 6. Run the Backend
+### 7. Run the Backend
 
 From `backend/`:
 
@@ -293,14 +323,14 @@ Health check:
 curl http://127.0.0.1:8000/api/health
 ```
 
-### 7. Install Frontend Dependencies
+### 8. Install Frontend Dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 8. Configure Frontend Environment
+### 9. Configure Frontend Environment
 
 Create `frontend/.env.local`:
 
@@ -310,7 +340,7 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 
 If this variable is omitted, the frontend falls back to `http://localhost:8000`.
 
-### 9. Run the Frontend
+### 10. Run the Frontend
 
 From `frontend/`:
 
@@ -350,6 +380,17 @@ http://127.0.0.1:3000
 | `OPENAI_MODEL_NAME` | Legacy local fallback model name. |
 | `OPENAI_API_KEY` | Legacy local fallback API key. |
 | `OPENAI_API_BASE` | Legacy local fallback base URL. |
+
+### ADK Tracing / OpenTelemetry (Optional)
+
+| Variable | Purpose |
+| --- | --- |
+| `KITCH_ADK_TRACING_ENABLED` | Set to `true` to request ADK OpenTelemetry setup even before an endpoint is present. Set to `false` to force-disable it. |
+| `KITCH_ADK_TRACING_REQUIRED` | Set to `true` if backend startup should fail when tracing cannot be configured. Defaults to best-effort. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP HTTP traces endpoint, such as `http://127.0.0.1:4318/v1/traces`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | General OTLP endpoint if traces, metrics, and logs share one collector. |
+| `OTEL_SERVICE_NAME` | Service name shown in trace backends. Defaults to `kitch-backend` when tracing is enabled. |
+| `OTEL_RESOURCE_ATTRIBUTES` | Comma-separated resource attributes. Defaults to `service.namespace=kitch,deployment.environment=local` when tracing is enabled. |
 
 ### Zepto MCP (Optional)
 

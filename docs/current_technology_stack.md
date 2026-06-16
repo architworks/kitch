@@ -101,6 +101,7 @@ Current packages:
 - `mcp>=1.0.0`
 - `aiosqlite>=0.18.0`
 - `sqlalchemy>=2.0.0`
+- `opentelemetry-exporter-otlp-proto-http>=1.28.0`
 
 Current local dev command:
 
@@ -132,6 +133,7 @@ Current ADK services:
 - `LlmAgent`
 - `EventsCompactionConfig`
 - `LlmEventSummarizer`
+- Optional ADK OpenTelemetry tracing via `backend/app/telemetry.py`
 
 Current agent team:
 
@@ -320,6 +322,54 @@ Why Supabase is still required even with ADK memory:
 
 - ADK memory is for flexible preferences and conversation context.
 - Supabase stores authoritative product records.
+
+---
+
+## ADK Tracing and OpenTelemetry Configuration
+
+Tracing bootstrap location:
+
+- `backend/app/telemetry.py`
+
+Current behavior:
+
+- Kitch runs ADK programmatically behind FastAPI, so tracing is configured in code before the ADK `Runner` is created.
+- Tracing is off by default.
+- If `KITCH_ADK_TRACING_ENABLED=true` or an OTEL endpoint variable is set, Kitch calls ADK's `maybe_set_otel_providers()`.
+- ADK emits OpenTelemetry spans for agent invocation, model calls, workflow execution, and tool execution.
+
+Environment variables:
+
+| Variable | Purpose |
+| :--- | :--- |
+| `KITCH_ADK_TRACING_ENABLED` | Set to `true` to request ADK OpenTelemetry setup. Set to `false` to force-disable it. |
+| `KITCH_ADK_TRACING_REQUIRED` | Set to `true` if backend startup should fail when tracing cannot be configured. Defaults to best-effort. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP HTTP traces endpoint, for example `http://127.0.0.1:4318/v1/traces`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | General OTLP endpoint if traces, metrics, and logs share one collector. |
+| `OTEL_SERVICE_NAME` | Service name shown in trace backends. Defaults to `kitch-backend` when tracing is enabled. |
+| `OTEL_RESOURCE_ATTRIBUTES` | Comma-separated resource attributes. Defaults to `service.namespace=kitch,deployment.environment=local` when tracing is enabled. |
+
+Local Jaeger example:
+
+```bash
+docker run --rm --name kitch-jaeger \
+  -p 16686:16686 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:latest
+```
+
+Then set:
+
+```bash
+KITCH_ADK_TRACING_ENABLED=true
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
+OTEL_SERVICE_NAME=kitch-backend
+```
+
+Why this is separate from ADK Web:
+
+- `adk web` can export traces when it owns the runtime.
+- Kitch owns the runtime through FastAPI, so it uses ADK's programmatic tracing setup and exports to any OTLP-compatible backend.
 
 ---
 

@@ -36,6 +36,10 @@ from dotenv import load_dotenv
 # 0. Load model provider credentials dynamically from gitignored .env file
 load_dotenv()
 
+from app.telemetry import configure_adk_tracing
+
+configure_adk_tracing()
+
 def build_llm_model():
     """
     Builds the model adapter from environment configuration.

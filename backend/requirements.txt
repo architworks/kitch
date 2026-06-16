@@ -8,3 +8,4 @@ python-dotenv>=1.0.0
 mcp>=1.0.0
 aiosqlite>=0.18.0
 sqlalchemy>=2.0.0
+opentelemetry-exporter-otlp-proto-http>=1.28.0
