@@ -75,14 +75,62 @@ flowchart TD
     Coordinator --> Vision
     Coordinator --> RecipeGrocery
 
-    Chef --> MealTools[Meal Schedule Tools]
-    Vision --> VisionTools[Macro and Pantry Tools]
-    RecipeGrocery --> RecipeTools[Recipe, Grocery, Preference Tools]
+    subgraph ToolLayer[Python Tool Layer]
+        GetWeekly[get_weekly_schedule_tool]
+        SaveWeekly[save_weekly_plan_tool]
+        UpdateMeal[update_single_meal_in_schedule]
+        AddPantry[add_to_pantry_tool]
+        LogMacros[log_macros_tool]
+        GetPantry[get_pantry_stock_tool]
+        GetMacro[get_macro_diary_tool]
+        GetCart[get_grocery_cart_tool]
+        ClearCart[clear_planned_grocery_cart_tool]
+        SaveRecipePlan[save_recipe_grocery_plan_tool]
+        GetRecipePlan[get_recipe_grocery_plan_tool]
+        ListRecipePlans[list_recipe_grocery_plans_tool]
+        SetFoodPreference[set_household_food_preference_tool]
+        SearchFoodPreferences[search_household_food_preferences_tool]
+        GetDatetime[get_current_datetime]
+    end
 
-    MealTools --> Supabase[(Supabase)]
-    VisionTools --> Supabase
-    RecipeTools --> Supabase
-    RecipeTools --> Memory[ADK Memory]
+    Chef --> GetWeekly
+    Chef --> SaveWeekly
+    Chef --> UpdateMeal
+    Chef --> GetDatetime
+
+    Vision --> AddPantry
+    Vision --> LogMacros
+    Vision --> GetPantry
+    Vision --> GetMacro
+    Vision --> GetDatetime
+
+    RecipeGrocery --> GetWeekly
+    RecipeGrocery --> GetCart
+    RecipeGrocery --> ClearCart
+    RecipeGrocery --> SaveRecipePlan
+    RecipeGrocery --> GetRecipePlan
+    RecipeGrocery --> ListRecipePlans
+    RecipeGrocery --> SetFoodPreference
+    RecipeGrocery --> SearchFoodPreferences
+    RecipeGrocery --> GetPantry
+    RecipeGrocery --> AddPantry
+    RecipeGrocery --> GetDatetime
+
+    GetWeekly --> Supabase[(Supabase)]
+    SaveWeekly --> Supabase
+    UpdateMeal --> Supabase
+    AddPantry --> Supabase
+    LogMacros --> Supabase
+    GetPantry --> Supabase
+    GetMacro --> Supabase
+    GetCart --> Supabase
+    ClearCart --> Supabase
+    SaveRecipePlan --> Supabase
+    GetRecipePlan --> Supabase
+    ListRecipePlans --> Supabase
+    SetFoodPreference --> Memory[ADK Memory]
+    SearchFoodPreferences --> Memory
+    GetDatetime --> RuntimeContext[Runtime datetime context]
 
     API --> ProviderAdapters[Backend Provider Adapters]
     ProviderAdapters --> Zepto[Zepto MCP]
