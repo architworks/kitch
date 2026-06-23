@@ -263,13 +263,22 @@ OTEL_SERVICE_NAME=kitch-backend
 OTEL_RESOURCE_ATTRIBUTES=service.namespace=kitch,deployment.environment=local
 ```
 
+To also send the same ADK traces to LangSmith, add:
+
+```bash
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=kitch-local
+```
+
+Jaeger and LangSmith can run together: Jaeger uses the standard OTEL endpoint above, while LangSmith is added as a second exporter by Kitch's telemetry bootstrap.
+
 Restart the backend, run a chat turn, then open:
 
 ```text
 http://127.0.0.1:16686
 ```
 
-ADK emits spans for agent invocation, model calls, workflow execution, and tool execution. You can also point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at any OTLP-compatible collector, or use `OTEL_EXPORTER_OTLP_ENDPOINT` if you want one endpoint for multiple telemetry signals.
+ADK emits spans for agent invocation, model calls, workflow execution, and tool execution. You can point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at any OTLP-compatible collector, use `OTEL_EXPORTER_OTLP_ENDPOINT` if you want one endpoint for multiple telemetry signals, and set `LANGSMITH_API_KEY` when you want LangSmith export in parallel.
 
 ### 6. Configure Zepto MCP (Optional)
 
@@ -391,6 +400,10 @@ http://127.0.0.1:3000
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | General OTLP endpoint if traces, metrics, and logs share one collector. |
 | `OTEL_SERVICE_NAME` | Service name shown in trace backends. Defaults to `kitch-backend` when tracing is enabled. |
 | `OTEL_RESOURCE_ATTRIBUTES` | Comma-separated resource attributes. Defaults to `service.namespace=kitch,deployment.environment=local` when tracing is enabled. |
+| `LANGSMITH_API_KEY` | Optional LangSmith API key. When set, Kitch exports ADK traces to LangSmith in addition to the standard OTEL endpoint. |
+| `LANGSMITH_PROJECT` | Optional LangSmith project name. Defaults to LangSmith's project behavior if omitted. |
+| `LANGSMITH_OTEL_TRACES_ENDPOINT` | Optional LangSmith OTEL traces endpoint override. Defaults to `https://api.smith.langchain.com/otel/v1/traces`. |
+| `KITCH_LANGSMITH_TRACING_ENABLED` | Optional explicit LangSmith tracing toggle. Set to `false` to disable LangSmith export even if a key is present. |
 
 ### Zepto MCP (Optional)
 

@@ -335,8 +335,9 @@ Current behavior:
 
 - Kitch runs ADK programmatically behind FastAPI, so tracing is configured in code before the ADK `Runner` is created.
 - Tracing is off by default.
-- If `KITCH_ADK_TRACING_ENABLED=true` or an OTEL endpoint variable is set, Kitch calls ADK's `maybe_set_otel_providers()`.
+- If `KITCH_ADK_TRACING_ENABLED=true`, an OTEL endpoint variable is set, or `LANGSMITH_API_KEY` is set, Kitch calls ADK's `maybe_set_otel_providers()`.
 - ADK emits OpenTelemetry spans for agent invocation, model calls, workflow execution, and tool execution.
+- Jaeger and LangSmith can be used together. The standard OTEL endpoint handles Jaeger or any collector, and LangSmith is added as an extra OTLP trace exporter when configured.
 
 Environment variables:
 
@@ -348,6 +349,10 @@ Environment variables:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | General OTLP endpoint if traces, metrics, and logs share one collector. |
 | `OTEL_SERVICE_NAME` | Service name shown in trace backends. Defaults to `kitch-backend` when tracing is enabled. |
 | `OTEL_RESOURCE_ATTRIBUTES` | Comma-separated resource attributes. Defaults to `service.namespace=kitch,deployment.environment=local` when tracing is enabled. |
+| `LANGSMITH_API_KEY` | Optional LangSmith API key. When set, Kitch exports ADK traces to LangSmith in addition to the standard OTEL endpoint. |
+| `LANGSMITH_PROJECT` | Optional LangSmith project name. Defaults to LangSmith's project behavior if omitted. |
+| `LANGSMITH_OTEL_TRACES_ENDPOINT` | Optional LangSmith OTEL traces endpoint override. Defaults to `https://api.smith.langchain.com/otel/v1/traces`. |
+| `KITCH_LANGSMITH_TRACING_ENABLED` | Optional explicit LangSmith tracing toggle. Set to `false` to disable LangSmith export even if a key is present. |
 
 Local Jaeger example:
 
@@ -364,6 +369,8 @@ Then set:
 KITCH_ADK_TRACING_ENABLED=true
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
 OTEL_SERVICE_NAME=kitch-backend
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=kitch-local
 ```
 
 Why this is separate from ADK Web:

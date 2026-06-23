@@ -26,6 +26,7 @@ dist-ssr
 .env
 venv/
 .agents/
+.local-tools/
 
 __pycache__/
 **/__pycache__/
