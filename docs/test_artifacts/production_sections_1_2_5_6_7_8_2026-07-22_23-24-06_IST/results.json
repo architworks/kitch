@@ -1,0 +1,1475 @@
+{
+  "title": "Kitch production test subset rerun",
+  "source_plan": "docs/production_test_results.md",
+  "sections": [
+    1,
+    2,
+    5,
+    6,
+    7,
+    8
+  ],
+  "started_at": "2026-07-22T23:39:32+05:30",
+  "ended_at": "2026-07-22T23:41:59+05:30",
+  "timezone": "Asia/Kolkata",
+  "base_url": "http://127.0.0.1:8000",
+  "runtime": {
+    "agent_framework": "Google ADK",
+    "model_adapter": "Gemini",
+    "configured_model": "gemini-3.6-flash"
+  },
+  "fixture": {
+    "path": "fridge_scan_fixture.png",
+    "known_items": [
+      "6 brown eggs",
+      "2 tomatoes",
+      "1 cucumber",
+      "1 bottle of milk",
+      "1 block of paneer"
+    ]
+  },
+  "source_report_sha256_before": "386780c01907e764234f09bf63a738213edd33dd32ddc6d253c2af7d9c051066",
+  "source_report_sha256_after": "386780c01907e764234f09bf63a738213edd33dd32ddc6d253c2af7d9c051066",
+  "source_report_unchanged": true,
+  "summary": {
+    "PASS": 3,
+    "FAIL": 12,
+    "INCONCLUSIVE": 1,
+    "ERROR": 0
+  },
+  "initial_state": {
+    "profile": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "full_name": "Kitch Household",
+      "diet_preference": "balanced",
+      "household_size": 3,
+      "daily_calorie_target": 2000,
+      "created_at": "2026-05-28T12:08:19.315473+00:00"
+    },
+    "pantry_stock": [
+      {
+        "name": "leeks",
+        "amount": 2.0,
+        "unit": "stalks"
+      },
+      {
+        "name": "broccoli",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "corn on the cob",
+        "amount": 2.0,
+        "unit": "ears"
+      },
+      {
+        "name": "cucumber",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "red bell peppers",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "tomatoes",
+        "amount": 5.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "parsley",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "green onions",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "lemon",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "radicchio",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "green apple",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "romaine lettuce",
+        "amount": 2.0,
+        "unit": "heads"
+      },
+      {
+        "name": "eggplant",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "strawberries",
+        "amount": 1.0,
+        "unit": "box"
+      },
+      {
+        "name": "romanesco cauliflower",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "yellow bell pepper",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "green bell pepper",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "potatoes",
+        "amount": 8.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "bok choy",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "sugar snap peas",
+        "amount": 1.0,
+        "unit": "bag"
+      },
+      {
+        "name": "artichokes",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "nectarines",
+        "amount": 6.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "pomegranate",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "cauliflower",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "oranges",
+        "amount": 3.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "limes",
+        "amount": 4.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "mango",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "green beans",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "brussels sprouts",
+        "amount": 5.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "kale",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "savoy cabbage",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "onion",
+        "amount": 1.0,
+        "unit": "piece"
+      }
+    ],
+    "macro_diary": [
+      {
+        "name": "2 egg omelette",
+        "calories": 220,
+        "macros": {
+          "protein": 13,
+          "carbs": 2,
+          "fat": 17,
+          "fiber": 0
+        },
+        "time": "2026-05-31T06:32:11.35226+00:00"
+      },
+      {
+        "name": "Vegetable poha with peanuts",
+        "calories": 430,
+        "macros": {
+          "protein": 10,
+          "carbs": 68,
+          "fat": 14,
+          "fiber": 7
+        },
+        "time": "2026-05-31T06:34:24.703413+00:00"
+      },
+      {
+        "name": "Paneer Manchurian (approx. 150g paneer)",
+        "calories": 680,
+        "macros": {
+          "protein": 29,
+          "carbs": 30,
+          "fat": 45,
+          "fiber": 2
+        },
+        "time": "2026-05-31T14:52:44.000167+00:00"
+      },
+      {
+        "name": "Crispy Gnocchi Croquettes in Marinara Sauce",
+        "calories": 190,
+        "macros": {
+          "protein": 3,
+          "carbs": 23,
+          "fat": 10,
+          "fiber": 2
+        },
+        "time": "2026-05-31T15:40:01.509973+00:00"
+      }
+    ],
+    "weekly_plan": {
+      "Saturday": {
+        "breakfast": "Banana Ragi Pancakes with Honey Yogurt",
+        "lunch": "Vegetable Sambar Millet Bowls with Sweet Potato",
+        "dinner": "Indo-Chinese Veg Manchurian with Hakka Noodles"
+      },
+      "Sunday": {
+        "breakfast": "Moong Dal Dosa with Coconut Chutney",
+        "lunch": "Roasted Cauliflower and Chickpea Buddha Bowls with Tahini Dressing",
+        "dinner": "Homestyle Dal Tadka with Jeera Rice and Bhindi Masala"
+      },
+      "Tuesday": {
+        "breakfast": "Greek Yogurt Parfaits with Mango and Almond Granola",
+        "lunch": "Paneer Tikka Whole Wheat Wraps with Mint Yogurt",
+        "dinner": "Vegetable Lasagna with Mixed Green Salad"
+      },
+      "Monday": {
+        "breakfast": "Vegetable Upma with Coconut Chutney",
+        "lunch": "Chole Quinoa Bowls with Cucumber Raita",
+        "dinner": "Chicken Parmesan with Whole Wheat Spaghetti and Mixed Green Salad"
+      },
+      "Wednesday": {
+        "breakfast": "Spinach Corn Besan Chilla with Tomato Chutney",
+        "lunch": "Mediterranean Chickpea Couscous Salad with Feta",
+        "dinner": "Kerala Egg Curry with Red Rice and Green Beans"
+      },
+      "Thursday": {
+        "breakfast": "Masala Scrambled Eggs with Whole Wheat Toast",
+        "lunch": "Rajma Brown Rice Bowls with Kachumber Salad",
+        "dinner": "Thai Basil Tofu and Vegetable Stir-Fry with Jasmine Rice"
+      },
+      "Friday": {
+        "breakfast": "Poha with Sprouts and Roasted Peanuts",
+        "lunch": "Grilled Chicken Hummus Pita Bowls",
+        "dinner": "Paneer Butter Masala with Tandoori Roti and Cucumber Salad"
+      }
+    },
+    "grocery_cart": [],
+    "latest_recipe_grocery_plan": null
+  },
+  "final_state": {
+    "profile": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "full_name": "Kitch Household",
+      "diet_preference": "keto",
+      "household_size": 3,
+      "daily_calorie_target": 2000,
+      "created_at": "2026-05-28T12:08:19.315473+00:00"
+    },
+    "pantry_stock": [
+      {
+        "name": "leeks",
+        "amount": 2.0,
+        "unit": "stalks"
+      },
+      {
+        "name": "broccoli",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "corn on the cob",
+        "amount": 2.0,
+        "unit": "ears"
+      },
+      {
+        "name": "cucumber",
+        "amount": 2.0,
+        "unit": "piece"
+      },
+      {
+        "name": "red bell peppers",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "tomatoes",
+        "amount": 7.0,
+        "unit": "piece"
+      },
+      {
+        "name": "parsley",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "green onions",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "lemon",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "radicchio",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "green apple",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "romaine lettuce",
+        "amount": 2.0,
+        "unit": "heads"
+      },
+      {
+        "name": "eggplant",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "strawberries",
+        "amount": 1.0,
+        "unit": "box"
+      },
+      {
+        "name": "romanesco cauliflower",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "yellow bell pepper",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "green bell pepper",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "potatoes",
+        "amount": 8.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "bok choy",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "sugar snap peas",
+        "amount": 1.0,
+        "unit": "bag"
+      },
+      {
+        "name": "artichokes",
+        "amount": 2.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "nectarines",
+        "amount": 6.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "pomegranate",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "cauliflower",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "oranges",
+        "amount": 3.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "limes",
+        "amount": 4.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "mango",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "green beans",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "brussels sprouts",
+        "amount": 5.0,
+        "unit": "pieces"
+      },
+      {
+        "name": "kale",
+        "amount": 1.0,
+        "unit": "bunch"
+      },
+      {
+        "name": "savoy cabbage",
+        "amount": 1.0,
+        "unit": "head"
+      },
+      {
+        "name": "onion",
+        "amount": 1.0,
+        "unit": "piece"
+      },
+      {
+        "name": "eggs",
+        "amount": 6.0,
+        "unit": "piece"
+      },
+      {
+        "name": "milk",
+        "amount": 1.0,
+        "unit": "bottle"
+      },
+      {
+        "name": "paneer/block cheese",
+        "amount": 1.0,
+        "unit": "block"
+      }
+    ],
+    "macro_diary": [
+      {
+        "name": "2 egg omelette",
+        "calories": 220,
+        "macros": {
+          "protein": 13,
+          "carbs": 2,
+          "fat": 17,
+          "fiber": 0
+        },
+        "time": "2026-05-31T06:32:11.35226+00:00"
+      },
+      {
+        "name": "Vegetable poha with peanuts",
+        "calories": 430,
+        "macros": {
+          "protein": 10,
+          "carbs": 68,
+          "fat": 14,
+          "fiber": 7
+        },
+        "time": "2026-05-31T06:34:24.703413+00:00"
+      },
+      {
+        "name": "Paneer Manchurian (approx. 150g paneer)",
+        "calories": 680,
+        "macros": {
+          "protein": 29,
+          "carbs": 30,
+          "fat": 45,
+          "fiber": 2
+        },
+        "time": "2026-05-31T14:52:44.000167+00:00"
+      },
+      {
+        "name": "Crispy Gnocchi Croquettes in Marinara Sauce",
+        "calories": 190,
+        "macros": {
+          "protein": 3,
+          "carbs": 23,
+          "fat": 10,
+          "fiber": 2
+        },
+        "time": "2026-05-31T15:40:01.509973+00:00"
+      }
+    ],
+    "weekly_plan": {
+      "Wednesday": {
+        "breakfast": "Aloo Paratha with Fresh Curd & Pickle",
+        "lunch": "Rajma Masala with Steamed Rice",
+        "dinner": "Palak Paneer with Rotis & Salad"
+      },
+      "Sunday": {
+        "breakfast": "Puri Bhaji with Sooji Halwa",
+        "lunch": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+        "dinner": "Dal Makhani with Jeera Rice & Garlic Naan"
+      },
+      "Thursday": {
+        "breakfast": "Upma with Mixed Vegetables & Cashews",
+        "lunch": "Baingan Bharta with Whole Wheat Rotis",
+        "dinner": "Butter Chicken with Butter Naan"
+      },
+      "Monday": {
+        "breakfast": "Poha with Roasted Peanuts & Curry Leaves",
+        "lunch": "Dal Tadka with Jeera Rice & Cucumber Raita",
+        "dinner": "Paneer Tikka Masala with Garlic Naan"
+      },
+      "Friday": {
+        "breakfast": "Idli Sambar with Tomato Chutney",
+        "lunch": "Vegetable Biryani with Cucumber Mint Raita",
+        "dinner": "Fish Curry with Steamed Rice & Cabbage Poriyal"
+      },
+      "Saturday": {
+        "breakfast": "Moong Dal Cheela with Green Chutney",
+        "lunch": "Pav Bhaji with Toasted Pav",
+        "dinner": "Kadhai Paneer with Missi Roti & Kachumber Salad"
+      },
+      "Tuesday": {
+        "breakfast": "Masala Dosa with Sambar & Coconut Chutney",
+        "lunch": "Chana Masala with Whole Wheat Parathas",
+        "dinner": "Chicken Curry with Steamed Basmati Rice"
+      }
+    },
+    "grocery_cart": [
+      {
+        "id": "local-9a45f284-17db-420e-8196-9b5df688123e",
+        "name": "Onions",
+        "amount": 2.0,
+        "unit": "kg",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "1 onion in pantry, need additional for week",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-7b71e59b-dbee-42b9-873a-e89b59b02007",
+        "name": "Tomatoes",
+        "amount": 1.5,
+        "unit": "kg",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "7 tomatoes available in fridge/pantry",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-32cd4d69-9b00-47cf-8b7f-f8799711d1ed",
+        "name": "Cucumber",
+        "amount": 2.0,
+        "unit": "pieces",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "2 cucumbers available in fridge",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-33dde1fe-b1b8-4f5d-a663-0283bbe58e6b",
+        "name": "Potatoes",
+        "amount": 8.0,
+        "unit": "pieces",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "8 potatoes available in pantry",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-612bbc23-68ac-483b-98c1-d540306d1f00",
+        "name": "Eggplant (Baingan)",
+        "amount": 2.0,
+        "unit": "pieces",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "2 eggplants available in pantry",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-4e19d916-3bd7-4f4c-b743-b828fbb7d318",
+        "name": "Cauliflower",
+        "amount": 1.0,
+        "unit": "head",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "1 head of cauliflower available in pantry",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-22f557b5-c625-4f9c-aad6-2e74200e9542",
+        "name": "Spinach (Palak)",
+        "amount": 2.0,
+        "unit": "bunches",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-765c141e-65f5-4f09-95a6-368d905ccf77",
+        "name": "Ginger & Garlic",
+        "amount": 250.0,
+        "unit": "g",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-e9d8cfcd-e74e-4f49-9a36-2c44385eb5cb",
+        "name": "Green Chillies & Coriander",
+        "amount": 1.0,
+        "unit": "bunch",
+        "category": "Produce",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-d6af8ea2-7a8f-4fa2-a294-aa9c47f38b5b",
+        "name": "Milk",
+        "amount": 1.0,
+        "unit": "bottle",
+        "category": "Dairy & Refrigerated",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "1 bottle available in fridge",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-97aaee6e-f845-4b53-8963-7e9f240ccbc9",
+        "name": "Paneer",
+        "amount": 500.0,
+        "unit": "g",
+        "category": "Dairy & Refrigerated",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "1 block of paneer available in fridge; buy more if needed",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-c1efcb60-c4c0-452f-b496-bbbade9f518c",
+        "name": "Eggs",
+        "amount": 6.0,
+        "unit": "pieces",
+        "category": "Dairy & Refrigerated",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": true,
+        "stockNote": "6 eggs available in fridge",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-1f95e85e-14b0-42a6-b62d-5a4b5e9cd633",
+        "name": "Curd / Yogurt",
+        "amount": 1.0,
+        "unit": "kg",
+        "category": "Dairy & Refrigerated",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-efa1e785-a092-48a0-90f1-6bb74fa247e5",
+        "name": "Butter & Ghee",
+        "amount": 250.0,
+        "unit": "g",
+        "category": "Dairy & Refrigerated",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-a4e28f30-7285-4464-a96f-c983103cceff",
+        "name": "Chicken",
+        "amount": 1.5,
+        "unit": "kg",
+        "category": "Meat & Seafood",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-cdcce4d4-be0b-40ff-afd7-8b849135e4cb",
+        "name": "Fish Fillets",
+        "amount": 500.0,
+        "unit": "g",
+        "category": "Meat & Seafood",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-0496c8a0-0798-471a-9d3a-a4d2f4281c35",
+        "name": "Basmati Rice",
+        "amount": 2.0,
+        "unit": "kg",
+        "category": "Pantry & Staples",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-d9aef282-bccb-4d62-88aa-8d262459c120",
+        "name": "Poha, Upma Rava & Dals (Toor, Chana, Rajma, Moong, Urad)",
+        "amount": 1.0,
+        "unit": "pack",
+        "category": "Pantry & Staples",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-5ea8d3de-40dd-4c86-9a62-821f57185ad4",
+        "name": "Whole Wheat Atta",
+        "amount": 2.0,
+        "unit": "kg",
+        "category": "Pantry & Staples",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      },
+      {
+        "id": "local-06d1d605-f71b-4b73-b431-06d8e2bbe5c5",
+        "name": "Baker's Dozen Whole Wheat Bread / Pav",
+        "amount": 1.0,
+        "unit": "pack",
+        "category": "Bakery",
+        "source": "agent",
+        "checked": false,
+        "alreadyStocked": false,
+        "stockNote": "Selected Baker's Dozen whole wheat as per preference",
+        "recipeGroceryPlanId": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914"
+      }
+    ],
+    "latest_recipe_grocery_plan": {
+      "id": "5ad41ee6-65db-4a06-af82-4c3bcdbf2914",
+      "scope": {},
+      "scopeLabel": "Recipe + grocery plan",
+      "request": "Weekly Indian Meal Plan Grocery List",
+      "householdSize": 3,
+      "recipeCount": 3,
+      "ingredientCount": 15,
+      "updatesCart": true,
+      "cartItemCount": 20,
+      "createdAt": "2026-07-22T18:11:32.985491+00:00",
+      "updatedAt": "2026-07-22T18:11:32.985491+00:00"
+    }
+  },
+  "results": [
+    {
+      "scenario": "1.1",
+      "section": "Meal Plan Generation",
+      "prompt": "Plan my meals for next week. Keep it balanced and diverse.",
+      "started_at": "2026-07-22T23:39:33+05:30",
+      "ended_at": "2026-07-22T23:39:49+05:30",
+      "duration_seconds": 16.087,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "7 days/21 meals persisted with requested theme",
+      "response": {
+        "text": "Here is your balanced and diverse meal plan for next week (**July 27, 2026 – August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Berry & Nut Oatmeal with Honey\n* **Lunch:** Mediterranean Chickpea & Quinoa Salad\n* **Dinner:** Grilled Salmon with Asparagus and Brown Rice\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Avocado Toast with Poached Eggs\n* **Lunch:** Turkey and Veggie Wrap with Hummus\n* **Dinner:** Chicken & Broccoli Stir-Fry with Jasmine Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Greek Yogurt Parfait with Granola & Fresh Berries\n* **Lunch:** Caprese Salad with Grilled Chicken\n* **Dinner:** Lean Beef Tacos with Black Beans and Corn Salsa\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Spinach, Tomato & Mushroom Omelet\n* **Lunch:** Lentil Soup with Whole Wheat Sourdough Bread\n* **Dinner:** Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Whole Grain Pancakes with Fresh Fruit\n* **Lunch:** Asian Chicken Salad with Sesame Dressing\n* **Dinner:** Shrimp Scampi with Whole Wheat Spaghetti & Side Salad\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Shakshuka with Warm Pita Bread\n* **Lunch:** Grilled Vegetable & Halloumi Panini\n* **Dinner:** Herb-Roasted Whole Chicken with Roasted Vegetables\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Chia Seed Pudding with Mango and Coconut\n* **Lunch:** Minestrone Soup with Garlic Bread\n* **Dinner:** Pan-Seared Cod with Lemon Butter Sauce and Quinoa\n\n---\n\nThis plan has been saved to your schedule. Let me know if you'd like to swap any specific meal or if you want to generate detailed recipes and grocery lists for any of these dishes!",
+        "action": {
+          "type": "UPDATE_PLANNER"
+        }
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Sunday": {
+            "breakfast": "Chia Seed Pudding with Mango and Coconut",
+            "lunch": "Minestrone Soup with Garlic Bread",
+            "dinner": "Pan-Seared Cod with Lemon Butter Sauce and Quinoa"
+          },
+          "Friday": {
+            "breakfast": "Whole Grain Pancakes with Fresh Fruit",
+            "lunch": "Asian Chicken Salad with Sesame Dressing",
+            "dinner": "Shrimp Scampi with Whole Wheat Spaghetti & Side Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Avocado Toast with Poached Eggs",
+            "lunch": "Turkey and Veggie Wrap with Hummus",
+            "dinner": "Chicken & Broccoli Stir-Fry with Jasmine Rice"
+          },
+          "Wednesday": {
+            "breakfast": "Greek Yogurt Parfait with Granola & Fresh Berries",
+            "lunch": "Caprese Salad with Grilled Chicken",
+            "dinner": "Lean Beef Tacos with Black Beans and Corn Salsa"
+          },
+          "Thursday": {
+            "breakfast": "Spinach, Tomato & Mushroom Omelet",
+            "lunch": "Lentil Soup with Whole Wheat Sourdough Bread",
+            "dinner": "Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale"
+          },
+          "Saturday": {
+            "breakfast": "Shakshuka with Warm Pita Bread",
+            "lunch": "Grilled Vegetable & Halloumi Panini",
+            "dinner": "Herb-Roasted Whole Chicken with Roasted Vegetables"
+          },
+          "Monday": {
+            "breakfast": "Berry & Nut Oatmeal with Honey",
+            "lunch": "Mediterranean Chickpea & Quinoa Salad",
+            "dinner": "Grilled Salmon with Asparagus and Brown Rice"
+          }
+        },
+        "assistant_reply": "Here is your balanced and diverse meal plan for next week (**July 27, 2026 – August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Berry & Nut Oatmeal with Honey\n* **Lunch:** Mediterranean Chickpea & Quinoa Salad\n* **Dinner:** Grilled Salmon with Asparagus and Brown Rice\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Avocado Toast with Poached Eggs\n* **Lunch:** Turkey and Veggie Wrap with Hummus\n* **Dinner:** Chicken & Broccoli Stir-Fry with Jasmine Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Greek Yogurt Parfait with Granola & Fresh Berries\n* **Lunch:** Caprese Salad with Grilled Chicken\n* **Dinner:** Lean Beef Tacos with Black Beans and Corn Salsa\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Spinach, Tomato & Mushroom Omelet\n* **Lunch:** Lentil Soup with Whole Wheat Sourdough Bread\n* **Dinner:** Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Whole Grain Pancakes with Fresh Fruit\n* **Lunch:** Asian Chicken Salad with Sesame Dressing\n* **Dinner:** Shrimp Scampi with Whole Wheat Spaghetti & Side Salad\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Shakshuka with Warm Pita Bread\n* **Lunch:** Grilled Vegetable & Halloumi Panini\n* **Dinner:** Herb-Roasted Whole Chicken with Roasted Vegetables\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Chia Seed Pudding with Mango and Coconut\n* **Lunch:** Minestrone Soup with Garlic Bread\n* **Dinner:** Pan-Seared Cod with Lemon Butter Sauce and Quinoa\n\n---\n\nThis plan has been saved to your schedule. Let me know if you'd like to swap any specific meal or if you want to generate detailed recipes and grocery lists for any of these dishes!"
+      }
+    },
+    {
+      "scenario": "1.2",
+      "section": "Meal Plan Generation",
+      "prompt": "Actually, I'm feeling like eating Indian food this week. Plan a completely new weekly meal plan focusing on delicious Indian dishes.",
+      "started_at": "2026-07-22T23:39:49+05:30",
+      "ended_at": "2026-07-22T23:40:01+05:30",
+      "duration_seconds": 11.591,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "7 days/21 meals persisted with requested theme",
+      "response": {
+        "text": "Here is your new Indian meal plan for next week (**July 27, 2026 – August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Poha with Roasted Peanuts & Curry Leaves\n* **Lunch:** Dal Tadka with Jeera Rice & Cucumber Raita\n* **Dinner:** Paneer Tikka Masala with Garlic Naan\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Masala Dosa with Sambar & Coconut Chutney\n* **Lunch:** Chana Masala with Whole Wheat Parathas\n* **Dinner:** Chicken Curry with Steamed Basmati Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Aloo Paratha with Fresh Curd & Pickle\n* **Lunch:** Rajma Masala with Steamed Rice\n* **Dinner:** Palak Paneer with Rotis & Salad\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Upma with Mixed Vegetables & Cashews\n* **Lunch:** Baingan Bharta with Whole Wheat Rotis\n* **Dinner:** Butter Chicken with Butter Naan\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Idli Sambar with Tomato Chutney\n* **Lunch:** Vegetable Biryani with Cucumber Mint Raita\n* **Dinner:** Fish Curry with Steamed Rice & Cabbage Poriyal\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Moong Dal Cheela with Green Chutney\n* **Lunch:** Pav Bhaji with Toasted Pav\n* **Dinner:** Kadhai Paneer with Missi Roti & Kachumber Salad\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Puri Bhaji with Sooji Halwa\n* **Lunch:** Hyderabadi Chicken Biryani with Mirchi Ka Salan\n* **Dinner:** Dal Makhani with Jeera Rice & Garlic Naan\n\n---\n\nYour schedule has been updated with this delicious Indian menu! Let me know if you need to swap any individual meals or want recipes and ingredient lists.",
+        "action": {
+          "type": "UPDATE_PLANNER"
+        }
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Wednesday": {
+            "breakfast": "Aloo Paratha with Fresh Curd & Pickle",
+            "lunch": "Rajma Masala with Steamed Rice",
+            "dinner": "Palak Paneer with Rotis & Salad"
+          },
+          "Sunday": {
+            "breakfast": "Puri Bhaji with Sooji Halwa",
+            "lunch": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+            "dinner": "Dal Makhani with Jeera Rice & Garlic Naan"
+          },
+          "Thursday": {
+            "breakfast": "Upma with Mixed Vegetables & Cashews",
+            "lunch": "Baingan Bharta with Whole Wheat Rotis",
+            "dinner": "Butter Chicken with Butter Naan"
+          },
+          "Monday": {
+            "breakfast": "Poha with Roasted Peanuts & Curry Leaves",
+            "lunch": "Dal Tadka with Jeera Rice & Cucumber Raita",
+            "dinner": "Paneer Tikka Masala with Garlic Naan"
+          },
+          "Friday": {
+            "breakfast": "Idli Sambar with Tomato Chutney",
+            "lunch": "Vegetable Biryani with Cucumber Mint Raita",
+            "dinner": "Fish Curry with Steamed Rice & Cabbage Poriyal"
+          },
+          "Saturday": {
+            "breakfast": "Moong Dal Cheela with Green Chutney",
+            "lunch": "Pav Bhaji with Toasted Pav",
+            "dinner": "Kadhai Paneer with Missi Roti & Kachumber Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Masala Dosa with Sambar & Coconut Chutney",
+            "lunch": "Chana Masala with Whole Wheat Parathas",
+            "dinner": "Chicken Curry with Steamed Basmati Rice"
+          }
+        },
+        "assistant_reply": "Here is your new Indian meal plan for next week (**July 27, 2026 – August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Poha with Roasted Peanuts & Curry Leaves\n* **Lunch:** Dal Tadka with Jeera Rice & Cucumber Raita\n* **Dinner:** Paneer Tikka Masala with Garlic Naan\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Masala Dosa with Sambar & Coconut Chutney\n* **Lunch:** Chana Masala with Whole Wheat Parathas\n* **Dinner:** Chicken Curry with Steamed Basmati Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Aloo Paratha with Fresh Curd & Pickle\n* **Lunch:** Rajma Masala with Steamed Rice\n* **Dinner:** Palak Paneer with Rotis & Salad\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Upma with Mixed Vegetables & Cashews\n* **Lunch:** Baingan Bharta with Whole Wheat Rotis\n* **Dinner:** Butter Chicken with Butter Naan\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Idli Sambar with Tomato Chutney\n* **Lunch:** Vegetable Biryani with Cucumber Mint Raita\n* **Dinner:** Fish Curry with Steamed Rice & Cabbage Poriyal\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Moong Dal Cheela with Green Chutney\n* **Lunch:** Pav Bhaji with Toasted Pav\n* **Dinner:** Kadhai Paneer with Missi Roti & Kachumber Salad\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Puri Bhaji with Sooji Halwa\n* **Lunch:** Hyderabadi Chicken Biryani with Mirchi Ka Salan\n* **Dinner:** Dal Makhani with Jeera Rice & Garlic Naan\n\n---\n\nYour schedule has been updated with this delicious Indian menu! Let me know if you need to swap any individual meals or want recipes and ingredient lists."
+      }
+    },
+    {
+      "scenario": "1.3",
+      "section": "Meal Plan Generation",
+      "prompt": "Change my preference to keto and make a full weekly keto meal plan.",
+      "started_at": "2026-07-22T23:40:01+05:30",
+      "ended_at": "2026-07-22T23:40:09+05:30",
+      "duration_seconds": 7.691,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Plan persistence or requested theme validation failed",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 51.507620012s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-3.6-flash', 'location': 'global'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '51s'}]}}"
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Wednesday": {
+            "breakfast": "Aloo Paratha with Fresh Curd & Pickle",
+            "lunch": "Rajma Masala with Steamed Rice",
+            "dinner": "Palak Paneer with Rotis & Salad"
+          },
+          "Sunday": {
+            "breakfast": "Puri Bhaji with Sooji Halwa",
+            "lunch": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+            "dinner": "Dal Makhani with Jeera Rice & Garlic Naan"
+          },
+          "Thursday": {
+            "breakfast": "Upma with Mixed Vegetables & Cashews",
+            "lunch": "Baingan Bharta with Whole Wheat Rotis",
+            "dinner": "Butter Chicken with Butter Naan"
+          },
+          "Monday": {
+            "breakfast": "Poha with Roasted Peanuts & Curry Leaves",
+            "lunch": "Dal Tadka with Jeera Rice & Cucumber Raita",
+            "dinner": "Paneer Tikka Masala with Garlic Naan"
+          },
+          "Friday": {
+            "breakfast": "Idli Sambar with Tomato Chutney",
+            "lunch": "Vegetable Biryani with Cucumber Mint Raita",
+            "dinner": "Fish Curry with Steamed Rice & Cabbage Poriyal"
+          },
+          "Saturday": {
+            "breakfast": "Moong Dal Cheela with Green Chutney",
+            "lunch": "Pav Bhaji with Toasted Pav",
+            "dinner": "Kadhai Paneer with Missi Roti & Kachumber Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Masala Dosa with Sambar & Coconut Chutney",
+            "lunch": "Chana Masala with Whole Wheat Parathas",
+            "dinner": "Chicken Curry with Steamed Basmati Rice"
+          }
+        },
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "2.1",
+      "section": "Plan Modification",
+      "prompt": "Actually, swap Thursday dinner with something vegan.",
+      "started_at": "2026-07-22T23:40:09+05:30",
+      "ended_at": "2026-07-22T23:40:12+05:30",
+      "duration_seconds": 3.056,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Unexpected plan delta or requested replacement missing",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 48.44662555s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '48s'}]}}"
+      },
+      "evidence": {
+        "changed_slots": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "2.2",
+      "section": "Plan Modification",
+      "prompt": "Change Monday breakfast to chia pudding",
+      "started_at": "2026-07-22T23:40:12+05:30",
+      "ended_at": "2026-07-22T23:40:15+05:30",
+      "duration_seconds": 3.1,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Unexpected plan delta or requested replacement missing",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 45.351254422s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '45s'}]}}"
+      },
+      "evidence": {
+        "changed_slots": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "2.3",
+      "section": "Plan Modification",
+      "prompt": "I don't like salmon, replace it wherever it appears in my weekly meal plan.",
+      "started_at": "2026-07-22T23:40:15+05:30",
+      "ended_at": "2026-07-22T23:40:18+05:30",
+      "duration_seconds": 3.077,
+      "http_status": 500,
+      "status": "INCONCLUSIVE",
+      "reason": "Generated prerequisite plan contained no salmon occurrences to replace",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 42.271862408s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '42s'}]}}"
+      },
+      "evidence": {
+        "salmon_slots_before": [],
+        "salmon_slots_after": [],
+        "changed_slots": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "5.1",
+      "section": "Grocery List Creation",
+      "prompt": "What groceries do I need for the week?",
+      "started_at": "2026-07-22T23:40:18+05:30",
+      "ended_at": "2026-07-22T23:40:25+05:30",
+      "duration_seconds": 6.58,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Recipe artifact or native cart persistence failed",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 35.853911459s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '35s'}]}}"
+      },
+      "evidence": {
+        "recipe_plan": null,
+        "cart_item_count": 0,
+        "cart_items": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "5.2",
+      "section": "Grocery List Creation",
+      "prompt": "Make a shopping list",
+      "started_at": "2026-07-22T23:40:25+05:30",
+      "ended_at": "2026-07-22T23:40:28+05:30",
+      "duration_seconds": 3.324,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Recipe artifact or native cart persistence failed",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 32.54035743s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '32s'}]}}"
+      },
+      "evidence": {
+        "recipe_plan": null,
+        "cart_item_count": 0,
+        "cart_items": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "6.1",
+      "section": "Pantry-Aware Grocery Subtraction",
+      "prompt": "I already have eggs and avocado, update the grocery list.",
+      "started_at": "2026-07-22T23:40:28+05:30",
+      "ended_at": "2026-07-22T23:40:31+05:30",
+      "duration_seconds": 3.161,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Pantry persistence or cart subtraction evidence missing",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 29.19275742s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '29s'}]}}"
+      },
+      "evidence": {
+        "pantry_items": [
+          {
+            "name": "leeks",
+            "amount": 2.0,
+            "unit": "stalks"
+          },
+          {
+            "name": "broccoli",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "corn on the cob",
+            "amount": 2.0,
+            "unit": "ears"
+          },
+          {
+            "name": "cucumber",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "red bell peppers",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "tomatoes",
+            "amount": 5.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "parsley",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "green onions",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "lemon",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "radicchio",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "green apple",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "romaine lettuce",
+            "amount": 2.0,
+            "unit": "heads"
+          },
+          {
+            "name": "eggplant",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "strawberries",
+            "amount": 1.0,
+            "unit": "box"
+          },
+          {
+            "name": "romanesco cauliflower",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "yellow bell pepper",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "green bell pepper",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "potatoes",
+            "amount": 8.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "bok choy",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "sugar snap peas",
+            "amount": 1.0,
+            "unit": "bag"
+          },
+          {
+            "name": "artichokes",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "nectarines",
+            "amount": 6.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "pomegranate",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "cauliflower",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "oranges",
+            "amount": 3.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "limes",
+            "amount": 4.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "mango",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "green beans",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "brussels sprouts",
+            "amount": 5.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "kale",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "savoy cabbage",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "onion",
+            "amount": 1.0,
+            "unit": "piece"
+          }
+        ],
+        "stocked_cart_items": [],
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "6.2",
+      "section": "Pantry-Aware Grocery Subtraction",
+      "prompt": "Log my fridge scan and tell me what else I still need to buy",
+      "started_at": "2026-07-22T23:40:31+05:30",
+      "ended_at": "2026-07-22T23:40:34+05:30",
+      "duration_seconds": 2.581,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Vision persistence or pantry-aware follow-up evidence was incomplete",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 26.745600991s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '26s'}]}}"
+      },
+      "evidence": {
+        "known_fixture_items": [
+          "eggs",
+          "tomatoes",
+          "cucumber",
+          "milk",
+          "paneer"
+        ],
+        "detected_expected_types": [],
+        "new_pantry_items": [],
+        "stocked_cart_items": [],
+        "recipe_plan": null,
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "7.1",
+      "section": "Preference Persistence",
+      "prompt": "For bread, always get Baker's Dozen whole wheat",
+      "started_at": "2026-07-22T23:40:34+05:30",
+      "ended_at": "2026-07-22T23:41:02+05:30",
+      "duration_seconds": 28.344,
+      "http_status": 200,
+      "status": "FAIL",
+      "reason": "Preference acknowledgement or recall/application failed",
+      "response": {
+        "text": "",
+        "action": {
+          "type": "UPDATE_PANTRY"
+        }
+      },
+      "evidence": {
+        "assistant_reply": "",
+        "verification_probe_http_status": 200,
+        "verification_probe": {
+          "status": "success",
+          "result": "Prepared 1 legacy Zepto preview items with ADK native brand memory active. This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. Mapped items: [{'name': 'bread', 'qty': 1, 'unit': 'loaf'}]"
+        }
+      }
+    },
+    {
+      "scenario": "7.2",
+      "section": "Preference Persistence",
+      "prompt": "Never add cereals or cookies to my grocery list — only dairy, fruits, and veggies.",
+      "started_at": "2026-07-22T23:41:02+05:30",
+      "ended_at": "2026-07-22T23:41:36+05:30",
+      "duration_seconds": 33.93,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Preference acknowledgement or recall/application failed",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.6-flash\\nPlease retry in 26.313763196s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '5'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '26s'}]}}"
+      },
+      "evidence": {
+        "assistant_reply": "",
+        "verification_probe_http_status": 500,
+        "verification_probe": {
+          "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash\\nPlease retry in 23.641659218s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '20'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '23s'}]}}"
+        }
+      }
+    },
+    {
+      "scenario": "7.3",
+      "section": "Preference Persistence",
+      "prompt": "I prefer Amul butter over any other brand",
+      "started_at": "2026-07-22T23:41:36+05:30",
+      "ended_at": "2026-07-22T23:41:48+05:30",
+      "duration_seconds": 12.116,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "Preference acknowledged and recalled/applied",
+      "response": {
+        "text": "You asked never to add **cereals** or **cookies** to your grocery list (focusing instead on dairy, fruits, veggies, and specified household staples).\n\nI have also updated your household food preferences to save that you **prefer Amul butter over any other brand**.",
+        "action": null
+      },
+      "evidence": {
+        "assistant_reply": "You asked never to add **cereals** or **cookies** to your grocery list (focusing instead on dairy, fruits, veggies, and specified household staples).\n\nI have also updated your household food preferences to save that you **prefer Amul butter over any other brand**.",
+        "verification_probe_http_status": 200,
+        "verification_probe": {
+          "status": "success",
+          "result": "Prepared 1 legacy Zepto preview items with ADK native brand memory active. This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. Mapped items: [{'name': 'Prefer Amul butter over any other brand', 'qty': 500, 'unit': 'g'}]"
+        }
+      }
+    },
+    {
+      "scenario": "8.1",
+      "section": "Datetime Awareness",
+      "prompt": "What's for dinner tonight?",
+      "started_at": "2026-07-22T23:41:48+05:30",
+      "ended_at": "2026-07-22T23:41:52+05:30",
+      "duration_seconds": 3.537,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Response did not explicitly resolve Wednesday",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash\\nPlease retry in 8.802244424s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '20'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '8s'}]}}"
+      },
+      "evidence": {
+        "expected_day": "Wednesday",
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "8.2",
+      "section": "Datetime Awareness",
+      "prompt": "What am I eating tomorrow morning?",
+      "started_at": "2026-07-22T23:41:52+05:30",
+      "ended_at": "2026-07-22T23:41:55+05:30",
+      "duration_seconds": 3.48,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Response did not explicitly resolve Thursday",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash\\nPlease retry in 5.222560189s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '20'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '5s'}]}}"
+      },
+      "evidence": {
+        "expected_day": "Thursday",
+        "assistant_reply": ""
+      }
+    },
+    {
+      "scenario": "8.3",
+      "section": "Datetime Awareness",
+      "prompt": "How many calories have I eaten today so far?",
+      "started_at": "2026-07-22T23:41:55+05:30",
+      "ended_at": "2026-07-22T23:41:59+05:30",
+      "duration_seconds": 3.528,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Reported calorie total did not match persisted diary",
+      "response": {
+        "detail": "\nOn how to mitigate this issue, please refer to:\n\nhttps://google.github.io/adk-docs/agents/models/google-gemini/#error-code-429-resource_exhausted\n\n\n429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash\\nPlease retry in 1.726373978s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.6-flash'}, 'quotaValue': '20'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '1s'}]}}"
+      },
+      "evidence": {
+        "diary_entries": [
+          {
+            "name": "2 egg omelette",
+            "calories": 220,
+            "macros": {
+              "protein": 13,
+              "carbs": 2,
+              "fat": 17,
+              "fiber": 0
+            },
+            "time": "2026-05-31T06:32:11.35226+00:00"
+          },
+          {
+            "name": "Vegetable poha with peanuts",
+            "calories": 430,
+            "macros": {
+              "protein": 10,
+              "carbs": 68,
+              "fat": 14,
+              "fiber": 7
+            },
+            "time": "2026-05-31T06:34:24.703413+00:00"
+          },
+          {
+            "name": "Paneer Manchurian (approx. 150g paneer)",
+            "calories": 680,
+            "macros": {
+              "protein": 29,
+              "carbs": 30,
+              "fat": 45,
+              "fiber": 2
+            },
+            "time": "2026-05-31T14:52:44.000167+00:00"
+          },
+          {
+            "name": "Crispy Gnocchi Croquettes in Marinara Sauce",
+            "calories": 190,
+            "macros": {
+              "protein": 3,
+              "carbs": 23,
+              "fat": 10,
+              "fiber": 2
+            },
+            "time": "2026-05-31T15:40:01.509973+00:00"
+          }
+        ],
+        "expected_calorie_total": 1520.0,
+        "numbers_in_reply": [],
+        "assistant_reply": ""
+      }
+    }
+  ]
+}
