@@ -403,7 +403,7 @@ Runtime pieces:
 - Backend: FastAPI Python service.
 - Agent runtime: Google ADK 2.0.
 - Persistence: Supabase Postgres.
-- Model provider: environment-configurable Gemini or OpenAI-compatible route.
+- Model runtime: native ADK Gemini, with AI Studio authentication locally and Vertex AI authentication in cloud deployments.
 - Provider adapter: Zepto MCP.
 
 Why this matters:

@@ -16,7 +16,7 @@ Kitch is split into:
 2. FastAPI backend gateway.
 3. Google ADK 2.0 agent runtime.
 4. Supabase persistence.
-5. Configurable LLM provider.
+5. Native Gemini model runtime.
 6. Backend provider adapters, currently Zepto MCP for cart sync and guarded order placement.
 
 ```mermaid
@@ -232,28 +232,15 @@ Until then:
 
 ## LLM and Environment Configuration
 
-The backend uses a provider selector so local testing and production do not need the same model provider.
+The backend always uses ADK's native `Gemini` adapter. Local testing and cloud deployment use the same model path and differ only in authentication mode.
 
-Provider selector:
-
-| Variable | Purpose |
-| :--- | :--- |
-| `KITCH_LLM_PROVIDER` | `openai_compatible` or `gemini`. Defaults to `openai_compatible`. |
-| `KITCH_LLM_MODEL` | Model name passed to the selected adapter. |
-| `KITCH_LLM_API_KEY` | Optional generic API key for OpenAI-compatible mode. |
-| `KITCH_LLM_API_BASE` | Optional generic base URL. |
-| `KITCH_LLM_LITELLM_PREFIX` | Optional LiteLLM model prefix. Defaults to `openai`. |
-| `KITCH_LLM_CUSTOM_PROVIDER` | Optional LiteLLM custom provider. Defaults to `openai`. |
-
-Local OpenAI-compatible fallback variables:
+Gemini model configuration:
 
 | Variable | Purpose |
 | :--- | :--- |
-| `OPENAI_MODEL_NAME` | Model name for ADK `LiteLlm`. |
-| `OPENAI_API_KEY` | Authenticates model calls. |
-| `OPENAI_API_BASE` | OpenAI-compatible gateway base URL. |
+| `KITCH_LLM_MODEL` | Gemini model ID. Defaults to `gemini-3.6-flash`; non-Gemini IDs are rejected. |
 
-Production Gemini variables:
+Gemini authentication variables:
 
 | Variable | Purpose |
 | :--- | :--- |
@@ -265,17 +252,16 @@ Production Gemini variables:
 Recommended production model config:
 
 ```bash
-KITCH_LLM_PROVIDER=gemini
-KITCH_LLM_MODEL=gemini-flash-latest
+KITCH_LLM_MODEL=gemini-3.6-flash
 GOOGLE_GENAI_USE_VERTEXAI=FALSE
 GOOGLE_API_KEY=...
 ```
 
-Why configurable model provider:
+Why Gemini-only:
 
-- Local testing has used OpenAI-compatible routes.
-- Production should run on Gemini.
-- Agent definitions should not change when the model provider changes.
+- Local and deployed behavior use the same native ADK model adapter.
+- The configured model is guaranteed to be a Gemini model.
+- Agent definitions and the event compactor share one configured Gemini instance.
 
 ---
 

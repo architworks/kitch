@@ -446,13 +446,13 @@ Current primitives:
 - `InMemoryMemoryService`
 - `EventsCompactionConfig`
 - `LlmEventSummarizer`
-- Native ADK `Gemini` model adapter or ADK `LiteLlm` model adapter, selected by environment variables.
+- Native ADK `Gemini` model adapter, configured with `KITCH_LLM_MODEL`.
 
 Why model configuration is environment-driven:
 
-- Local testing has used OpenAI-compatible/LiteLLM settings.
-- Production is intended to use Gemini.
-- The app should not hardcode one model provider into agent definitions.
+- Local Google AI Studio testing and Vertex AI deployment use the same Gemini adapter.
+- The Gemini model version can be changed without editing agent definitions.
+- Non-Gemini model IDs are rejected during backend startup.
 
 ---
 

@@ -42,41 +42,22 @@ configure_adk_tracing()
 
 def build_llm_model():
     """
-    Builds the model adapter from environment configuration.
+    Builds Kitch's Gemini model adapter from environment configuration.
 
-    Production can use native ADK Gemini by setting:
-    - KITCH_LLM_PROVIDER=gemini
-    - KITCH_LLM_MODEL=gemini-flash-latest
-    - GOOGLE_API_KEY=...
-    - GOOGLE_GENAI_USE_VERTEXAI=FALSE
-
-    Local OpenAI-compatible testing remains supported through:
-    - KITCH_LLM_PROVIDER=openai_compatible, or omitted
-    - OPENAI_MODEL_NAME / OPENAI_API_KEY / OPENAI_API_BASE
+    Authentication is handled by the Google Gen AI SDK:
+    - Google AI Studio: GOOGLE_API_KEY (or GEMINI_API_KEY) and
+      GOOGLE_GENAI_USE_VERTEXAI=FALSE.
+    - Vertex AI: Application Default Credentials plus GOOGLE_CLOUD_PROJECT,
+      GOOGLE_CLOUD_LOCATION, and GOOGLE_GENAI_USE_VERTEXAI=TRUE.
     """
-    provider = os.environ.get("KITCH_LLM_PROVIDER", os.environ.get("LLM_PROVIDER", "openai_compatible")).strip().lower()
-
-    if provider in {"gemini", "google", "google_ai_studio", "vertexai"}:
-        return Gemini(
-            model=os.environ.get("KITCH_LLM_MODEL", os.environ.get("GOOGLE_MODEL_NAME", "gemini-flash-latest")),
-            base_url=os.environ.get("KITCH_LLM_API_BASE", os.environ.get("GOOGLE_API_BASE"))
+    model_name = os.environ.get("KITCH_LLM_MODEL", "gemini-3.6-flash").strip()
+    if not model_name.startswith("gemini-"):
+        raise ValueError(
+            "KITCH_LLM_MODEL must be a Gemini model ID (for example, "
+            "'gemini-3.6-flash')."
         )
 
-    model_name = os.environ.get("KITCH_LLM_MODEL", os.environ.get("OPENAI_MODEL_NAME", "gpt-5.5")).strip()
-    model_identifier = (
-        model_name
-        if "/" in model_name
-        else f"{os.environ.get('KITCH_LLM_LITELLM_PREFIX', 'openai')}/{model_name}"
-    )
-
-    from google.adk.models.lite_llm import LiteLlm
-
-    return LiteLlm(
-        model=model_identifier,
-        api_key=os.environ.get("KITCH_LLM_API_KEY", os.environ.get("OPENAI_API_KEY")),
-        api_base=os.environ.get("KITCH_LLM_API_BASE", os.environ.get("OPENAI_API_BASE")),
-        custom_llm_provider=os.environ.get("KITCH_LLM_CUSTOM_PROVIDER", "openai")
-    )
+    return Gemini(model=model_name)
 
 configured_llm = build_llm_model()
 

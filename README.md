@@ -162,7 +162,7 @@ Chat text can plan groceries and prepare cart state, but it must not place a rea
 - Python 3.12 or newer.
 - Node.js and npm.
 - A Supabase project.
-- An LLM provider configuration for either Gemini or an OpenAI-compatible endpoint.
+- A Gemini API key for local development, or Vertex AI credentials for cloud deployment.
 - Optional: Zepto MCP authentication if you want live Zepto cart sync.
 
 ### 1. Install Backend Dependencies
@@ -199,9 +199,8 @@ Create `backend/.env`:
 SUPABASE_URL=...
 SUPABASE_KEY=...
 
-# Recommended production-style Gemini setup
-KITCH_LLM_PROVIDER=gemini
-KITCH_LLM_MODEL=gemini-flash-latest
+# Gemini setup
+KITCH_LLM_MODEL=gemini-3.6-flash
 GOOGLE_GENAI_USE_VERTEXAI=FALSE
 GOOGLE_API_KEY=...
 
@@ -211,35 +210,26 @@ ZEPTO_MCP_ENABLED=false
 
 `backend/.env` is loaded by FastAPI and the ADK runtime. Keep this file gitignored.
 
-### 4. Choose an LLM Provider
+### 4. Configure Gemini Authentication
 
-Gemini mode:
+Local Google AI Studio mode:
 
 ```bash
-KITCH_LLM_PROVIDER=gemini
-KITCH_LLM_MODEL=gemini-flash-latest
+KITCH_LLM_MODEL=gemini-3.6-flash
 GOOGLE_GENAI_USE_VERTEXAI=FALSE
 GOOGLE_API_KEY=...
 ```
 
-OpenAI-compatible mode:
+Vertex AI mode:
 
 ```bash
-KITCH_LLM_PROVIDER=openai_compatible
-KITCH_LLM_MODEL=...
-KITCH_LLM_API_KEY=...
-KITCH_LLM_API_BASE=...
-KITCH_LLM_LITELLM_PREFIX=openai
-KITCH_LLM_CUSTOM_PROVIDER=openai
+KITCH_LLM_MODEL=gemini-3.6-flash
+GOOGLE_GENAI_USE_VERTEXAI=TRUE
+GOOGLE_CLOUD_PROJECT=...
+GOOGLE_CLOUD_LOCATION=global
 ```
 
-The backend also supports legacy local fallback names:
-
-```bash
-OPENAI_MODEL_NAME=...
-OPENAI_API_KEY=...
-OPENAI_API_BASE=...
-```
+Vertex AI uses the deployment service account through Application Default Credentials, so do not set an API key in that mode. Kitch always uses ADK's native Gemini adapter; there is no alternate LLM-provider fallback.
 
 ### 5. Configure ADK Tracing (Optional)
 
@@ -372,23 +362,15 @@ http://127.0.0.1:3000
 | `SUPABASE_URL` | Supabase project URL. |
 | `SUPABASE_KEY` | Supabase backend key. For local development with RLS, use a server-side service role key. |
 
-### Backend LLM Provider
+### Backend Gemini Model
 
 | Variable | Purpose |
 | --- | --- |
-| `KITCH_LLM_PROVIDER` | `gemini` or `openai_compatible`. Defaults to `openai_compatible`. |
-| `KITCH_LLM_MODEL` | Model name passed to the selected adapter. |
-| `KITCH_LLM_API_KEY` | Generic API key for OpenAI-compatible mode. |
-| `KITCH_LLM_API_BASE` | Generic base URL for OpenAI-compatible mode. |
-| `KITCH_LLM_LITELLM_PREFIX` | LiteLLM model prefix. Defaults to `openai`. |
-| `KITCH_LLM_CUSTOM_PROVIDER` | LiteLLM custom provider. Defaults to `openai`. |
-| `GOOGLE_API_KEY` | Google AI Studio key for Gemini API-key mode. |
+| `KITCH_LLM_MODEL` | Gemini model ID. Defaults to `gemini-3.6-flash`; non-Gemini IDs are rejected. |
+| `GOOGLE_API_KEY` | Google AI Studio key for local Gemini API-key mode. `GEMINI_API_KEY` is also accepted by Google's SDK. |
 | `GOOGLE_GENAI_USE_VERTEXAI` | `FALSE` for AI Studio API-key mode, `TRUE` for Vertex AI mode. |
 | `GOOGLE_CLOUD_PROJECT` | Required for Vertex AI mode. |
 | `GOOGLE_CLOUD_LOCATION` | Required for Vertex AI mode. |
-| `OPENAI_MODEL_NAME` | Legacy local fallback model name. |
-| `OPENAI_API_KEY` | Legacy local fallback API key. |
-| `OPENAI_API_BASE` | Legacy local fallback base URL. |
 
 ### ADK Tracing / OpenTelemetry (Optional)
 
