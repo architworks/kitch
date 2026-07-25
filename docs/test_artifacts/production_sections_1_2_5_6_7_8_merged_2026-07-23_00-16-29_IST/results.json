@@ -1,0 +1,778 @@
+{
+  "title": "Kitch Production Test Sections 1, 2, 5, 6, 7, 8 - Merged Artifact",
+  "generated_at": "2026-07-23T00:17:13+05:30",
+  "timezone": "Asia/Kolkata",
+  "source_plan": "docs/production_test_results.md",
+  "source_report_sha256": "386780c01907e764234f09bf63a738213edd33dd32ddc6d253c2af7d9c051066",
+  "source_report_unchanged": true,
+  "sections": [
+    1,
+    2,
+    5,
+    6,
+    7,
+    8
+  ],
+  "selection_policy": {
+    "kept_successes_without_rerun": [
+      "1.1",
+      "1.2",
+      "7.3"
+    ],
+    "continued_remaining_after_model_switch": [
+      "1.3",
+      "2.1",
+      "2.2",
+      "2.3",
+      "5.1",
+      "5.2",
+      "6.1",
+      "6.2",
+      "7.1",
+      "7.2",
+      "8.1",
+      "8.2",
+      "8.3"
+    ]
+  },
+  "source_fragments": [
+    "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_2026-07-22_23-24-06_IST",
+    "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_retry_2026-07-22_23-43-33_IST",
+    "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST"
+  ],
+  "runtime": {
+    "agent_framework": "Google ADK",
+    "model_adapter": "Gemini",
+    "models_used_by_selected_results": [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash"
+    ]
+  },
+  "started_at": "2026-07-22T23:39:33+05:30",
+  "ended_at": "2026-07-23T00:01:56+05:30",
+  "summary": {
+    "PASS": 3,
+    "FAIL": 12,
+    "INCONCLUSIVE": 1,
+    "ERROR": 0
+  },
+  "results": [
+    {
+      "scenario": "1.1",
+      "section": "Meal Plan Generation",
+      "prompt": "Plan my meals for next week. Keep it balanced and diverse.",
+      "started_at": "2026-07-22T23:39:33+05:30",
+      "ended_at": "2026-07-22T23:39:49+05:30",
+      "duration_seconds": 16.087,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "7 days/21 meals persisted with requested theme",
+      "response": {
+        "text": "Here is your balanced and diverse meal plan for next week (**July 27, 2026 \u2013 August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Berry & Nut Oatmeal with Honey\n* **Lunch:** Mediterranean Chickpea & Quinoa Salad\n* **Dinner:** Grilled Salmon with Asparagus and Brown Rice\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Avocado Toast with Poached Eggs\n* **Lunch:** Turkey and Veggie Wrap with Hummus\n* **Dinner:** Chicken & Broccoli Stir-Fry with Jasmine Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Greek Yogurt Parfait with Granola & Fresh Berries\n* **Lunch:** Caprese Salad with Grilled Chicken\n* **Dinner:** Lean Beef Tacos with Black Beans and Corn Salsa\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Spinach, Tomato & Mushroom Omelet\n* **Lunch:** Lentil Soup with Whole Wheat Sourdough Bread\n* **Dinner:** Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Whole Grain Pancakes with Fresh Fruit\n* **Lunch:** Asian Chicken Salad with Sesame Dressing\n* **Dinner:** Shrimp Scampi with Whole Wheat Spaghetti & Side Salad\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Shakshuka with Warm Pita Bread\n* **Lunch:** Grilled Vegetable & Halloumi Panini\n* **Dinner:** Herb-Roasted Whole Chicken with Roasted Vegetables\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Chia Seed Pudding with Mango and Coconut\n* **Lunch:** Minestrone Soup with Garlic Bread\n* **Dinner:** Pan-Seared Cod with Lemon Butter Sauce and Quinoa\n\n---\n\nThis plan has been saved to your schedule. Let me know if you'd like to swap any specific meal or if you want to generate detailed recipes and grocery lists for any of these dishes!",
+        "action": {
+          "type": "UPDATE_PLANNER"
+        }
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Sunday": {
+            "breakfast": "Chia Seed Pudding with Mango and Coconut",
+            "lunch": "Minestrone Soup with Garlic Bread",
+            "dinner": "Pan-Seared Cod with Lemon Butter Sauce and Quinoa"
+          },
+          "Friday": {
+            "breakfast": "Whole Grain Pancakes with Fresh Fruit",
+            "lunch": "Asian Chicken Salad with Sesame Dressing",
+            "dinner": "Shrimp Scampi with Whole Wheat Spaghetti & Side Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Avocado Toast with Poached Eggs",
+            "lunch": "Turkey and Veggie Wrap with Hummus",
+            "dinner": "Chicken & Broccoli Stir-Fry with Jasmine Rice"
+          },
+          "Wednesday": {
+            "breakfast": "Greek Yogurt Parfait with Granola & Fresh Berries",
+            "lunch": "Caprese Salad with Grilled Chicken",
+            "dinner": "Lean Beef Tacos with Black Beans and Corn Salsa"
+          },
+          "Thursday": {
+            "breakfast": "Spinach, Tomato & Mushroom Omelet",
+            "lunch": "Lentil Soup with Whole Wheat Sourdough Bread",
+            "dinner": "Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale"
+          },
+          "Saturday": {
+            "breakfast": "Shakshuka with Warm Pita Bread",
+            "lunch": "Grilled Vegetable & Halloumi Panini",
+            "dinner": "Herb-Roasted Whole Chicken with Roasted Vegetables"
+          },
+          "Monday": {
+            "breakfast": "Berry & Nut Oatmeal with Honey",
+            "lunch": "Mediterranean Chickpea & Quinoa Salad",
+            "dinner": "Grilled Salmon with Asparagus and Brown Rice"
+          }
+        },
+        "assistant_reply": "Here is your balanced and diverse meal plan for next week (**July 27, 2026 \u2013 August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Berry & Nut Oatmeal with Honey\n* **Lunch:** Mediterranean Chickpea & Quinoa Salad\n* **Dinner:** Grilled Salmon with Asparagus and Brown Rice\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Avocado Toast with Poached Eggs\n* **Lunch:** Turkey and Veggie Wrap with Hummus\n* **Dinner:** Chicken & Broccoli Stir-Fry with Jasmine Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Greek Yogurt Parfait with Granola & Fresh Berries\n* **Lunch:** Caprese Salad with Grilled Chicken\n* **Dinner:** Lean Beef Tacos with Black Beans and Corn Salsa\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Spinach, Tomato & Mushroom Omelet\n* **Lunch:** Lentil Soup with Whole Wheat Sourdough Bread\n* **Dinner:** Baked Tofu Grain Bowl with Roasted Sweet Potatoes & Kale\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Whole Grain Pancakes with Fresh Fruit\n* **Lunch:** Asian Chicken Salad with Sesame Dressing\n* **Dinner:** Shrimp Scampi with Whole Wheat Spaghetti & Side Salad\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Shakshuka with Warm Pita Bread\n* **Lunch:** Grilled Vegetable & Halloumi Panini\n* **Dinner:** Herb-Roasted Whole Chicken with Roasted Vegetables\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Chia Seed Pudding with Mango and Coconut\n* **Lunch:** Minestrone Soup with Garlic Bread\n* **Dinner:** Pan-Seared Cod with Lemon Butter Sauce and Quinoa\n\n---\n\nThis plan has been saved to your schedule. Let me know if you'd like to swap any specific meal or if you want to generate detailed recipes and grocery lists for any of these dishes!"
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_2026-07-22_23-24-06_IST",
+      "effective_model": "gemini-3.6-flash",
+      "merge_note": "Previously passed; not rerun during Gemini 3.5 continuation."
+    },
+    {
+      "scenario": "1.2",
+      "section": "Meal Plan Generation",
+      "prompt": "Actually, I'm feeling like eating Indian food this week. Plan a completely new weekly meal plan focusing on delicious Indian dishes.",
+      "started_at": "2026-07-22T23:39:49+05:30",
+      "ended_at": "2026-07-22T23:40:01+05:30",
+      "duration_seconds": 11.591,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "7 days/21 meals persisted with requested theme",
+      "response": {
+        "text": "Here is your new Indian meal plan for next week (**July 27, 2026 \u2013 August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Poha with Roasted Peanuts & Curry Leaves\n* **Lunch:** Dal Tadka with Jeera Rice & Cucumber Raita\n* **Dinner:** Paneer Tikka Masala with Garlic Naan\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Masala Dosa with Sambar & Coconut Chutney\n* **Lunch:** Chana Masala with Whole Wheat Parathas\n* **Dinner:** Chicken Curry with Steamed Basmati Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Aloo Paratha with Fresh Curd & Pickle\n* **Lunch:** Rajma Masala with Steamed Rice\n* **Dinner:** Palak Paneer with Rotis & Salad\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Upma with Mixed Vegetables & Cashews\n* **Lunch:** Baingan Bharta with Whole Wheat Rotis\n* **Dinner:** Butter Chicken with Butter Naan\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Idli Sambar with Tomato Chutney\n* **Lunch:** Vegetable Biryani with Cucumber Mint Raita\n* **Dinner:** Fish Curry with Steamed Rice & Cabbage Poriyal\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Moong Dal Cheela with Green Chutney\n* **Lunch:** Pav Bhaji with Toasted Pav\n* **Dinner:** Kadhai Paneer with Missi Roti & Kachumber Salad\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Puri Bhaji with Sooji Halwa\n* **Lunch:** Hyderabadi Chicken Biryani with Mirchi Ka Salan\n* **Dinner:** Dal Makhani with Jeera Rice & Garlic Naan\n\n---\n\nYour schedule has been updated with this delicious Indian menu! Let me know if you need to swap any individual meals or want recipes and ingredient lists.",
+        "action": {
+          "type": "UPDATE_PLANNER"
+        }
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Wednesday": {
+            "breakfast": "Aloo Paratha with Fresh Curd & Pickle",
+            "lunch": "Rajma Masala with Steamed Rice",
+            "dinner": "Palak Paneer with Rotis & Salad"
+          },
+          "Sunday": {
+            "breakfast": "Puri Bhaji with Sooji Halwa",
+            "lunch": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+            "dinner": "Dal Makhani with Jeera Rice & Garlic Naan"
+          },
+          "Thursday": {
+            "breakfast": "Upma with Mixed Vegetables & Cashews",
+            "lunch": "Baingan Bharta with Whole Wheat Rotis",
+            "dinner": "Butter Chicken with Butter Naan"
+          },
+          "Monday": {
+            "breakfast": "Poha with Roasted Peanuts & Curry Leaves",
+            "lunch": "Dal Tadka with Jeera Rice & Cucumber Raita",
+            "dinner": "Paneer Tikka Masala with Garlic Naan"
+          },
+          "Friday": {
+            "breakfast": "Idli Sambar with Tomato Chutney",
+            "lunch": "Vegetable Biryani with Cucumber Mint Raita",
+            "dinner": "Fish Curry with Steamed Rice & Cabbage Poriyal"
+          },
+          "Saturday": {
+            "breakfast": "Moong Dal Cheela with Green Chutney",
+            "lunch": "Pav Bhaji with Toasted Pav",
+            "dinner": "Kadhai Paneer with Missi Roti & Kachumber Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Masala Dosa with Sambar & Coconut Chutney",
+            "lunch": "Chana Masala with Whole Wheat Parathas",
+            "dinner": "Chicken Curry with Steamed Basmati Rice"
+          }
+        },
+        "assistant_reply": "Here is your new Indian meal plan for next week (**July 27, 2026 \u2013 August 2, 2026**):\n\n---\n\n### **Monday, July 27, 2026**\n* **Breakfast:** Poha with Roasted Peanuts & Curry Leaves\n* **Lunch:** Dal Tadka with Jeera Rice & Cucumber Raita\n* **Dinner:** Paneer Tikka Masala with Garlic Naan\n\n---\n\n### **Tuesday, July 28, 2026**\n* **Breakfast:** Masala Dosa with Sambar & Coconut Chutney\n* **Lunch:** Chana Masala with Whole Wheat Parathas\n* **Dinner:** Chicken Curry with Steamed Basmati Rice\n\n---\n\n### **Wednesday, July 29, 2026**\n* **Breakfast:** Aloo Paratha with Fresh Curd & Pickle\n* **Lunch:** Rajma Masala with Steamed Rice\n* **Dinner:** Palak Paneer with Rotis & Salad\n\n---\n\n### **Thursday, July 30, 2026**\n* **Breakfast:** Upma with Mixed Vegetables & Cashews\n* **Lunch:** Baingan Bharta with Whole Wheat Rotis\n* **Dinner:** Butter Chicken with Butter Naan\n\n---\n\n### **Friday, July 31, 2026**\n* **Breakfast:** Idli Sambar with Tomato Chutney\n* **Lunch:** Vegetable Biryani with Cucumber Mint Raita\n* **Dinner:** Fish Curry with Steamed Rice & Cabbage Poriyal\n\n---\n\n### **Saturday, August 01, 2026**\n* **Breakfast:** Moong Dal Cheela with Green Chutney\n* **Lunch:** Pav Bhaji with Toasted Pav\n* **Dinner:** Kadhai Paneer with Missi Roti & Kachumber Salad\n\n---\n\n### **Sunday, August 02, 2026**\n* **Breakfast:** Puri Bhaji with Sooji Halwa\n* **Lunch:** Hyderabadi Chicken Biryani with Mirchi Ka Salan\n* **Dinner:** Dal Makhani with Jeera Rice & Garlic Naan\n\n---\n\nYour schedule has been updated with this delicious Indian menu! Let me know if you need to swap any individual meals or want recipes and ingredient lists."
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_2026-07-22_23-24-06_IST",
+      "effective_model": "gemini-3.6-flash",
+      "merge_note": "Previously passed; not rerun during Gemini 3.5 continuation."
+    },
+    {
+      "scenario": "1.3",
+      "section": "Meal Plan Generation",
+      "prompt": "Change my preference to keto and make a full weekly keto meal plan.",
+      "started_at": "2026-07-22T23:49:27+05:30",
+      "ended_at": "2026-07-22T23:49:38+05:30",
+      "duration_seconds": 11.507,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Plan persistence or requested theme validation failed",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "days_persisted": 7,
+        "nonempty_meal_slots": 21,
+        "theme_detected": true,
+        "weekly_plan": {
+          "Wednesday": {
+            "breakfast": "Aloo Paratha with Fresh Curd & Pickle",
+            "lunch": "Rajma Masala with Steamed Rice",
+            "dinner": "Palak Paneer with Rotis & Salad"
+          },
+          "Sunday": {
+            "breakfast": "Puri Bhaji with Sooji Halwa",
+            "lunch": "Hyderabadi Chicken Biryani with Mirchi Ka Salan",
+            "dinner": "Dal Makhani with Jeera Rice & Garlic Naan"
+          },
+          "Thursday": {
+            "breakfast": "Upma with Mixed Vegetables & Cashews",
+            "lunch": "Baingan Bharta with Whole Wheat Rotis",
+            "dinner": "Butter Chicken with Butter Naan"
+          },
+          "Monday": {
+            "breakfast": "Poha with Roasted Peanuts & Curry Leaves",
+            "lunch": "Dal Tadka with Jeera Rice & Cucumber Raita",
+            "dinner": "Paneer Tikka Masala with Garlic Naan"
+          },
+          "Friday": {
+            "breakfast": "Idli Sambar with Tomato Chutney",
+            "lunch": "Vegetable Biryani with Cucumber Mint Raita",
+            "dinner": "Fish Curry with Steamed Rice & Cabbage Poriyal"
+          },
+          "Saturday": {
+            "breakfast": "Moong Dal Cheela with Green Chutney",
+            "lunch": "Pav Bhaji with Toasted Pav",
+            "dinner": "Kadhai Paneer with Missi Roti & Kachumber Salad"
+          },
+          "Tuesday": {
+            "breakfast": "Masala Dosa with Sambar & Coconut Chutney",
+            "lunch": "Chana Masala with Whole Wheat Parathas",
+            "dinner": "Chicken Curry with Steamed Basmati Rice"
+          }
+        },
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "2.1",
+      "section": "Plan Modification",
+      "prompt": "Actually, swap Thursday dinner with something vegan.",
+      "started_at": "2026-07-22T23:49:38+05:30",
+      "ended_at": "2026-07-22T23:49:53+05:30",
+      "duration_seconds": 14.347,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Unexpected plan delta or requested replacement missing",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "changed_slots": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "2.2",
+      "section": "Plan Modification",
+      "prompt": "Change Monday breakfast to chia pudding",
+      "started_at": "2026-07-22T23:49:53+05:30",
+      "ended_at": "2026-07-22T23:52:51+05:30",
+      "duration_seconds": 178.849,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Unexpected plan delta or requested replacement missing",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "changed_slots": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "2.3",
+      "section": "Plan Modification",
+      "prompt": "I don't like salmon, replace it wherever it appears in my weekly meal plan.",
+      "started_at": "2026-07-22T23:52:51+05:30",
+      "ended_at": "2026-07-22T23:56:15+05:30",
+      "duration_seconds": 203.431,
+      "http_status": 500,
+      "status": "INCONCLUSIVE",
+      "reason": "Generated prerequisite plan contained no salmon occurrences to replace",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "salmon_slots_before": [],
+        "salmon_slots_after": [],
+        "changed_slots": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "5.1",
+      "section": "Grocery List Creation",
+      "prompt": "What groceries do I need for the week?",
+      "started_at": "2026-07-22T23:56:15+05:30",
+      "ended_at": "2026-07-22T23:58:19+05:30",
+      "duration_seconds": 124.495,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Recipe artifact or native cart persistence failed",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "recipe_plan": null,
+        "cart_item_count": 0,
+        "cart_items": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "5.2",
+      "section": "Grocery List Creation",
+      "prompt": "Make a shopping list",
+      "started_at": "2026-07-22T23:58:19+05:30",
+      "ended_at": "2026-07-22T23:59:49+05:30",
+      "duration_seconds": 89.645,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Recipe artifact or native cart persistence failed",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "recipe_plan": null,
+        "cart_item_count": 0,
+        "cart_items": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "6.1",
+      "section": "Pantry-Aware Grocery Subtraction",
+      "prompt": "I already have eggs and avocado, update the grocery list.",
+      "started_at": "2026-07-22T23:59:49+05:30",
+      "ended_at": "2026-07-23T00:00:03+05:30",
+      "duration_seconds": 14.113,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Pantry persistence or cart subtraction evidence missing",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "pantry_items": [
+          {
+            "name": "leeks",
+            "amount": 2.0,
+            "unit": "stalks"
+          },
+          {
+            "name": "broccoli",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "corn on the cob",
+            "amount": 2.0,
+            "unit": "ears"
+          },
+          {
+            "name": "cucumber",
+            "amount": 2.0,
+            "unit": "piece"
+          },
+          {
+            "name": "red bell peppers",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "tomatoes",
+            "amount": 7.0,
+            "unit": "piece"
+          },
+          {
+            "name": "parsley",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "green onions",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "lemon",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "radicchio",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "green apple",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "romaine lettuce",
+            "amount": 2.0,
+            "unit": "heads"
+          },
+          {
+            "name": "eggplant",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "strawberries",
+            "amount": 1.0,
+            "unit": "box"
+          },
+          {
+            "name": "romanesco cauliflower",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "yellow bell pepper",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "green bell pepper",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "potatoes",
+            "amount": 8.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "bok choy",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "sugar snap peas",
+            "amount": 1.0,
+            "unit": "bag"
+          },
+          {
+            "name": "artichokes",
+            "amount": 2.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "nectarines",
+            "amount": 6.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "pomegranate",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "cauliflower",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "oranges",
+            "amount": 3.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "limes",
+            "amount": 4.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "mango",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "green beans",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "brussels sprouts",
+            "amount": 5.0,
+            "unit": "pieces"
+          },
+          {
+            "name": "kale",
+            "amount": 1.0,
+            "unit": "bunch"
+          },
+          {
+            "name": "savoy cabbage",
+            "amount": 1.0,
+            "unit": "head"
+          },
+          {
+            "name": "onion",
+            "amount": 1.0,
+            "unit": "piece"
+          },
+          {
+            "name": "eggs",
+            "amount": 6.0,
+            "unit": "piece"
+          },
+          {
+            "name": "milk",
+            "amount": 1.0,
+            "unit": "bottle"
+          },
+          {
+            "name": "paneer/block cheese",
+            "amount": 1.0,
+            "unit": "block"
+          }
+        ],
+        "stocked_cart_items": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "6.2",
+      "section": "Pantry-Aware Grocery Subtraction",
+      "prompt": "Log my fridge scan and tell me what else I still need to buy",
+      "started_at": "2026-07-23T00:00:03+05:30",
+      "ended_at": "2026-07-23T00:00:19+05:30",
+      "duration_seconds": 16.054,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Vision persistence or pantry-aware follow-up evidence was incomplete",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "known_fixture_items": [
+          "eggs",
+          "tomatoes",
+          "cucumber",
+          "milk",
+          "paneer"
+        ],
+        "detected_expected_types": [],
+        "new_pantry_items": [],
+        "stocked_cart_items": [],
+        "recipe_plan": null,
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "7.1",
+      "section": "Preference Persistence",
+      "prompt": "For bread, always get Baker's Dozen whole wheat",
+      "started_at": "2026-07-23T00:00:19+05:30",
+      "ended_at": "2026-07-23T00:00:35+05:30",
+      "duration_seconds": 16.023,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Preference acknowledgement or recall/application failed",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "assistant_reply": "",
+        "verification_probe_http_status": 200,
+        "verification_probe": {
+          "status": "success",
+          "result": "Prepared 1 legacy Zepto preview items with ADK native brand memory active. This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. Mapped items: [{'name': 'bread', 'qty': 1, 'unit': 'loaf'}]"
+        }
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "7.2",
+      "section": "Preference Persistence",
+      "prompt": "Never add cereals or cookies to my grocery list \u2014 only dairy, fruits, and veggies.",
+      "started_at": "2026-07-23T00:00:35+05:30",
+      "ended_at": "2026-07-23T00:01:07+05:30",
+      "duration_seconds": 31.4,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Preference acknowledgement or recall/application failed",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "assistant_reply": "",
+        "verification_probe_http_status": 500,
+        "verification_probe": {
+          "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+        }
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "7.3",
+      "section": "Preference Persistence",
+      "prompt": "I prefer Amul butter over any other brand",
+      "started_at": "2026-07-22T23:41:36+05:30",
+      "ended_at": "2026-07-22T23:41:48+05:30",
+      "duration_seconds": 12.116,
+      "http_status": 200,
+      "status": "PASS",
+      "reason": "Preference acknowledged and recalled/applied",
+      "response": {
+        "text": "You asked never to add **cereals** or **cookies** to your grocery list (focusing instead on dairy, fruits, veggies, and specified household staples).\n\nI have also updated your household food preferences to save that you **prefer Amul butter over any other brand**.",
+        "action": null
+      },
+      "evidence": {
+        "assistant_reply": "You asked never to add **cereals** or **cookies** to your grocery list (focusing instead on dairy, fruits, veggies, and specified household staples).\n\nI have also updated your household food preferences to save that you **prefer Amul butter over any other brand**.",
+        "verification_probe_http_status": 200,
+        "verification_probe": {
+          "status": "success",
+          "result": "Prepared 1 legacy Zepto preview items with ADK native brand memory active. This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. Mapped items: [{'name': 'Prefer Amul butter over any other brand', 'qty': 500, 'unit': 'g'}]"
+        }
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_2026-07-22_23-24-06_IST",
+      "effective_model": "gemini-3.6-flash",
+      "merge_note": "Previously passed; not rerun during Gemini 3.5 continuation."
+    },
+    {
+      "scenario": "8.1",
+      "section": "Datetime Awareness",
+      "prompt": "What's for dinner tonight?",
+      "started_at": "2026-07-23T00:01:07+05:30",
+      "ended_at": "2026-07-23T00:01:24+05:30",
+      "duration_seconds": 17.806,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Response did not explicitly resolve Thursday",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "expected_day": "Thursday",
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "8.2",
+      "section": "Datetime Awareness",
+      "prompt": "What am I eating tomorrow morning?",
+      "started_at": "2026-07-23T00:01:24+05:30",
+      "ended_at": "2026-07-23T00:01:40+05:30",
+      "duration_seconds": 15.929,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Response did not explicitly resolve Friday",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "expected_day": "Friday",
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    },
+    {
+      "scenario": "8.3",
+      "section": "Datetime Awareness",
+      "prompt": "How many calories have I eaten today so far?",
+      "started_at": "2026-07-23T00:01:40+05:30",
+      "ended_at": "2026-07-23T00:01:56+05:30",
+      "duration_seconds": 16.149,
+      "http_status": 500,
+      "status": "FAIL",
+      "reason": "Reported calorie total did not match persisted diary",
+      "response": {
+        "detail": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
+      },
+      "evidence": {
+        "diary_entries": [
+          {
+            "name": "2 egg omelette",
+            "calories": 220,
+            "macros": {
+              "protein": 13,
+              "carbs": 2,
+              "fat": 17,
+              "fiber": 0
+            },
+            "time": "2026-05-31T06:32:11.35226+00:00"
+          },
+          {
+            "name": "Vegetable poha with peanuts",
+            "calories": 430,
+            "macros": {
+              "protein": 10,
+              "carbs": 68,
+              "fat": 14,
+              "fiber": 7
+            },
+            "time": "2026-05-31T06:34:24.703413+00:00"
+          },
+          {
+            "name": "Paneer Manchurian (approx. 150g paneer)",
+            "calories": 680,
+            "macros": {
+              "protein": 29,
+              "carbs": 30,
+              "fat": 45,
+              "fiber": 2
+            },
+            "time": "2026-05-31T14:52:44.000167+00:00"
+          },
+          {
+            "name": "Crispy Gnocchi Croquettes in Marinara Sauce",
+            "calories": 190,
+            "macros": {
+              "protein": 3,
+              "carbs": 23,
+              "fat": 10,
+              "fiber": 2
+            },
+            "time": "2026-05-31T15:40:01.509973+00:00"
+          }
+        ],
+        "expected_calorie_total": 1520.0,
+        "numbers_in_reply": [],
+        "assistant_reply": ""
+      },
+      "selected_from": "docs/test_artifacts/production_sections_1_2_5_6_7_8_merged_2026-07-23_00-16-29_IST/source_fragments/production_sections_1_2_5_6_7_8_remaining_gemini_3_5_flash_2026-07-22_23-49-05_IST",
+      "effective_model": "gemini-3.5-flash",
+      "merge_note": "Continuation result after model switch."
+    }
+  ],
+  "fixture": "fridge_scan_fixture.png",
+  "notes": [
+    "This merged artifact keeps the three previously successful scenarios from the first run and uses the Gemini 3.5 continuation results for every remaining scenario.",
+    "The retry-blocked folder is preserved as source evidence because it documents the Supabase resume, Gemini quota, and missing Supabase table blockers encountered during the run history.",
+    "Provider sync and real order placement were not exercised."
+  ]
+}
