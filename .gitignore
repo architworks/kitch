@@ -32,3 +32,5 @@ __pycache__/
 **/__pycache__/
 *.py[cod]
 .vercel
+
+docs/test_artifacts/*.png
