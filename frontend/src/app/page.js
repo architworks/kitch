@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import { DIET_TYPES } from "./mockData.js";
 import {
@@ -64,6 +64,43 @@ const ABOUT_STEP_TONES = {
 const DEFAULT_MEAL_SLOT = "breakfast";
 const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
+const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
+
+class ApiResponseError extends Error {
+  constructor(status, detail) {
+    const message = typeof detail === "string"
+      ? detail
+      : detail?.message || `Request failed with status ${status}`;
+    super(message);
+    this.name = "ApiResponseError";
+    this.status = status;
+    this.detail = detail;
+  }
+
+  get isPersistenceFailure() {
+    return this.status === 503 && (
+      this.detail?.code === "persistence_unavailable"
+      || this.detail?.code === "persistence_misconfigured"
+    );
+  }
+}
+
+const requireSuccessfulResponse = async (response) => {
+  if (response.ok) return response;
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  throw new ApiResponseError(response.status, body?.detail || body);
+};
+
+const apiErrorMessage = (error, fallback) => (
+  error instanceof ApiResponseError && error.isPersistenceFailure
+    ? PERSISTENCE_FAILURE_MESSAGE
+    : error?.message || fallback
+);
 
 const AboutIconBadge = ({ name, tone = "sage", className = "" }) => {
   const badgeClass = `about-icon-badge tone-${tone} about-icon-${name} ${className}`.trim();
@@ -645,6 +682,7 @@ export default function Home() {
   const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
   const chatMessagesRef = useRef(null);
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
+  const confirmedGroceryItemsRef = useRef([]);
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
@@ -678,7 +716,13 @@ export default function Home() {
   const [groceryCustomUnit, setGroceryCustomUnit] = useState("piece");
   const [groceryCustomCat, setGroceryCustomCat] = useState("Fresh Produce");
 
-  const applyLiveState = (userName, data) => {
+  const applyConfirmedGroceryCart = useCallback((items) => {
+    const confirmedItems = Array.isArray(items) ? items : [];
+    confirmedGroceryItemsRef.current = confirmedItems;
+    setCustomGroceryItems(confirmedItems);
+  }, []);
+
+  const applyLiveState = useCallback((userName, data) => {
     if (data.pantry_stock) {
       setPantryStock(data.pantry_stock);
     }
@@ -703,24 +747,20 @@ export default function Home() {
       setWeeklyPlan(data.weekly_plan || {});
     }
     if (data.grocery_cart) {
-      setCustomGroceryItems(data.grocery_cart);
+      applyConfirmedGroceryCart(data.grocery_cart);
     }
-  };
+  }, [applyConfirmedGroceryCart]);
 
   const fetchLiveState = async (userName) => {
     const res = await fetch(apiUrl(`/api/state/${userName}`));
-    if (!res.ok) {
-      throw new Error(`State sync failed with status ${res.status}`);
-    }
+    await requireSuccessfulResponse(res);
     return res.json();
   };
 
-  const syncLatestRecipeGroceryPlan = async () => {
+  const syncLatestRecipeGroceryPlan = useCallback(async () => {
     try {
       const res = await fetch(apiUrl("/api/recipe-grocery/plans/latest"));
-      if (!res.ok) {
-        throw new Error(`Recipe sync failed with status ${res.status}`);
-      }
+      await requireSuccessfulResponse(res);
       const data = await res.json();
       setLatestRecipeGroceryPlan(data.plan || null);
       return data.plan || null;
@@ -728,14 +768,12 @@ export default function Home() {
       console.error("Failed to sync latest recipe+grocery plan", e);
       return null;
     }
-  };
+  }, []);
 
   const syncZeptoStatus = async () => {
     try {
       const res = await fetch(apiUrl("/api/grocery/zepto/status"));
-      if (!res.ok) {
-        throw new Error(`Zepto status failed with status ${res.status}`);
-      }
+      await requireSuccessfulResponse(res);
       const data = await res.json();
       setZeptoConnectionStatus(data);
       return data;
@@ -782,7 +820,7 @@ export default function Home() {
     return () => {
       ignore = true;
     };
-  }, [activeUser]);
+  }, [activeUser, applyLiveState, syncLatestRecipeGroceryPlan]);
 
   useEffect(() => {
     if (activeTab !== "groceries") return undefined;
@@ -858,16 +896,41 @@ export default function Home() {
     setAlertBanner({ show: true, text });
   };
 
-  const switchDiet = (dietType) => {
-    if (DIET_TYPES[dietType]) {
-      setDietPreference(dietType);
+  const saveHouseholdProfile = async (dietType, size) => {
+    const res = await fetch(apiUrl("/api/household/profile"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        diet_preference: dietType,
+        household_size: size
+      })
+    });
+    await requireSuccessfulResponse(res);
+    return res.json();
+  };
+
+  const switchDiet = async (dietType) => {
+    if (!DIET_TYPES[dietType]) return;
+    try {
+      const data = await saveHouseholdProfile(dietType, householdSize);
+      setDietPreference(data.profile.diet_preference);
       triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[dietType].name}!`);
+    } catch (e) {
+      console.error("Failed to update dietary profile", e);
+      triggerBannerAlert(apiErrorMessage(e, "Could not update the dietary profile."));
     }
   };
 
-  const updateHouseholdSize = (size) => {
+  const updateHouseholdSize = async (size) => {
     const val = Math.max(1, parseInt(size) || 1);
-    setHouseholdSize(val);
+    try {
+      const data = await saveHouseholdProfile(dietPreference, val);
+      setHouseholdSize(data.profile.household_size);
+      triggerBannerAlert(`Updated household size to ${data.profile.household_size}.`);
+    } catch (e) {
+      console.error("Failed to update household size", e);
+      triggerBannerAlert(apiErrorMessage(e, "Could not update the household size."));
+    }
   };
 
   const switchActiveUser = (userName) => {
@@ -887,15 +950,7 @@ export default function Home() {
   };
 
   const updateGroceryCartItemDetails = async (item, updates) => {
-    if (!item) return;
-
-    setCustomGroceryItems(prev => prev.map(current => (
-      current.id === item.id
-        ? { ...current, ...updates }
-        : current
-    )));
-
-    if (!item.id) return;
+    if (!item?.id) return;
 
     try {
       const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
@@ -903,35 +958,33 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.grocery_cart) {
-          setCustomGroceryItems(data.grocery_cart);
-        }
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      if (data.grocery_cart) {
+        applyConfirmedGroceryCart(data.grocery_cart);
       }
     } catch (e) {
       console.error("Failed to update grocery cart item", e);
+      setCustomGroceryItems(confirmedGroceryItemsRef.current);
+      triggerBannerAlert(apiErrorMessage(e, "Could not update the grocery item."));
     }
   };
 
   const deleteGroceryCartItem = async (item) => {
-    if (!item) return;
-
-    setCustomGroceryItems(prev => prev.filter(current => current.id !== item.id));
-    if (!item.id) return;
+    if (!item?.id) return;
 
     try {
       const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "DELETE"
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.grocery_cart) {
-          setCustomGroceryItems(data.grocery_cart);
-        }
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      if (data.grocery_cart) {
+        applyConfirmedGroceryCart(data.grocery_cart);
       }
     } catch (e) {
       console.error("Failed to delete grocery cart item", e);
+      triggerBannerAlert(apiErrorMessage(e, "Could not delete the grocery item."));
     }
   };
 
@@ -940,24 +993,22 @@ export default function Home() {
       const res = await fetch(apiUrl("/api/grocery/cart/planned"), {
         method: "DELETE"
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.grocery_cart) {
-          setCustomGroceryItems(data.grocery_cart);
-        }
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      if (data.grocery_cart) {
+        applyConfirmedGroceryCart(data.grocery_cart);
       }
       triggerBannerAlert("Cleared recipe-planned grocery rows.");
     } catch (e) {
       console.error("Failed to clear planned grocery rows", e);
-      triggerBannerAlert("Could not clear planned grocery rows.");
+      triggerBannerAlert(apiErrorMessage(e, "Could not clear planned grocery rows."));
     }
   };
 
   const addCustomGroceryItem = async (name, category, amount = 1, unit = "piece") => {
     if (!name.trim()) return;
 
-    const optimisticItem = {
-      id: `pending-${Date.now()}`,
+    const requestedItem = {
       name: name.trim(),
       amount: parseFloat(amount) || 1,
       unit: unit || "piece",
@@ -968,26 +1019,24 @@ export default function Home() {
       stockNote: ""
     };
 
-    setCustomGroceryItems(prev => [...prev, optimisticItem]);
-    setGroceryCustomName("");
-    setGroceryCustomAmount(1);
-    setGroceryCustomUnit("piece");
-    triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
-
     try {
       const res = await fetch(apiUrl("/api/grocery/cart/items"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(optimisticItem)
+        body: JSON.stringify(requestedItem)
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.grocery_cart) {
-          setCustomGroceryItems(data.grocery_cart);
-        }
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      if (data.grocery_cart) {
+        applyConfirmedGroceryCart(data.grocery_cart);
       }
+      setGroceryCustomName("");
+      setGroceryCustomAmount(1);
+      setGroceryCustomUnit("piece");
+      triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
     } catch (e) {
       console.error("Failed to add grocery cart item", e);
+      triggerBannerAlert(apiErrorMessage(e, "Could not add the grocery item."));
     }
   };
 
@@ -998,13 +1047,13 @@ export default function Home() {
     }
 
     setIsZeptoSyncing(true);
-    setZeptoCartReview(null);
     try {
       const res = await fetch(apiUrl("/api/grocery/zepto/sync-cart"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean) })
       });
+      await requireSuccessfulResponse(res);
       const data = await res.json();
       const review = data.review || data;
       setZeptoCartReview(review);
@@ -1014,12 +1063,7 @@ export default function Home() {
       triggerBannerAlert(data.status === "success" ? "Zepto cart sync completed for review." : "Zepto cart sync needs attention.");
     } catch (e) {
       console.error("Failed to sync Zepto cart", e);
-      setZeptoCartReview({
-        status: "error",
-        message: "Failed to contact the backend Zepto cart sync endpoint.",
-        matched_items: [],
-        unavailable_items: []
-      });
+      triggerBannerAlert(apiErrorMessage(e, "Failed to sync the native cart to Zepto."));
     } finally {
       setIsZeptoSyncing(false);
       syncZeptoStatus();
@@ -1035,8 +1079,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
       });
+      await requireSuccessfulResponse(res);
       const data = await res.json();
-      if (res.ok && data.review) {
+      if (data.review) {
         setZeptoCartReview(data.review);
         setSelectedZeptoAddress(data.review.selected_address_id || "");
         setSelectedZeptoPaymentMethod(data.review.selected_payment_method_id || "");
@@ -1045,7 +1090,7 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Failed to update Zepto review", e);
-      triggerBannerAlert("Could not update Zepto review selection.");
+      triggerBannerAlert(apiErrorMessage(e, "Could not update Zepto review selection."));
     } finally {
       setIsUpdatingZeptoReview(false);
     }
@@ -1084,51 +1129,30 @@ export default function Home() {
           order_review_acknowledged: true
         })
       });
+      await requireSuccessfulResponse(res);
       const data = await res.json();
       setZeptoCartReview(data.review || data);
       triggerBannerAlert(data.status === "success" ? "Zepto order placement request completed." : "Zepto order could not be placed.");
     } catch (e) {
       console.error("Failed to place Zepto order", e);
-      triggerBannerAlert("Failed to contact the backend Zepto order endpoint.");
+      triggerBannerAlert(apiErrorMessage(e, "Failed to contact the backend Zepto order endpoint."));
     } finally {
       setIsPlacingZeptoOrder(false);
     }
   };
 
-  const logMeal = (name, calories, protein, carbs, fat, fiber) => {
-    const meal = {
-      name,
-      calories,
-      macros: { protein, carbs, fat, fiber },
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setUserProfiles(prev => {
-      const current = prev[activeUser] || { name: activeUser, loggedMeals: [] };
-      const updatedMeals = [...current.loggedMeals, meal];
-      return {
-        ...prev,
-        [activeUser]: { ...current, loggedMeals: updatedMeals }
-      };
-    });
-  };
-
   const resetDailyLogs = async () => {
-    setUserProfiles(prev => {
-      const current = prev[activeUser] || { name: activeUser, loggedMeals: [] };
-      return {
-        ...prev,
-        [activeUser]: { ...current, loggedMeals: [] }
-      };
-    });
-    triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
-
     try {
-      await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
+      const res = await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
         method: "POST"
       });
+      await requireSuccessfulResponse(res);
+      const data = await fetchLiveState(activeUser);
+      applyLiveState(activeUser, data);
+      triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
     } catch (e) {
       console.error("Failed to clear macro logs in DB", e);
+      triggerBannerAlert(apiErrorMessage(e, "Could not clear the plate logs."));
     }
   };
 
@@ -1175,9 +1199,7 @@ export default function Home() {
         body: JSON.stringify(chatPayload)
       });
 
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
+      await requireSuccessfulResponse(res);
 
       const response = await res.json();
       const responseTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1215,11 +1237,18 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Real API chat processing error", e);
+      const message = apiErrorMessage(
+        e,
+        `I was unable to reach the Kitch backend server on \`${API_BASE_URL}\`. Please make sure the FastAPI server is running.`
+      );
+      if (e instanceof ApiResponseError && e.isPersistenceFailure) {
+        triggerBannerAlert(PERSISTENCE_FAILURE_MESSAGE);
+      }
       setChatHistory(prev => [
         ...prev,
         {
           sender: "agent",
-          text: `⚠️ **Connection Error:** I was unable to reach the Kitch backend server on \`${API_BASE_URL}\`. Please make sure the FastAPI server is running!`,
+          text: `⚠️ ${message}`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -1296,9 +1325,7 @@ export default function Home() {
         body: formData
       });
 
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
+      await requireSuccessfulResponse(res);
 
       setScanningOverlay(prev => ({
         ...prev,
@@ -1329,12 +1356,18 @@ export default function Home() {
     } catch (e) {
       console.error("Real photo upload error", e);
       setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
-      
+      const message = apiErrorMessage(
+        e,
+        `Failed to reach \`/api/upload-photo\` on \`${API_BASE_URL}\`. Is your FastAPI backend running?`
+      );
+      if (e instanceof ApiResponseError && e.isPersistenceFailure) {
+        triggerBannerAlert(PERSISTENCE_FAILURE_MESSAGE);
+      }
       setChatHistory(prev => [
         ...prev,
         {
           sender: "agent",
-          text: `⚠️ **Upload Connection Error:** Failed to reach \`/api/upload-photo\` on \`${API_BASE_URL}\`. Is your FastAPI backend running?`,
+          text: `⚠️ ${message}`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);

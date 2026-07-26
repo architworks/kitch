@@ -178,7 +178,10 @@ pip install -r requirements.txt
 
 1. Create a Supabase project.
 2. Open the Supabase SQL editor.
-3. Run the schema in `backend/database/supabase_schema.sql`.
+3. For a new project, run `backend/database/supabase_schema.sql`. For every
+   deployment, apply all unapplied files in `backend/database/migrations/` in
+   filename order before starting FastAPI. Versioned migrations are the
+   deployment source of truth.
 4. Ensure the prototype household profile IDs exist, or update the configured IDs in `backend/app/household_config.py` and `frontend/src/app/householdConfig.js`.
 
 The default prototype IDs are:
@@ -189,7 +192,11 @@ The default prototype IDs are:
 | Anubhav | `11111111-1111-1111-1111-111111111111` |
 | Naman | `22222222-2222-2222-2222-222222222222` |
 
-Because the schema enables Row Level Security and `profiles.id` references `auth.users.id`, local development is simplest with a backend-only Supabase service role key plus matching Supabase auth users/profiles. If you create real auth users through Supabase Auth, copy their UUIDs into the household config files instead of using the prototype UUIDs above. Never expose the service role key to the frontend.
+All six structured-data tables use Row Level Security with browser roles denied.
+FastAPI must use a backend-only Supabase secret key (preferred) or the temporary
+legacy service-role key. If you create real auth users through Supabase Auth,
+copy their UUIDs into the household config files instead of using the prototype
+UUIDs above. Never expose either elevated key to the frontend.
 
 ### 3. Create Backend Environment File
 
@@ -197,7 +204,9 @@ Create `backend/.env`:
 
 ```bash
 SUPABASE_URL=...
-SUPABASE_KEY=...
+SUPABASE_SECRET_KEY=sb_secret_...
+# Temporary legacy alternative:
+# SUPABASE_SERVICE_ROLE_KEY=...
 
 # Gemini setup
 KITCH_LLM_MODEL=gemini-3.6-flash
@@ -360,7 +369,11 @@ http://127.0.0.1:3000
 | Variable | Purpose |
 | --- | --- |
 | `SUPABASE_URL` | Supabase project URL. |
-| `SUPABASE_KEY` | Supabase backend key. For local development with RLS, use a server-side service role key. |
+| `SUPABASE_SECRET_KEY` | Preferred `sb_secret_...` credential for the trusted FastAPI backend. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Temporary support for a legacy `service_role` JWT. Do not set it together with `SUPABASE_SECRET_KEY`. |
+
+`SUPABASE_KEY`, publishable keys, legacy anon JWTs, malformed keys, and
+redacted placeholders are rejected during backend startup.
 
 ### Backend Gemini Model
 

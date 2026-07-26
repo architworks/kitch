@@ -3,8 +3,11 @@
 import json as _json
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
-from app.household_config import DEFAULT_ACTIVE_USER, get_household_profile_id
+from app.household_config import DEFAULT_ACTIVE_USER
 from app.supabase_client import (
+    get_weekly_schedule as db_get_weekly_schedule,
+    save_weekly_plan as db_save_weekly_plan,
+    update_single_meal as db_update_single_meal,
     get_pantry_stock as db_get_pantry_stock,
     add_to_pantry as db_add_to_pantry,
     log_macros as db_log_macros,
@@ -15,7 +18,6 @@ from app.supabase_client import (
     save_recipe_grocery_plan as db_save_recipe_grocery_plan,
     get_recipe_grocery_plan as db_get_recipe_grocery_plan,
     list_recipe_grocery_plans as db_list_recipe_grocery_plans,
-    supabase
 )
 from app.providers.zepto import ZeptoProviderAdapter
 
@@ -53,27 +55,7 @@ def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
   Transforms persisted DB rows into a dictionary mapping weekdays to meal categories and recipe names.
   Only weekdays with at least one planned meal are returned; missing weekdays are unplanned.
   """
-  try:
-    profile_id = get_household_profile_id()
-    response = supabase.table("meal_plans").select("*").eq("profile_id", profile_id).execute()
-    
-    plan_dict = {}
-    for row in response.data or []:
-      day = row.get("day", "").strip().capitalize()
-      if not day:
-        continue
-      planned_meals = {
-        "breakfast": str(row.get("breakfast_recipe_id") or "").strip(),
-        "lunch": str(row.get("lunch_recipe_id") or "").strip(),
-        "dinner": str(row.get("dinner_recipe_id") or "").strip()
-      }
-      if not any(planned_meals.values()):
-        continue
-      plan_dict[day] = planned_meals
-    return plan_dict
-  except Exception as e:
-    print(f"Error fetching weekly schedule dict: {e}")
-    return {}
+  return db_get_weekly_schedule(user_name)
 
 def get_weekly_schedule_tool(user_name: str = "") -> Dict[str, Dict[str, str]]:
   """
@@ -95,35 +77,14 @@ def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str
                    Example: {"Monday": {"breakfast": "Scrambled Eggs", "lunch": "Salad", "dinner": "Tofu Stir-fry"}, ...}
       user_name: Ignored for now. Meal plans are shared by the configured household.
   """
-  try:
-    profile_id = get_household_profile_id()
-    weekly_plan = _ensure_dict(weekly_plan)
-    
-    if not isinstance(weekly_plan, dict):
-      return {"status": "error", "message": f"Expected a dict for weekly_plan, got {type(weekly_plan).__name__}"}
-      
-    for day, meals in weekly_plan.items():
-      day_clean = day.strip().capitalize()
-      meals = _ensure_dict(meals)
-      if not isinstance(meals, dict):
-        continue
-        
-      breakfast = meals.get("breakfast", "")
-      lunch = meals.get("lunch", "")
-      dinner = meals.get("dinner", "")
-      
-      supabase.table("meal_plans").upsert({
-          "profile_id": profile_id,
-          "day": day_clean,
-          "breakfast_recipe_id": str(breakfast).strip(),
-          "lunch_recipe_id": str(lunch).strip(),
-          "dinner_recipe_id": str(dinner).strip(),
-          "snack_recipe_id": ""
-      }, on_conflict="profile_id,day").execute()
-      
-    return {"status": "success", "message": "Successfully synchronized weekly plan to database."}
-  except Exception as e:
-    return {"status": "error", "message": f"Database insertion failed: {str(e)}"}
+  weekly_plan = _ensure_dict(weekly_plan)
+  if not isinstance(weekly_plan, dict):
+    return {"status": "error", "message": f"Expected a dict for weekly_plan, got {type(weekly_plan).__name__}"}
+  saved = db_save_weekly_plan(weekly_plan)
+  return {
+    "status": "success",
+    "message": f"Successfully synchronized {len(saved)} meal-plan days to durable storage."
+  }
 
 def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name: str, user_name: str = "") -> Dict[str, Any]:
   """
@@ -137,44 +98,15 @@ def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name
       new_recipe_name: The name of the new recipe (e.g. 'Garlic Salmon', 'Keto Chia Pudding')
       user_name: Ignored for now. Meal plans are shared by the configured household.
   """
-  try:
-    profile_id = get_household_profile_id()
-    day_clean = day.strip().capitalize()
-    meal_category = meal_category.lower().strip()
-    
-    # Check if there is an existing plan row for this day
-    response = supabase.table("meal_plans").select("*").eq("profile_id", profile_id).eq("day", day_clean).execute()
-    
-    data = {
-        "profile_id": profile_id,
-        "day": day_clean
-    }
-    
-    if response.data:
-        # Row exists, update target column and carry over other columns
-        row = response.data[0]
-        data["id"] = row.get("id")
-        data["breakfast_recipe_id"] = row.get("breakfast_recipe_id")
-        data["lunch_recipe_id"] = row.get("lunch_recipe_id")
-        data["dinner_recipe_id"] = row.get("dinner_recipe_id")
-        data["snack_recipe_id"] = row.get("snack_recipe_id")
-        
-    col_map = {
-        "breakfast": "breakfast_recipe_id",
-        "lunch": "lunch_recipe_id",
-        "dinner": "dinner_recipe_id"
-    }
-    
-    target_col = col_map.get(meal_category)
-    if not target_col:
-        return {"status": "error", "message": f"Invalid meal category: {meal_category}"}
-        
-    data[target_col] = str(new_recipe_name).strip()
-    
-    supabase.table("meal_plans").upsert(data, on_conflict="profile_id,day").execute()
-    return {"status": "success", "message": f"Successfully updated {day_clean} {meal_category} to '{new_recipe_name}'."}
-  except Exception as e:
-    return {"status": "error", "message": f"Database update failed: {str(e)}"}
+  day_clean = day.strip().capitalize()
+  meal_category = meal_category.lower().strip()
+  if meal_category not in {"breakfast", "lunch", "dinner"}:
+    return {"status": "error", "message": f"Invalid meal category: {meal_category}"}
+  db_update_single_meal(day_clean, meal_category, new_recipe_name)
+  return {
+    "status": "success",
+    "message": f"Successfully updated {day_clean} {meal_category} to '{new_recipe_name}' in durable storage."
+  }
 
 # --- Section 2: Supabase Pantry Stock & Logs ---
 def get_pantry_stock_tool(user_name: str = "") -> List[Dict[str, Any]]:
@@ -300,7 +232,7 @@ def _resolve_memory_service(tool_context: ToolContext = None):
 async def set_household_food_preference_tool(preference_text: str, tool_context: ToolContext = None) -> Dict[str, Any]:
   """
   Store a household-level food preference, dislike, exclusion, or planning style
-  in ADK memory as plain text.
+  in intentionally ephemeral, process-local ADK memory as plain text.
   """
   preference = str(preference_text or "").strip()
   if not preference:
@@ -325,7 +257,10 @@ async def set_household_food_preference_tool(preference_text: str, tool_context:
           events=[event]
       )
 
-    return {"status": "success", "message": f"Saved household food preference: {preference}"}
+    return {
+      "status": "success",
+      "message": f"Stored household food preference in ephemeral process-local memory: {preference}"
+    }
   except Exception as e:
     return {"status": "error", "message": f"Failed to save household food preference: {str(e)}"}
 
@@ -387,10 +322,8 @@ def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: st
   """
   Add or update an ingredient in the shared household pantry/fridge stock database on Supabase.
   """
-  res = db_add_to_pantry(user_name, ingredient_name, amount, unit)
-  if res:
-      return f"Successfully added {amount} {unit} of '{ingredient_name}' to the shared household pantry stock."
-  return "Failed to add item to database."
+  db_add_to_pantry(user_name, ingredient_name, amount, unit)
+  return f"Successfully added {amount} {unit} of '{ingredient_name}' to the shared household pantry stock."
 
 def log_macros_tool(
     user_name: str, 
@@ -404,10 +337,8 @@ def log_macros_tool(
   """
   Record a meal intake log with calorie and macronutrient details into the user's Supabase journal.
   """
-  res = db_log_macros(user_name, meal_name, calories, protein, carbs, fat, fiber)
-  if res:
-      return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {user_name}'s journal."
-  return "Failed to log meal macros to database."
+  db_log_macros(user_name, meal_name, calories, protein, carbs, fat, fiber)
+  return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {user_name}'s journal."
 
 def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
   """
@@ -529,7 +460,10 @@ async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: 
       
     return {
         "status": "success", 
-        "message": f"Successfully updated your household brand preference: '{ingredient}' will map to '{branded_sku}'."
+        "message": (
+          "Updated ephemeral process-local brand preference memory: "
+          f"'{ingredient}' will map to '{branded_sku}'."
+        )
     }
   except Exception as e:
     import traceback

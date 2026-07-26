@@ -4,7 +4,8 @@ import hashlib
 import json
 import time
 from uuid import uuid4
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List
 from dotenv import load_dotenv
@@ -34,7 +35,15 @@ from app.supabase_client import (
     list_recipe_grocery_plans,
     get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
-    update_household_profile
+    update_household_profile,
+    validate_persistence_readiness,
+)
+from app.persistence import (
+    PersistenceConfigurationError,
+    PersistenceError,
+    begin_persistence_scope,
+    end_persistence_scope,
+    raise_recorded_persistence_failure,
 )
 
 load_dotenv()
@@ -190,8 +199,9 @@ async def get_or_create_session(user_name: str, session_id: str, diet_preference
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Lifespan events logging backend startup/shutdown.
+    Refuse startup unless durable storage is correctly configured and ready.
     """
+    validate_persistence_readiness()
     print("🚀 Starting Kitch ADK 2.0 Backend Gateway Service...")
     yield
     print("💤 Stopped Kitch ADK 2.0 Backend Gateway Service.")
@@ -211,6 +221,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def persistence_postcondition(request: Request, call_next):
+    """
+    Convert every durable-storage failure to a safe 503 response.
+
+    The request-scope marker also catches failures swallowed by the agent
+    framework so chat/photo APIs cannot return generated success text.
+    """
+    token = begin_persistence_scope()
+    try:
+        response = await call_next(request)
+        raise_recorded_persistence_failure()
+        return response
+    except PersistenceError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": error.public_detail()},
+        )
+    finally:
+        end_persistence_scope(token)
+
+@app.exception_handler(PersistenceError)
+async def persistence_exception_handler(
+    request: Request,
+    error: PersistenceError,
+):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": error.public_detail()},
+    )
 
 # 1. Conversational Chat Agent Endpoint
 @app.post("/api/chat", response_model=ChatResponse)
@@ -264,9 +305,8 @@ async def chat_endpoint(payload: ChatRequest):
         grocery_cart_after = get_grocery_cart()
         latest_recipe_plan_after = get_latest_recipe_grocery_plan_metadata()
 
-        # Detect persisted state changes first; text phrasing is only a fallback.
+        # Only confirmed persisted state changes can produce mutation actions.
         action = None
-        text_lower = text_reply.lower()
         
         if weekly_plan_after and weekly_plan_after != weekly_plan_before:
             action = {"type": "UPDATE_PLANNER"}
@@ -276,16 +316,6 @@ async def chat_endpoint(payload: ChatRequest):
             action = {"type": "UPDATE_GROCERY_CART"}
         elif latest_recipe_plan_after != latest_recipe_plan_before:
             action = {"type": "UPDATE_RECIPE_GROCERY"}
-        elif (
-            "swapped" in text_lower
-            or "modified your meal plan" in text_lower
-            or ("meal plan" in text_lower and "saved" in text_lower)
-        ):
-            action = {"type": "UPDATE_PLANNER"}
-        elif "dietary alignment complete" in text_lower or "switched dietary profile" in text_lower:
-            action = {"type": "SWITCH_DIET"}
-        elif "added" in text_lower and "pantry" in text_lower:
-            action = {"type": "UPDATE_PANTRY"}
             
         return ChatResponse(text=text_reply, action=action)
         
@@ -446,6 +476,30 @@ async def add_pantry_endpoint(payload: Dict[str, Any]):
         
         res = add_to_pantry(user, name, amount, unit)
         return {"status": "success", "data": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/household/profile")
+async def update_household_profile_endpoint(payload: Dict[str, Any]):
+    """Persist shared household planning settings before confirming them in UI."""
+    try:
+        current = get_household_profile()
+        profile = update_household_profile(
+            diet_preference=payload.get(
+                "diet_preference",
+                current["diet_preference"],
+            ),
+            household_size=int(
+                payload.get("household_size", current["household_size"])
+            ),
+            daily_calorie_target=int(
+                payload.get(
+                    "daily_calorie_target",
+                    current["daily_calorie_target"],
+                )
+            ),
+        )
+        return {"status": "success", "profile": profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -700,5 +754,29 @@ async def place_zepto_order_endpoint(payload: Dict[str, Any]):
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "engine": "google-adk"}
+    """Readiness check for elevated access, schema, and household config."""
+    try:
+        readiness = validate_persistence_readiness()
+        return {
+            "status": "ready",
+            "engine": "google-adk",
+            "memory": "ephemeral-process-local",
+            "persistence": readiness,
+        }
+    except PersistenceError as error:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": error.public_detail()},
+        )
+    except PersistenceConfigurationError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "persistence_misconfigured",
+                    "message": "Kitch durable storage is not configured correctly.",
+                    "operation": "readiness_check",
+                    "retryable": False,
+                }
+            },
+        )

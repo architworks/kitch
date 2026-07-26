@@ -61,7 +61,9 @@ def build_llm_model():
 
 configured_llm = build_llm_model()
 
-# 1. Initialize modern, high-performance in-memory prototyping services
+# 1. Intentionally ephemeral ADK services.
+# These are process-local until the Vertex AI migration and must never be used
+# as substitutes for structured Supabase state.
 session_service = InMemorySessionService()
 memory_service = InMemoryMemoryService()
 HOUSEHOLD_MEMBERS_TEXT = household_members_text()
@@ -119,7 +121,8 @@ chef_planner = LlmAgent(
         "5. The schedule tool returns only weekdays with persisted meals. If a weekday is missing, treat that day as unplanned rather than inventing meals for it.\n"
         "6. When the user asks 'what's for dinner tonight' or similar, check the current day and look up the schedule for that day.\n"
         "7. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
-        "8. Structure schedules clearly in markdown, showing meal names and brief descriptions only."
+        "8. Structure schedules clearly in markdown, showing meal names and brief descriptions only.\n"
+        "9. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         get_weekly_schedule_tool,
@@ -151,7 +154,8 @@ vision_scanner = LlmAgent(
         "2. If the user doesn't specify their name, use the active user from session state.\n"
         "3. For fridge scans (photos or text), identify items and add them to the shared household pantry using 'add_to_pantry_tool'.\n"
         "4. To check daily progress, use 'get_macro_diary_tool' and summarize totals.\n"
-        "5. Always respond with a clean markdown summary of what was logged."
+        "5. Always respond with a clean markdown summary of what was logged.\n"
+        "6. Describe pantry or diary data as saved only after its persistence tool returns a successful result. If persistence fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         add_to_pantry_tool,
@@ -181,7 +185,7 @@ recipe_grocery_planner = LlmAgent(
         "- Household size: {app:household_size?}\n\n"
         "CRITICAL RULES:\n"
         "1. Before generating recipes or groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
-        "2. If the user states a new household food preference or exclusion (for example 'we prefer not to use tofu', 'avoid mushrooms', or 'prefer high protein dinners'), call 'set_household_food_preference_tool' to save it. If the same message also asks for a recipe or groceries, save the preference first, then continue.\n"
+        "2. If the user states a new household food preference or exclusion (for example 'we prefer not to use tofu', 'avoid mushrooms', or 'prefer high protein dinners'), call 'set_household_food_preference_tool' to store it in explicitly ephemeral process-local ADK memory. If the same message also asks for a recipe or groceries, store the preference first, then continue. Never describe this memory as durable.\n"
         "3. Resolve only the user's requested scope. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_weekly_schedule_tool' and select only the requested meal slots or days. Do not process the whole weekly plan unless the user explicitly asks for the full week.\n"
         "4. For every recipe or grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
@@ -189,7 +193,8 @@ recipe_grocery_planner = LlmAgent(
         "7. If the user mentions items already at home or just bought, call 'add_to_pantry_tool' for each item first, then plan using the updated pantry.\n"
         "8. Never invent native cart rows independently of the recipe cards. Recipe and grocery outputs must stay connected through the saved recipe+grocery artifact.\n"
         "9. Do not call Zepto, Blinkit, provider sync, export, or order-placement tools. Provider cart translation is separate from this agent and happens through backend provider endpoints or a future provider agent.\n"
-        "10. Present results in clean markdown. For grocery requests, mention that the native household grocery cart has been updated."
+        "10. Present results in clean markdown. For grocery requests, mention that the native household grocery cart has been updated only after save_recipe_grocery_plan_tool returns status=success.\n"
+        "11. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         get_weekly_schedule_tool,
@@ -236,7 +241,8 @@ kitch_coordinator = LlmAgent(
         "4. If unsure, ask a clarifying question rather than guessing wrong.\n"
         "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to vision_scanner for logging.\n"
         "6. If the user asks to add groceries to Zepto/Blinkit, route only the native recipe/grocery planning part to recipe_grocery_planner. Provider cart sync is handled by backend UI actions, not ordinary chat.\n"
-        "7. Never ask 'which agent should I use' — just figure it out from context."
+        "7. Never ask 'which agent should I use' — just figure it out from context.\n"
+        "8. Never claim a durable change succeeded unless the specialist received a successful persistence-tool result. Do not turn a tool error into reassuring success language."
     ),
     sub_agents=[chef_planner, vision_scanner, recipe_grocery_planner],
     before_agent_callback=inject_datetime_callback

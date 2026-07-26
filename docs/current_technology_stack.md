@@ -302,7 +302,12 @@ Conscious limitation:
 | Variable | Purpose |
 | :--- | :--- |
 | `SUPABASE_URL` | Supabase project URL. |
-| `SUPABASE_KEY` | Supabase API key used by the backend. |
+| `SUPABASE_SECRET_KEY` | Preferred `sb_secret_...` credential used only by the trusted backend. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Temporary legacy `service_role` JWT support. |
+
+`SUPABASE_KEY`, publishable credentials, and anon JWTs are intentionally
+rejected. All versioned database migrations must be applied before FastAPI is
+started.
 
 Why Supabase is still required even with ADK memory:
 
