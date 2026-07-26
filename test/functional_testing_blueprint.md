@@ -220,6 +220,46 @@ preserve the rest of the weekly schedule.
 - Fail criteria: Salmon remains, unrelated meals change, or the plan becomes
   incomplete.
 
+## Section 2A: Recipe Management
+
+These scenarios verify that users can request full cooking details for a
+planned meal without implicitly asking Kitch to buy anything. They cover the
+Home-page **View details** flow, which seeds a `Show me the recipe for ...`
+prompt, and the persisted recipe rendered in the Recipes page.
+
+### Scenario 2A.1 - View Recipe Details for the Next Planned Meal
+
+- Prerequisite: The active meal plan has a named next meal on the Home page.
+  Record that meal name before beginning.
+- Prompt/action: Click **View details** for the next meal and confirm the chat
+  input is seeded with `Show me the recipe for <next meal>`. Submit that exact
+  prompt.
+- Expected behavior: The assistant generates a complete recipe for the exact
+  named meal. The response should provide usable cooking details rather than
+  only describing the dish or changing the meal plan.
+- Recipe-content check: Confirm the saved recipe contains the exact or clearly
+  equivalent meal title, servings, ingredients with quantities or units,
+  ordered cooking instructions, and cooking time where appropriate.
+- Recipe-management check: Open the **Recipes** tab and confirm it renders the
+  generated recipe title, ingredients, and cooking steps. Exercise the Recipe
+  and Ingredients views to confirm both parts of the artifact are usable.
+- Cart-isolation check: Record the native grocery cart before and after the
+  request. A recipe-only request must not add, remove, or replace cart rows,
+  must not claim that groceries were added, and must not show an
+  `UPDATE_GROCERY_CART` success action.
+- Persistence check: Refresh the browser, return to the **Recipes** tab, and
+  confirm the same recipe remains visible. Confirm a durable
+  `recipe_grocery_plans` artifact exists with `updates_cart=false` and no
+  recipe-linked cart rows.
+- Pass criteria: The exact requested recipe is generated, saved, visible in the
+  Recipes tab after refresh, and the grocery cart remains unchanged.
+- Fail criteria: The assistant returns only a meal summary, generates the wrong
+  recipe, omits usable ingredients or instructions, fails to save the recipe,
+  loses it after refresh, or changes the grocery cart.
+- Persistence-failure criteria: A storage failure must return HTTP 503 and the
+  frontend must preserve the last confirmed recipe and cart state without
+  showing a success banner.
+
 ## Section 3: Macro Logging via Text Message
 
 These scenarios verify that plain text food messages are converted into diary
@@ -463,6 +503,7 @@ Close every artifact with a functional summary.
 
 - Meal planning:
 - Plan edits:
+- Recipe management:
 - Text macro logging:
 - Image macro logging:
 - Grocery generation:
@@ -493,6 +534,8 @@ Future runs should continue to report against them.
 - Text and image food logging create persisted diary entries with plausible
   nutrition.
 - Fridge scans and pantry updates persist stocked items.
+- Recipe-only requests produce complete persisted recipe artifacts that remain
+  visible in the Recipes page without changing the native grocery cart.
 - Grocery lists are generated from the active meal plan and account for pantry
   stock.
 - Brand and category preferences are remembered and applied to later grocery or
