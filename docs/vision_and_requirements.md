@@ -98,16 +98,21 @@ The Recipes page shows the latest recipe+grocery artifact:
 
 ### Groceries page
 
-The Groceries page is the operational checkout-prep screen:
+The Groceries page is the operational checkout-prep screen. It keeps the full
+ordering path visible in this order:
 
-- Review native grocery cart rows.
-- Add manual rows.
-- Edit quantities and units.
-- Select which eligible rows should move to Zepto.
-- Sync selected rows to Zepto.
-- Review actual Zepto cart items and unavailable items.
-- Choose address/payment state if exposed.
-- Confirm order only through a final approval action.
+- Review and modify native grocery cart rows.
+- Select an ordering app. Zepto is the current live default; Blinkit is shown
+  as a disabled `Coming soon` option.
+- Select a provider delivery address and transfer the selected native rows.
+- Review actual provider cart items, unavailable items, and provider-returned
+  totals.
+- Choose payment state if exposed, acknowledge the exact review, and place an
+  order only through the final approval action.
+
+Later stages stay visible but locked until their prerequisites are complete.
+Any native-cart, selection, provider, or address change invalidates the active
+provider review and requires a fresh sync.
 
 **Why this page exists:** native cart review, provider sync, and order approval need one clear operational flow. Hiding this inside the recipe page made it hard to understand what would actually be bought.
 
@@ -173,11 +178,13 @@ The floating chat input is the primary mode of interaction. It supports:
 | :--- | :--- | :--- |
 | REQ-040 | Keep provider sync behind backend adapters. | Provider APIs/MCP tools are external systems and should not leak into recipe/grocery planning. |
 | REQ-041 | Use Zepto MCP for live Zepto cart sync. | Zepto MCP exposes search/cart/order tools that are suitable for testing native-cart-to-provider-cart translation. |
-| REQ-042 | Before provider sync, show "not synced" rather than fake prices. | Fake totals would create false confidence. Prices and fees come from the provider response. |
+| REQ-042 | Before provider sync, show "not synced" rather than fake prices; after sync, show only normalized provider-returned totals. | Fake totals would create false confidence. Missing provider amounts must remain unavailable rather than being estimated. |
 | REQ-043 | Moving items to Zepto may replace the existing Zepto cart after the user clicks the sync action. | The user explicitly asked to move selected Kitch rows to Zepto, and replacing avoids ambiguous merges. |
 | REQ-044 | Order placement requires a saved review snapshot and confirmation token. | Ensures the order is based on exactly what the user reviewed. |
 | REQ-045 | The app must surface unavailable or unresolved provider items. | Silent failures would lead to missing groceries. |
 | REQ-046 | Blinkit provider sync is deferred. | No Blinkit MCP connection is currently configured. |
+| REQ-047 | Keep checkout stages visible in chronological order while locking unavailable actions. | Users should understand the full path from native cart review to final approval without being able to bypass a prerequisite. |
+| REQ-048 | Invalidate a provider review when its native-cart inputs or delivery context change. | A user must never place an order from a stale cart, address, or total snapshot. |
 
 ---
 
@@ -243,5 +250,6 @@ Kitch is working when:
 - Recipe requests produce recipe artifacts without changing the cart.
 - Grocery requests produce recipe artifacts and native cart rows together.
 - Pantry-covered items are visible but excluded from provider sync.
-- The user can sync selected native rows to Zepto and see actual Zepto cart details.
+- The user can choose the current live ordering app, sync selected native rows,
+  and see actual provider cart details and returned totals.
 - The user cannot place a real order without explicit final approval.

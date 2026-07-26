@@ -310,7 +310,10 @@ Current backend-owned provider behavior:
 
 - Native cart remains Kitch's source of truth.
 - `ZeptoProviderAdapter` can sync selected, non-stocked native cart rows to Zepto through backend HTTP routes.
-- Zepto sync creates a review snapshot.
+- The provider-neutral Groceries workflow selects Zepto by default and keeps
+  Blinkit disabled until its adapter exists.
+- Zepto sync creates a review snapshot with provider-returned cart totals when
+  available; native-cart or delivery-context changes invalidate that snapshot.
 - Real order placement requires a separate frontend approval button.
 
 Why provider behavior is outside the agent topology:

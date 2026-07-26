@@ -290,15 +290,21 @@ Example prompts:
 
 ### Current Product Boundary
 
-The native grocery cart is structured backend state. The Groceries page supports item review, manual rows, quantity edits, row exclusion for Zepto sync, and provider review. Provider substitution review should continue to improve as Zepto/Blinkit integrations mature.
+The native grocery cart is structured backend state. The Groceries page presents
+one visible, prerequisite-locked workflow: native cart review, ordering-app
+selection, delivery address and transfer, provider cart review, then payment
+and order. Zepto is the live default; Blinkit is a disabled `Coming soon`
+placeholder. Provider substitution review should continue to improve as live
+integrations mature.
 
 ---
 
-## 10. Flow: Sync Groceries to Zepto
+## 10. Flow: Prepare an Ordering-App Cart (Current Provider: Zepto)
 
 ### User Intent
 
-The user wants to move the native Kitch grocery cart into Zepto.
+The user wants to move the native Kitch grocery cart into an ordering app. The
+current live provider is Zepto.
 
 Example prompts:
 
@@ -308,23 +314,30 @@ Example prompts:
 
 ### Expected Experience
 
-1. User requests provider preparation.
-2. Kitch uses the native cart as the source of truth.
-3. Kitch excludes rows the user has removed from Zepto sync and rows covered by pantry stock.
-4. Kitch applies brand preferences where known.
-5. Kitch clears/replaces the Zepto cart.
-6. Kitch selects Zepto products and adds them to the Zepto cart.
-7. The app shows the actual Zepto cart, unavailable items, and address/payment review state.
-8. The user must click a final approval button before any order is placed.
+1. The user reviews the native cart and selects eligible rows.
+2. The user chooses an ordering app; Zepto is available and Blinkit is locked
+   as `Coming soon`.
+3. The user selects a saved delivery address, then transfers the native
+   selection.
+4. Kitch uses the native cart as the source of truth, excluding unselected and
+   pantry-covered rows and applying known brand preferences.
+5. Kitch clears/replaces the Zepto cart, selects matching products, and reads
+   the resulting provider cart.
+6. The app shows the actual Zepto cart, unavailable items, address/payment
+   state, and only provider-returned subtotal, fees, discounts, and total.
+7. The user must acknowledge the exact review before any order is placed.
 
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
 - The experience may indicate that the Zepto cart changed only after sync succeeds.
-- The user should see enough information to trust the actual Zepto cart contents.
+- The user should see enough information to trust the actual Zepto cart
+  contents and total. Kitch must never estimate a missing provider amount.
 - Brand substitutions should be visible.
 - Order placement must require explicit user approval.
 - Auth, payment, address, and OTP issues should surface as recoverable states.
+- Editing a native row or selection, changing provider, or changing address
+  invalidates the review and locks order placement until a fresh sync.
 
 ### Current Product Boundary
 

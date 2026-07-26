@@ -27,8 +27,8 @@ flowchart LR
     Plan[Plan the week] --> Recipe[Generate recipes]
     Recipe --> Pantry[Check pantry]
     Pantry --> Cart[Build native grocery cart]
-    Cart --> Zepto[Sync to Zepto for review]
-    Zepto --> Approval[Explicit order approval]
+    Cart --> Provider[Choose ordering app and sync for review]
+    Provider --> Approval[Explicit order approval]
 
     Intake[Text or plate photo] --> Macros[Personal macro diary]
     Fridge[Fridge photo or pantry text] --> Pantry
@@ -38,7 +38,7 @@ In practice, users can ask Kitch to:
 
 - Plan or change household meals.
 - Generate recipes and pantry-aware grocery requirements.
-- Review and sync selected grocery rows to Zepto.
+- Review selected grocery rows, choose an ordering app, and sync the cart for review.
 - Log personal food intake from text or photos.
 
 ## How Kitch Works

@@ -75,7 +75,7 @@ flowchart TD
     3. It calls `get_pantry_stock_tool` before grocery planning.
     4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
     5. For grocery requests it transactionally saves the artifact and replaces agent-generated `grocery_cart_items`, preserving manual rows. If either part fails, neither new change is committed.
-*   **Provider Boundary**: Zepto/Blinkit cart translation is no longer part of the recipe+grocery agent. Zepto sync remains available through backend provider endpoints.
+*   **Provider Boundary**: Zepto/Blinkit cart translation is no longer part of the recipe+grocery agent. The Groceries page uses a provider-neutral checkout workflow; Zepto is the live default and Blinkit remains a disabled future option until its backend adapter exists.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: We updated the FastAPI `/api/state/{user_name}` endpoint in [main.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/main.py) to fetch the live database meal plan using a new `get_weekly_schedule_dict` helper and return it in the state payload.

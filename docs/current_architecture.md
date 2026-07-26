@@ -145,9 +145,9 @@ Current routes:
 | `POST /api/grocery/export` | Legacy provider payload preview. |
 | `GET /api/grocery/zepto/status` | Returns Zepto configuration state; it does not claim store readiness. |
 | `GET /api/grocery/zepto/addresses` | Reads saved Zepto delivery addresses before cart sync. |
-| `POST /api/grocery/zepto/sync-cart` | Requires a saved address id, establishes store context, then replaces Zepto cart from selected, non-stocked native rows and creates a review snapshot. |
-| `GET /api/grocery/zepto/review/{review_id}` | Returns a saved Zepto review snapshot. |
-| `PATCH /api/grocery/zepto/review/{review_id}` | Updates review-only metadata such as address/payment selection and acknowledgement. |
+| `POST /api/grocery/zepto/sync-cart` | Requires a saved address id, establishes store context, then replaces Zepto cart from selected, non-stocked native rows and creates a review snapshot with normalized `cart_summary` values. |
+| `GET /api/grocery/zepto/review/{review_id}` | Returns a saved Zepto review snapshot, including `cart_summary` when the provider returned pricing. |
+| `PATCH /api/grocery/zepto/review/{review_id}` | Updates review-only payment selection and acknowledgement. Changing the native cart, ordering provider, or address requires a new review instead. |
 | `POST /api/grocery/zepto/place-order` | Places a Zepto order only after explicit frontend approval and token validation. |
 | `GET /api/health` | Readiness check for elevated database access, required schema, and the configured household profile. |
 
