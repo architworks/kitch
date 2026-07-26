@@ -1,0 +1,75 @@
+{
+  "run": {
+    "started_at": "2026-07-26T17:29:24+05:30",
+    "finished_at": "2026-07-26T17:30:36+05:30",
+    "timezone": "Asia/Kolkata",
+    "scope": ["5.1", "5.2", "6.1", "6.2"],
+    "backend_health": {
+      "http_status": 200,
+      "status": "ready",
+      "credential_type": "secret",
+      "tables": ["profiles", "meal_plans", "pantry_stock", "recipe_grocery_plans", "grocery_cart_items", "macro_diary"],
+      "household_profile_id": "00000000-0000-0000-0000-000000000000"
+    },
+    "non_blocking_backend_warning": "ADK tracing attempted to export to an unavailable local OTLP collector at 127.0.0.1:4318; application requests and Supabase writes succeeded."
+  },
+  "results": [
+    {
+      "id": "5.1",
+      "status": "PASS",
+      "prompt": "What groceries do I need for the week?",
+      "http_status": 200,
+      "duration_seconds": 13.941,
+      "action": "UPDATE_GROCERY_CART",
+      "new_recipe_plan_id": "80054868-f9b0-4c34-a5fd-50ff9724153e",
+      "new_recipe_plan_count": 1,
+      "new_agent_cart_count": 36,
+      "linked_new_cart_count": 36,
+      "cart_after_count": 36,
+      "observation": "The assistant generated a pantry-aware weekly shopping plan. Supabase confirmed one new recipe_grocery_plans artifact and 36 newly inserted source=agent grocery_cart_items rows, every one linked to that artifact."
+    },
+    {
+      "id": "5.2",
+      "status": "PASS",
+      "prompt": "Make a shopping list",
+      "http_status": 200,
+      "duration_seconds": 4.912,
+      "action": null,
+      "new_recipe_plan_count": 0,
+      "new_agent_cart_count": 0,
+      "cart_after_count": 36,
+      "observation": "The assistant rendered the existing categorized shopping list from the 36 durable cart rows created by scenario 5.1. This request made no false persistence claim and did not create a duplicate artifact or cart replacement."
+    },
+    {
+      "id": "6.1",
+      "status": "PASS",
+      "prompt": "I already have eggs and avocado, update the grocery list.",
+      "http_status": 200,
+      "duration_seconds": 13.841,
+      "action": "UPDATE_PANTRY",
+      "new_recipe_plan_id": "0d903991-ae5e-4f22-b328-8cf51b38a9cd",
+      "new_recipe_plan_count": 1,
+      "new_agent_cart_count": 37,
+      "linked_new_cart_count": 37,
+      "cart_after_count": 37,
+      "pantry_confirmed": ["eggs", "avocado"],
+      "observation": "The assistant increased durable pantry stock for eggs and avocado, marked them as stocked in its shopping output, and Supabase confirmed a new linked recipe artifact plus replacement agent cart."
+    },
+    {
+      "id": "6.2",
+      "status": "PASS",
+      "prompt": "Log my fridge scan and tell me what else I still need to buy",
+      "fixture": "fridge_scan_fixture.png",
+      "http_status": 200,
+      "duration_seconds": 39.693,
+      "new_recipe_plan_id": "065989d1-7136-4041-9076-2b1d57aa851b",
+      "new_recipe_plan_count": 1,
+      "new_agent_cart_count": 37,
+      "linked_new_cart_count": 37,
+      "cart_after_count": 37,
+      "fixture_expected_types": ["egg", "tomato", "cucumber", "milk", "paneer"],
+      "persisted_fixture_types": ["egg", "tomato", "cucumber", "milk", "paneer"],
+      "observation": "The image-derived pantry items were durable, then the grocery follow-up created a new persisted recipe artifact and a fully linked agent cart replacement."
+    }
+  ]
+}

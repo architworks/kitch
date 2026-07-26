@@ -1,0 +1,105 @@
+{
+  "run": {
+    "started_at": "2026-07-26T19:03:55+05:30",
+    "finished_at": "2026-07-26T19:04:36+05:30",
+    "timezone": "Asia/Kolkata",
+    "environment": "local",
+    "scope": [
+      "7.1"
+    ],
+    "browser": "Chrome via Chrome DevTools MCP",
+    "safety_boundary": "Cart sync and review only; no order placement."
+  },
+  "results": [
+    {
+      "id": "7.1",
+      "title": "Move Selected Native Cart Items to Zepto",
+      "status": "FAIL",
+      "action": "Click Move to Zepto cart from the Groceries page.",
+      "preconditions": {
+        "native_cart_count": 32,
+        "selected_native_count": 32,
+        "pantry_covered_count": 0,
+        "zepto_cart_before_count": 0,
+        "zepto_status": {
+          "enabled": true,
+          "state": "oauth_bridge_ready",
+          "transport": "stdio_remote",
+          "auth_mode": "browser_oauth"
+        }
+      },
+      "sync_observation": {
+        "http_status": 200,
+        "application_status": "error",
+        "submitted_native_ids": [
+          137,
+          132,
+          133,
+          134,
+          130,
+          135,
+          136,
+          131,
+          115,
+          138,
+          141,
+          143,
+          145,
+          142,
+          144,
+          146,
+          123,
+          124,
+          116,
+          117,
+          139,
+          126,
+          122,
+          128,
+          127,
+          129,
+          121,
+          119,
+          118,
+          140,
+          125,
+          120
+        ],
+        "matched_item_count": 0,
+        "unavailable_item_count": 32,
+        "message": "No Zepto products could be added to the cart.",
+        "common_items_also_unresolved": [
+          "Butter",
+          "Eggs",
+          "Milk / Almond Milk",
+          "Avocado",
+          "Broccoli",
+          "Tomatoes",
+          "Zucchini"
+        ]
+      },
+      "postconditions": {
+        "zepto_cart_after_count": 0,
+        "native_cart_after_count": 32,
+        "native_cart_changed": false,
+        "false_success_shown": false,
+        "confirm_order_disabled": true,
+        "order_placement_called": false
+      },
+      "diagnosis": {
+        "probable_cause": "Zepto store/location context is not established before product search.",
+        "provider_evidence": "Store context missing. Please run get_location_serviceability or select_store first.",
+        "interpretation": "OAuth/address access works, but product catalog search is not functionally ready."
+      },
+      "browser_observation": {
+        "review_visible": true,
+        "visible_status": "Sync needs attention",
+        "visible_in_cart_count": 0,
+        "visible_unavailable_count": 32,
+        "application_console_errors": 0,
+        "accessibility_issue": "68 form fields lack an id or name attribute."
+      },
+      "rationale": "Zero of 32 selected native items were resolved or added to Zepto, so the cart-sync requirement failed. Native-cart preservation and order blocking behaved correctly."
+    }
+  ]
+}

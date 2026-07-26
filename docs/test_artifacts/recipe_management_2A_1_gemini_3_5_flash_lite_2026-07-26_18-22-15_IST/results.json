@@ -1,0 +1,106 @@
+{
+  "run": {
+    "started_at": "2026-07-26T18:22:15+05:30",
+    "finished_at": "2026-07-26T18:43:16+05:30",
+    "timezone": "Asia/Kolkata",
+    "environment": "local",
+    "model": "gemini-3.5-flash-lite",
+    "scope": [
+      "2A.1"
+    ],
+    "backend_health": {
+      "http_status": 200,
+      "status": "ready",
+      "engine": "google-adk",
+      "memory": "ephemeral-process-local",
+      "credential_type": "secret",
+      "tables": [
+        "profiles",
+        "meal_plans",
+        "pantry_stock",
+        "recipe_grocery_plans",
+        "grocery_cart_items",
+        "macro_diary"
+      ],
+      "household_profile_id": "00000000-0000-0000-0000-000000000000"
+    },
+    "frontend_http_status": 200,
+    "browser_control_available": true,
+    "browser": "Chrome via Chrome DevTools MCP"
+  },
+  "results": [
+    {
+      "id": "2A.1",
+      "title": "View Recipe Details for the Next Planned Meal",
+      "status": "PASS",
+      "prompt": "Show me the recipe for Grilled Paneer Steak with Herb Butter and Steamed Broccoli",
+      "active_user": "Archit",
+      "household_size": 3,
+      "diet_preference": "balanced",
+      "http_status": 200,
+      "action": "UPDATE_RECIPE_GROCERY",
+      "assistant_observation": {
+        "exact_title_returned": true,
+        "scope": "Monday Dinner",
+        "servings": 3,
+        "cook_time": "20 mins",
+        "ingredient_lines": 7,
+        "ordered_steps": 5,
+        "claimed_cart_update": false
+      },
+      "persistence_observation": {
+        "new_recipe_plan_id": "ae713a87-7ad2-48fe-b7fd-30edd6f00743",
+        "request_matches_prompt": true,
+        "recipe_count": 1,
+        "structured_ingredient_count": 6,
+        "saved_step_count": 5,
+        "updates_cart": false,
+        "cart_item_count": 0,
+        "created_at": "2026-07-26T12:52:25.481202+00:00"
+      },
+      "cart_isolation_observation": {
+        "cart_before_count": 37,
+        "cart_after_count": 37,
+        "cart_changed": false,
+        "new_recipe_linked_cart_rows": 0,
+        "previous_cart_recipe_plan_id": "065989d1-7136-4041-9076-2b1d57aa851b"
+      },
+      "browser_observation": {
+        "frontend_http_status": 200,
+        "controllable_browser_available": true,
+        "browser": "Chrome via Chrome DevTools MCP",
+        "home_meal_title_visible": true,
+        "view_details_button_visible": true,
+        "seeded_prompt_matches": true,
+        "chat_recipe_response_visible": true,
+        "recipes_tab_visible_check": "PASS",
+        "recipe_title_visible": true,
+        "cook_time_visible": true,
+        "servings_visible": true,
+        "recipe_steps_visible": 5,
+        "ingredient_lines_visible": 7,
+        "ingredients_tab_check": "PASS",
+        "recipe_grocery_list_count": 0,
+        "refresh_persistence_visible_check": "PASS",
+        "grocery_cart_after_refresh_count": 37,
+        "network": {
+          "chat_post_status": 200,
+          "state_get_statuses": [
+            200,
+            200,
+            200
+          ],
+          "latest_recipe_get_statuses": [
+            200,
+            200,
+            200
+          ]
+        },
+        "application_console_errors": 0,
+        "application_console_warnings": 0,
+        "accessibility_issue": "156 form fields lack an id or name attribute."
+      },
+      "rationale": "The exact View details flow, assistant recipe, durable artifact, Recipes-tab rendering, Ingredients interaction, hard-refresh persistence, and grocery-cart isolation all passed."
+    }
+  ]
+}
