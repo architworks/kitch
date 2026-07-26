@@ -407,13 +407,71 @@ recommending items already stocked.
 - Fail criteria: Image ignored, pantry not updated, or remaining grocery list
   ignores visible stocked items.
 
-## Section 7: Ephemeral Preference Recall
+## Section 7: Zepto Cart Integration
+
+These scenarios verify the essential handoff from Kitch's durable native
+grocery cart to Zepto. They stop at cart review and must not place a real
+delivery order.
+
+### Scenario 7.1 - Move Selected Native Cart Items to Zepto
+
+- Prerequisite: The native grocery cart contains at least two eligible,
+  selected items and the Zepto connection reports ready.
+- Prompt/action: Open **Groceries**, review the selected items, and click
+  **Move to Zepto cart**.
+- Expected behavior: Kitch sends the selected eligible items to Zepto and opens
+  a review showing the resolved Zepto products, quantities, and availability.
+- Review check: Compare the native selection with the Zepto review. Every
+  successfully resolved item should correspond to a selected native row;
+  unavailable or substituted items should be clearly identified.
+- Native-state check: Syncing to Zepto must not delete, check off, or otherwise
+  mutate the durable native grocery cart.
+- Pass criteria: The sync completes, the Zepto review is visible and accurately
+  represents the selected native items, and no order is placed.
+- Fail criteria: Nothing reaches the Zepto review, unrelated items are added,
+  quantities are materially wrong without explanation, native rows change, or
+  the UI claims success after a provider failure.
+
+### Scenario 7.2 - Selection, Pantry Exclusion, and Repeat Sync
+
+- Prerequisite: Keep one eligible item selected, leave another eligible item
+  unselected, and include at least one pantry-covered row.
+- Prompt/action: Sync the cart to Zepto, inspect the review, then repeat the
+  sync without changing the native selection.
+- Expected behavior: Only selected, non-pantry-covered rows are offered to
+  Zepto. Unselected and already-stocked rows are excluded. Repeating the same
+  sync should refresh or reproduce the same reviewed cart rather than
+  multiplying quantities or creating duplicate products.
+- Pass criteria: The review respects selection and pantry coverage, and the
+  second sync remains equivalent without duplicates.
+- Fail criteria: Unselected or pantry-covered items are sent, selected eligible
+  items disappear without explanation, or the retry duplicates products or
+  quantities.
+
+### Scenario 7.3 - Zepto Failure and Final-Approval Safety
+
+- Prompt/action: Exercise a recoverable provider failure, unavailable-item
+  response, or incomplete checkout state during cart sync or review.
+- Expected behavior: The UI explains what failed or is unavailable, preserves
+  the native cart, and allows a safe retry. It must not display a completed
+  sync when the provider rejected the operation.
+- Approval check: Confirm that placing an order remains unavailable until the
+  exact Zepto cart, delivery address, payment method, and final acknowledgement
+  have been reviewed. Do not grant final approval or place a real order during
+  this functional test.
+- Pass criteria: Provider problems are visible and recoverable, native state is
+  preserved, and no order can be placed accidentally or from a stale review.
+- Fail criteria: The UI hides the failure, loses native cart state, shows false
+  success, or permits order placement without the required review and explicit
+  final approval.
+
+## Section 8: Ephemeral Preference Recall
 
 These scenarios verify that brand and category preferences affect later grocery
 or delivery-preparation behavior within the running backend process. They do
 not claim persistence across a backend restart until Vertex AI memory is used.
 
-### Scenario 7.1 - Bread Brand Preference
+### Scenario 8.1 - Bread Brand Preference
 
 - Prompt/action: "For bread, always get Baker's Dozen whole wheat"
 - Expected behavior: The assistant stores a bread brand/type preference.
@@ -425,7 +483,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not acknowledged, not remembered, or later bread
   item ignores the preference.
 
-### Scenario 7.2 - Grocery Category Exclusion
+### Scenario 8.2 - Grocery Category Exclusion
 
 - Prompt/action: "Never add cereals or cookies to my grocery list - only dairy,
   fruits, and veggies."
@@ -440,7 +498,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not saved, ignored later, or grocery lists include
   excluded categories without user override.
 
-### Scenario 7.3 - Amul Butter Preference
+### Scenario 8.3 - Amul Butter Preference
 
 - Prompt/action: "I prefer Amul butter over any other brand"
 - Expected behavior: The assistant stores an Amul butter brand preference.
@@ -452,7 +510,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not acknowledged, not remembered, or provider
   payload/grocery preview uses generic butter without applying the preference.
 
-## Section 8: Datetime Awareness
+## Section 9: Datetime Awareness
 
 These scenarios verify that relative dates are resolved correctly and used to
 query meal or diary state.
@@ -460,7 +518,7 @@ query meal or diary state.
 Record the actual date and timezone in the artifact before running this
 section. The expected weekday depends on the run date.
 
-### Scenario 8.1 - Dinner Tonight
+### Scenario 9.1 - Dinner Tonight
 
 - Prompt/action: "What's for dinner tonight?"
 - Expected behavior: The assistant resolves "tonight" to the current calendar
@@ -471,7 +529,7 @@ section. The expected weekday depends on the run date.
 - Pass criteria: Correct date resolution and correct dinner.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
-### Scenario 8.2 - Tomorrow Morning
+### Scenario 9.2 - Tomorrow Morning
 
 - Prompt/action: "What am I eating tomorrow morning?"
 - Expected behavior: The assistant resolves "tomorrow morning" to tomorrow's
@@ -482,7 +540,7 @@ section. The expected weekday depends on the run date.
 - Pass criteria: Correct date resolution and correct breakfast.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
-### Scenario 8.3 - Calories Today So Far
+### Scenario 9.3 - Calories Today So Far
 
 - Prompt/action: "How many calories have I eaten today so far?"
 - Expected behavior: The assistant queries today's food diary and totals
@@ -508,6 +566,7 @@ Close every artifact with a functional summary.
 - Image macro logging:
 - Grocery generation:
 - Pantry-aware groceries:
+- Zepto cart integration:
 - Ephemeral preference recall:
 - Datetime awareness:
 
@@ -538,6 +597,9 @@ Future runs should continue to report against them.
   visible in the Recipes page without changing the native grocery cart.
 - Grocery lists are generated from the active meal plan and account for pantry
   stock.
+- Selected native grocery rows can be reviewed in Zepto without sending
+  excluded or pantry-covered items, duplicating retries, mutating native cart
+  state, or bypassing final-order approval.
 - Brand and category preferences are remembered and applied to later grocery or
   delivery-preparation flows.
 - Relative-date questions resolve to the correct day in the configured
