@@ -414,6 +414,14 @@ npx -y mcp-remote https://mcp.zepto.co.in/mcp
 Current behavior:
 
 - Kitch syncs selected native cart rows into Zepto only through backend provider endpoints.
+- The frontend loads saved Zepto addresses and requires the user to choose one before sync.
+- FastAPI passes the selected address id to the provider adapter.
+- The adapter calls `select_saved_address` before catalog search so Zepto can
+  establish location serviceability and store context.
+- Configuration readiness does not claim store readiness. Store readiness is
+  confirmed only after address selection succeeds.
+- A review remains locked to the address used for product resolution; changing
+  address requires a fresh sync.
 - Existing Zepto cart is replaced before sync.
 - Unavailable/unresolved items are returned in the review.
 - Zepto cart details are shown as "Zepto Cart" in the UI, not "matched products."

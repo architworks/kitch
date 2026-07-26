@@ -3574,6 +3574,38 @@ button {
   font-weight: 750;
 }
 
+.zepto-sync-address {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.zepto-sync-address select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(115, 121, 111, 0.24);
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 750;
+}
+
+.zepto-sync-address select:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.zepto-sync-address .zepto-address-error {
+  color: #9c3d3d;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
 .zepto-move-card button,
 .confirm-order-btn {
   width: 100%;
@@ -3858,6 +3890,35 @@ button {
 .zepto-address-empty,
 .zepto-payment-control {
   min-width: 0;
+}
+
+.zepto-locked-address {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: rgba(224, 239, 217, 0.72);
+  border: 1px solid rgba(74, 103, 65, 0.28);
+  border-radius: 12px;
+}
+
+.zepto-locked-address strong,
+.zepto-locked-address span,
+.zepto-locked-address small {
+  overflow-wrap: anywhere;
+}
+
+.zepto-locked-address strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.zepto-locked-address span,
+.zepto-locked-address small {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .zepto-approval-card label {

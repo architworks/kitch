@@ -61,8 +61,8 @@ class ZeptoProviderAdapter:
             state = "disabled"
             message = "Zepto MCP integration is disabled."
         elif self.transport in {"stdio", "stdio_remote", "mcp_remote"} and not self.access_token:
-            state = "oauth_bridge_ready"
-            message = "Zepto MCP will use the local browser OAuth bridge. If the token is expired, the bridge may open login."
+            state = "configured"
+            message = "Zepto MCP is configured through the local browser OAuth bridge."
         elif self.access_token or self.raw_headers:
             state = "configured"
             message = "Zepto MCP credentials are configured."
@@ -78,13 +78,70 @@ class ZeptoProviderAdapter:
             "endpoint": self.url,
             "transport": self.transport,
             "auth_mode": "bearer_or_headers" if self.access_token or self.raw_headers else "browser_oauth",
+            "readiness": "configured_only" if state == "configured" else state,
+            "store_context_state": "not_selected",
             "setup_command": f"{self.remote_command} {' '.join(self.remote_args)}" if self.transport in {"stdio", "stdio_remote", "mcp_remote"} else None,
         }
 
-    async def sync_cart(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def list_addresses(self) -> Dict[str, Any]:
+        """Return saved Zepto delivery addresses without selecting one."""
+        if not self.enabled:
+            return self._error("disabled", "Zepto MCP integration is disabled.")
+
+        try:
+            async with self._session() as session:
+                tools = await self._list_tools(session)
+                address_tool = "list_saved_addresses" if "list_saved_addresses" in tools else self._find_tool(
+                    tools,
+                    required=("address",),
+                    preferred=("get", "list", "show", "view"),
+                )
+                if not address_tool:
+                    return self._error(
+                        "missing_address_tool",
+                        "Zepto did not expose a saved-address lookup tool.",
+                        available_tools=list(tools.keys()),
+                    )
+
+                addresses = await self._call_tool(
+                    session,
+                    address_tool,
+                    self._build_empty_or_default_args(tools[address_tool]),
+                )
+                tool_error = self._tool_error_message(addresses)
+                if tool_error:
+                    return self._error(
+                        "address_lookup_failed",
+                        f"Zepto saved addresses could not be read: {tool_error}",
+                    )
+
+                return {
+                    "status": "success",
+                    "provider": "zepto",
+                    "addresses": addresses,
+                    "message": "Zepto saved addresses are available. Select one before syncing the cart.",
+                }
+        except Exception as exc:
+            return self._error(
+                "address_lookup_failed",
+                f"Zepto saved addresses could not be read: {exc}",
+            )
+
+    async def sync_cart(
+        self,
+        items: List[Dict[str, Any]],
+        selected_address_id: str = "",
+    ) -> Dict[str, Any]:
         """Replace the Zepto cart with best matches for native cart items."""
         if not self.enabled:
             return self._error("disabled", "Zepto MCP integration is disabled.")
+
+        selected_address_id = str(selected_address_id or "").strip()
+        if not selected_address_id:
+            return self._error(
+                "address_required",
+                "Select a Zepto delivery address before moving items to the cart.",
+            )
 
         if not items:
             return {
@@ -95,18 +152,38 @@ class ZeptoProviderAdapter:
             }
 
         try:
-            return await self._sync_cart(items)
+            return await self._sync_cart(items, selected_address_id)
         except Exception as exc:
             return self._error(
                 "mcp_sync_failed",
                 f"Zepto MCP cart sync failed: {exc}",
             )
 
-    async def _sync_cart(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _sync_cart(
+        self,
+        items: List[Dict[str, Any]],
+        selected_address_id: str,
+    ) -> Dict[str, Any]:
         async with self._session() as session:
             tools = await self._list_tools(session)
+            store_context = await self._select_store_context(
+                session,
+                tools,
+                selected_address_id,
+            )
+            if store_context.get("status") != "ready":
+                return {
+                    **store_context,
+                    "available_tools": list(tools.keys()),
+                }
+
             if {"search_products", "update_cart", "view_cart"}.issubset(tools):
-                return await self._sync_cart_with_zepto_tools(session, tools, items)
+                return await self._sync_cart_with_zepto_tools(
+                    session,
+                    tools,
+                    items,
+                    store_context,
+                )
 
             clear_tool = self._find_tool(tools, required=("cart",), preferred=("clear", "empty", "replace"))
             search_tool = self._find_tool(tools, required=(), preferred=("search", "product", "catalog"))
@@ -171,11 +248,18 @@ class ZeptoProviderAdapter:
                 "unavailable_items": unavailable_items,
                 "zepto_cart": zepto_cart,
                 "checkout_context": checkout_context,
+                "store_context": store_context,
                 "available_tools": list(tools.keys()),
                 "message": f"Synced {len(matched_items)} items to Zepto cart.",
             }
 
-    async def _sync_cart_with_zepto_tools(self, session: Any, tools: Dict[str, Any], items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _sync_cart_with_zepto_tools(
+        self,
+        session: Any,
+        tools: Dict[str, Any],
+        items: List[Dict[str, Any]],
+        store_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
         checkout_context = await self._checkout_context(session, tools)
         matched_items = []
         unavailable_items = []
@@ -241,6 +325,7 @@ class ZeptoProviderAdapter:
             "unavailable_items": unavailable_items,
             "zepto_cart": zepto_cart,
             "checkout_context": checkout_context,
+            "store_context": store_context,
             "available_tools": list(tools.keys()),
             "message": f"Synced {len(matched_items)} items to Zepto cart." if matched_items else "No Zepto products could be added to the cart.",
         }
@@ -421,6 +506,64 @@ class ZeptoProviderAdapter:
             args = {candidate_keys[0]: value}
         return args
 
+    def _find_address_selection_tool(self, tools: Dict[str, Any]) -> str | None:
+        if "select_saved_address" in tools:
+            return "select_saved_address"
+
+        for name, tool in tools.items():
+            text = f"{name} {getattr(tool, 'description', '')}".lower()
+            if "address" in text and any(word in text for word in ("select", "set", "choose")):
+                return name
+        return None
+
+    async def _select_store_context(
+        self,
+        session: Any,
+        tools: Dict[str, Any],
+        selected_address_id: str,
+    ) -> Dict[str, Any]:
+        address_tool = self._find_address_selection_tool(tools)
+        if not address_tool:
+            return self._error(
+                "missing_select_address_tool",
+                "Zepto did not expose a tool that can establish store context from a saved address.",
+                selected_address_id=selected_address_id,
+            )
+
+        try:
+            selection_result = await self._call_tool(
+                session,
+                address_tool,
+                self._build_selection_args(
+                    tools[address_tool],
+                    selected_address_id,
+                    "address",
+                ),
+            )
+        except Exception as exc:
+            return self._error(
+                "store_context_unavailable",
+                f"Zepto could not establish store context for the selected address: {exc}",
+                selected_address_id=selected_address_id,
+            )
+
+        tool_error = self._tool_error_message(selection_result)
+        if tool_error:
+            return self._error(
+                "store_context_unavailable",
+                f"Zepto could not establish store context for the selected address: {tool_error}",
+                selected_address_id=selected_address_id,
+            )
+
+        return {
+            "status": "ready",
+            "provider": "zepto",
+            "state": "store_context_ready",
+            "selected_address_id": selected_address_id,
+            "address_tool": address_tool,
+            "selection_result": selection_result,
+        }
+
     def _build_order_args(self, tool: Any, review: Dict[str, Any]) -> Dict[str, Any]:
         args = self._build_empty_or_default_args(tool)
         props = self._schema_properties(tool)
@@ -492,14 +635,24 @@ class ZeptoProviderAdapter:
         if address_tool:
             context["address_tool"] = address_tool
             try:
-                context["addresses"] = await self._call_tool(session, address_tool, self._build_empty_or_default_args(tools[address_tool]))
+                addresses = await self._call_tool(session, address_tool, self._build_empty_or_default_args(tools[address_tool]))
+                address_error = self._tool_error_message(addresses)
+                if address_error:
+                    context["address_error"] = address_error
+                else:
+                    context["addresses"] = addresses
             except Exception as exc:
                 context["address_error"] = str(exc)
 
         if payment_tool:
             context["payment_tool"] = payment_tool
             try:
-                context["payment_methods"] = await self._call_tool(session, payment_tool, self._build_empty_or_default_args(tools[payment_tool]))
+                payment_methods = await self._call_tool(session, payment_tool, self._build_empty_or_default_args(tools[payment_tool]))
+                payment_error = self._tool_error_message(payment_methods)
+                if payment_error:
+                    context["payment_error"] = payment_error
+                else:
+                    context["payment_methods"] = payment_methods
             except Exception as exc:
                 context["payment_error"] = str(exc)
 
@@ -510,9 +663,20 @@ class ZeptoProviderAdapter:
         selected_payment = review.get("selected_payment_method_id")
 
         if selected_address:
-            address_tool = self._find_tool(tools, required=("address",), preferred=("select", "set", "update", "choose"))
+            address_tool = self._find_address_selection_tool(tools)
             if address_tool:
-                await self._call_tool(session, address_tool, self._build_selection_args(tools[address_tool], selected_address, "address"))
+                selection_result = await self._call_tool(
+                    session,
+                    address_tool,
+                    self._build_selection_args(
+                        tools[address_tool],
+                        selected_address,
+                        "address",
+                    ),
+                )
+                selection_error = self._tool_error_message(selection_result)
+                if selection_error:
+                    raise RuntimeError(selection_error)
 
         if selected_payment:
             payment_tool = self._find_tool(tools, required=("payment",), preferred=("select", "set", "update", "choose"))
@@ -526,6 +690,25 @@ class ZeptoProviderAdapter:
             if isinstance(schema, dict) and "default" in schema:
                 args[key] = schema["default"]
         return args
+
+    def _tool_error_message(self, payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("isError") is not True and payload.get("is_error") is not True:
+            return None
+
+        content = payload.get("content")
+        if isinstance(content, list):
+            messages = [
+                str(item.get("text")).strip()
+                for item in content
+                if isinstance(item, dict) and item.get("text")
+            ]
+            if messages:
+                return " ".join(messages)
+
+        message = payload.get("message") or payload.get("error")
+        return str(message).strip() if message else "Zepto returned an unspecified tool error."
 
     def _first_product(self, payload: Any) -> Dict[str, Any] | None:
         products = []
@@ -542,7 +725,18 @@ class ZeptoProviderAdapter:
                     pass
 
             keys = {str(k).lower() for k in value.keys()}
-            if keys & {"id", "productid", "product_id", "skuid", "sku_id", "variantid", "variant_id"} and keys & {"name", "title", "productname", "product_name"}:
+            product_id_keys = {
+                "id",
+                "productid",
+                "product_id",
+                "productvariantid",
+                "storeproductid",
+                "skuid",
+                "sku_id",
+                "variantid",
+                "variant_id",
+            }
+            if keys & product_id_keys and keys & {"name", "title", "productname", "product_name"}:
                 products.append(value)
 
             for child in value.values():

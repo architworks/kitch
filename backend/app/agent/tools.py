@@ -290,17 +290,24 @@ async def search_household_food_preferences_tool(query: str, tool_context: ToolC
   except Exception as e:
     return {"status": "error", "message": f"Failed to search household food preferences: {str(e)}", "preferences": []}
 
-async def sync_native_cart_to_zepto_tool(tool_context: ToolContext = None) -> Dict[str, Any]:
+async def sync_native_cart_to_zepto_tool(
+    selected_address_id: str = "",
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
   """
   Replace the user's Zepto cart with unchecked, non-stocked items from Kitch's
-  native household grocery cart. This does not place an order.
+  native household grocery cart after establishing store context from a saved
+  delivery address. This does not place an order.
   """
   cart_items = [
     item for item in db_get_grocery_cart()
     if not item.get("checked") and not item.get("alreadyStocked")
   ]
   mapped_items = await _apply_brand_memory_to_items(cart_items, tool_context)
-  return await ZeptoProviderAdapter().sync_cart(mapped_items)
+  return await ZeptoProviderAdapter().sync_cart(
+    mapped_items,
+    selected_address_id=selected_address_id,
+  )
 
 async def get_zepto_cart_tool() -> Dict[str, Any]:
   """

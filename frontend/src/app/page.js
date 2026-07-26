@@ -693,6 +693,9 @@ export default function Home() {
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [zeptoCartReview, setZeptoCartReview] = useState(null);
   const [zeptoConnectionStatus, setZeptoConnectionStatus] = useState(null);
+  const [zeptoSavedAddresses, setZeptoSavedAddresses] = useState(null);
+  const [isZeptoAddressLoading, setIsZeptoAddressLoading] = useState(false);
+  const [zeptoAddressLoadError, setZeptoAddressLoadError] = useState("");
   const [selectedZeptoAddress, setSelectedZeptoAddress] = useState("");
   const [selectedZeptoPaymentMethod, setSelectedZeptoPaymentMethod] = useState("");
   const [zeptoReviewAcknowledged, setZeptoReviewAcknowledged] = useState(false);
@@ -789,6 +792,36 @@ export default function Home() {
     }
   };
 
+  const syncZeptoAddresses = async () => {
+    setIsZeptoAddressLoading(true);
+    setZeptoAddressLoadError("");
+    try {
+      const res = await fetch(apiUrl("/api/grocery/zepto/addresses"));
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      const addresses = data.addresses || null;
+      const options = collectObjectsWithAnyKey(addresses, ["address", "address_line", "addressLine", "id"]);
+      setZeptoSavedAddresses(addresses);
+      setSelectedZeptoAddress(current => (
+        options.some((option, idx) => optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`) === current)
+          ? current
+          : ""
+      ));
+      if (options.length === 0) {
+        setZeptoAddressLoadError("Zepto did not return any saved delivery addresses.");
+      }
+      return addresses;
+    } catch (e) {
+      console.error("Failed to load Zepto delivery addresses", e);
+      setZeptoSavedAddresses(null);
+      setSelectedZeptoAddress("");
+      setZeptoAddressLoadError(e?.message || "Could not load Zepto delivery addresses.");
+      return null;
+    } finally {
+      setIsZeptoAddressLoading(false);
+    }
+  };
+
   const syncLiveState = async (userName) => {
     try {
       const data = await fetchLiveState(userName);
@@ -826,6 +859,7 @@ export default function Home() {
     if (activeTab !== "groceries") return undefined;
     const timer = window.setTimeout(() => {
       syncZeptoStatus();
+      syncZeptoAddresses();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeTab]);
@@ -1045,13 +1079,20 @@ export default function Home() {
       triggerBannerAlert("Select at least one native cart item for Zepto.");
       return;
     }
+    if (!selectedZeptoAddress) {
+      triggerBannerAlert("Select a Zepto delivery address before moving items to the cart.");
+      return;
+    }
 
     setIsZeptoSyncing(true);
     try {
       const res = await fetch(apiUrl("/api/grocery/zepto/sync-cart"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean) })
+        body: JSON.stringify({
+          cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean),
+          selected_address_id: selectedZeptoAddress
+        })
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
@@ -1097,9 +1138,11 @@ export default function Home() {
     return null;
   };
 
-  const selectZeptoAddressOption = (value) => {
+  const selectZeptoSyncAddress = (value) => {
     setSelectedZeptoAddress(value);
-    updateZeptoReview({ selected_address_id: value || null });
+    setZeptoCartReview(null);
+    setSelectedZeptoPaymentMethod("");
+    setZeptoReviewAcknowledged(false);
   };
 
   const placeZeptoOrder = async () => {
@@ -1115,7 +1158,6 @@ export default function Home() {
     setIsPlacingZeptoOrder(true);
     try {
       const latestReview = await updateZeptoReview({
-        selected_address_id: selectedZeptoAddress || null,
         selected_payment_method_id: selectedZeptoPaymentMethod || null,
         order_review_acknowledged: true
       }) || zeptoCartReview;
@@ -1469,34 +1511,49 @@ export default function Home() {
     : Array.isArray(zeptoCartReview?.result?.unavailable_items) ? zeptoCartReview.result.unavailable_items : [];
   const zeptoCartDetails = zeptoCartReview?.zepto_cart || zeptoCartReview?.result?.zepto_cart || zeptoCartReview?.result || null;
   const zeptoCheckoutContext = zeptoCartReview?.checkout_context || zeptoCartReview?.result?.checkout_context || {};
-  const zeptoAddressOptions = collectObjectsWithAnyKey(zeptoCheckoutContext.addresses, ["address", "address_line", "addressLine", "id"]);
+  const zeptoSavedAddressOptions = collectObjectsWithAnyKey(zeptoSavedAddresses, ["address", "address_line", "addressLine", "id"]);
+  const selectedZeptoAddressOption = zeptoSavedAddressOptions.find((option, idx) => (
+    optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`) === selectedZeptoAddress
+  ));
+  const selectedZeptoAddressDisplay = selectedZeptoAddressOption
+    ? formatZeptoAddressParts(selectedZeptoAddressOption, "Selected Zepto address")
+    : null;
   const zeptoPaymentOptions = collectObjectsWithAnyKey(zeptoCheckoutContext.payment_methods, ["payment", "method", "payment_method", "id"]);
   const zeptoOrderBlockers = Array.isArray(zeptoCartReview?.order_blockers) ? zeptoCartReview.order_blockers : [];
   const canPlaceZeptoOrder = zeptoCartReview?.can_place_order
     && Boolean(zeptoCartReview?.confirmation_token)
     && Boolean(zeptoCartReview?.snapshot_hash)
+    && Boolean(selectedZeptoAddress)
     && zeptoOrderBlockers.length === 0
     && zeptoReviewAcknowledged
     && !isUpdatingZeptoReview;
   const zeptoState = zeptoConnectionStatus?.state || "unknown";
-  const zeptoStatusLabel = {
-    configured: "Signed in to Zepto",
-    oauth_bridge_ready: "Signed in to Zepto",
+  const zeptoStatusLabel = zeptoCartReview?.store_context?.state === "store_context_ready"
+    ? "Zepto store ready"
+    : zeptoSavedAddressOptions.length > 0
+      ? "Zepto connected"
+      : ({
+    configured: "Zepto configured",
     browser_login_required: "Browser login required",
     not_connected: "Not connected",
     disabled: "Disabled",
     failed: "Zepto sign-in needs attention",
     unknown: "Checking Zepto sign-in"
-  }[zeptoState] || zeptoState;
-  const zeptoStatusDescription = {
-    configured: "Ready to move selected items into your Zepto cart.",
-    oauth_bridge_ready: "Ready to move selected items into your Zepto cart.",
+  }[zeptoState] || zeptoState);
+  const zeptoStatusDescription = zeptoCartReview?.store_context?.state === "store_context_ready"
+    ? "Products were resolved for the selected delivery address."
+    : zeptoSavedAddressOptions.length > 0
+      ? selectedZeptoAddress
+        ? "Address selected. Zepto will confirm the serviceable store before searching products."
+        : "Select a delivery address before moving items to Zepto."
+      : ({
+    configured: "Loading saved addresses to verify the Zepto connection.",
     browser_login_required: "Sign in to Zepto in the browser to continue.",
     not_connected: "Connect Zepto before moving items to cart.",
     disabled: "Zepto cart sync is not enabled right now.",
     failed: "Reconnect Zepto and try again.",
     unknown: "Checking whether Zepto is ready."
-  }[zeptoState] || "";
+  }[zeptoState] || "");
 
   const plannedWeekDays = useMemo(() => (
     WEEK_DAYS.filter(day => MEAL_SLOTS.some(slot => hasMealTitle(weeklyPlan[day]?.[slot])))
@@ -2490,7 +2547,36 @@ export default function Home() {
                       <b>{zeptoStatusLabel}</b>
                       <span>{zeptoStatusDescription}</span>
                     </div>
-                    <button type="button" onClick={syncNativeCartToZepto} disabled={isZeptoSyncing || checkoutItems.length === 0}>
+                    <label className="zepto-sync-address">
+                      <span>Delivery address</span>
+                      <select
+                        aria-label="Zepto delivery address for cart sync"
+                        value={selectedZeptoAddress}
+                        disabled={isZeptoAddressLoading || zeptoSavedAddressOptions.length === 0}
+                        onChange={(e) => selectZeptoSyncAddress(e.target.value)}
+                      >
+                        <option value="">
+                          {isZeptoAddressLoading ? "Loading Zepto addresses..." : "Select delivery address"}
+                        </option>
+                        {zeptoSavedAddressOptions.map((option, idx) => {
+                          const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                          const address = formatZeptoAddressParts(option, `Address ${idx + 1}`);
+                          return (
+                            <option key={`${value}-${idx}`} value={value}>
+                              {address.detail ? `${address.title} — ${address.detail}` : address.title}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {zeptoAddressLoadError && (
+                        <small className="zepto-address-error">{zeptoAddressLoadError}</small>
+                      )}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={syncNativeCartToZepto}
+                      disabled={isZeptoSyncing || checkoutItems.length === 0 || !selectedZeptoAddress}
+                    >
                       {isZeptoSyncing ? "Moving to Zepto..." : "Move to Zepto cart"}
                     </button>
                   </article>
@@ -2578,42 +2664,16 @@ export default function Home() {
                     <article className="zepto-approval-card">
                       <div className="zepto-approval-heading">
                         <h3>Address and payment</h3>
-                        <p>Select the Zepto address to use for this reviewed cart.</p>
+                        <p>This reviewed cart is locked to the address used for product availability.</p>
                       </div>
-                      {zeptoAddressOptions.length > 0 ? (
-                        <div className="zepto-address-options" role="radiogroup" aria-label="Zepto delivery address">
-                          <button
-                            type="button"
-                            className={`zepto-address-option ${selectedZeptoAddress ? "" : "selected"}`}
-                            aria-checked={!selectedZeptoAddress}
-                            role="radio"
-                            disabled={isUpdatingZeptoReview}
-                            onClick={() => selectZeptoAddressOption("")}
-                          >
-                            <span>Zepto default</span>
-                            <small>Use the current/default Zepto account address.</small>
-                          </button>
-                          {zeptoAddressOptions.map((option, idx) => {
-                            const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                            const address = formatZeptoAddressParts(option, `Address ${idx + 1}`);
-                            return (
-                              <button
-                                key={`${value}-${idx}`}
-                                type="button"
-                                className={`zepto-address-option ${selectedZeptoAddress === value ? "selected" : ""}`}
-                                aria-checked={selectedZeptoAddress === value}
-                                role="radio"
-                                disabled={isUpdatingZeptoReview}
-                                onClick={() => selectZeptoAddressOption(value)}
-                              >
-                                <span>{address.title}</span>
-                                {address.detail && <small>{address.detail}</small>}
-                              </button>
-                            );
-                          })}
+                      {selectedZeptoAddressDisplay ? (
+                        <div className="zepto-locked-address">
+                          <strong>{selectedZeptoAddressDisplay.title}</strong>
+                          {selectedZeptoAddressDisplay.detail && <span>{selectedZeptoAddressDisplay.detail}</span>}
+                          <small>Choose a different address above and sync again to change stores.</small>
                         </div>
                       ) : (
-                        <p className="zepto-address-empty">Zepto did not expose selectable address options. Kitch will use the current/default Zepto account address if you confirm.</p>
+                        <p className="zepto-address-empty">The reviewed cart has no confirmed delivery address. Sync again after selecting one.</p>
                       )}
 
                       <div className="zepto-payment-control">

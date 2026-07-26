@@ -141,8 +141,9 @@ Current routes:
 | `GET /api/recipe-grocery/plans/latest` | Returns the latest recipe+grocery artifact. |
 | `GET /api/recipe-grocery/plans/{id}` | Returns one recipe+grocery artifact. |
 | `POST /api/grocery/export` | Legacy provider payload preview. |
-| `GET /api/grocery/zepto/status` | Returns simplified Zepto readiness state for the UI. |
-| `POST /api/grocery/zepto/sync-cart` | Replaces Zepto cart from selected, non-stocked native cart rows and creates a review snapshot. |
+| `GET /api/grocery/zepto/status` | Returns Zepto configuration state; it does not claim store readiness. |
+| `GET /api/grocery/zepto/addresses` | Reads saved Zepto delivery addresses before cart sync. |
+| `POST /api/grocery/zepto/sync-cart` | Requires a saved address id, establishes store context, then replaces Zepto cart from selected, non-stocked native rows and creates a review snapshot. |
 | `GET /api/grocery/zepto/review/{review_id}` | Returns a saved Zepto review snapshot. |
 | `PATCH /api/grocery/zepto/review/{review_id}` | Updates review-only metadata such as address/payment selection and acknowledgement. |
 | `POST /api/grocery/zepto/place-order` | Places a Zepto order only after explicit frontend approval and token validation. |
@@ -255,11 +256,17 @@ sequenceDiagram
     participant Adapter as ZeptoProviderAdapter
     participant MCP as Zepto MCP
 
-    UI->>API: POST /api/grocery/zepto/sync-cart
+    UI->>API: GET /api/grocery/zepto/addresses
+    API->>Adapter: list_addresses()
+    Adapter->>MCP: List saved addresses
+    MCP-->>UI: Saved address options
+    UI->>UI: User selects delivery address
+    UI->>API: POST /api/grocery/zepto/sync-cart + address id
     API->>DB: Read native cart rows
     API->>API: Exclude unselected and pantry-covered rows
     API->>API: Apply household brand memory to search terms
-    API->>Adapter: sync_cart(mapped_items)
+    API->>Adapter: sync_cart(mapped_items, address id)
+    Adapter->>MCP: Select saved address / establish store
     Adapter->>MCP: Search products
     Adapter->>MCP: Replace Zepto cart
     Adapter->>MCP: View Zepto cart
@@ -275,10 +282,14 @@ Important rules:
 
 - User selection on the native cart means "include this row when moving to Zepto."
 - Pantry-covered rows are never included.
+- A saved delivery address is required before sync.
+- Product search cannot start until Zepto confirms store context for that address.
+- A review is locked to the address/store context used during product resolution.
+- Changing address requires a new cart sync; patching an existing review cannot change it.
 - Zepto sync can replace the current Zepto cart.
 - Prices and fees are shown only after Zepto returns them.
 - Actual address labels should be shown with address details when exposed by Zepto.
-- The UI should say "Signed in to Zepto," not expose MCP/OAuth implementation details.
+- The UI distinguishes "Zepto configured/connected" from "Zepto store ready."
 
 Why:
 

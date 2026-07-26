@@ -416,11 +416,14 @@ delivery order.
 ### Scenario 7.1 - Move Selected Native Cart Items to Zepto
 
 - Prerequisite: The native grocery cart contains at least two eligible,
-  selected items and the Zepto connection reports ready.
-- Prompt/action: Open **Groceries**, review the selected items, and click
-  **Move to Zepto cart**.
-- Expected behavior: Kitch sends the selected eligible items to Zepto and opens
-  a review showing the resolved Zepto products, quantities, and availability.
+  selected items, saved Zepto addresses load successfully, and the Zepto
+  connection reports configured.
+- Prompt/action: Open **Groceries**, review the selected items, choose a saved
+  delivery address, and click **Move to Zepto cart**.
+- Expected behavior: Kitch establishes Zepto store context for the selected
+  address before searching products, sends the selected eligible items to
+  Zepto, and opens a review showing the resolved products, quantities, and
+  availability.
 - Review check: Compare the native selection with the Zepto review. Every
   successfully resolved item should correspond to a selected native row;
   unavailable or substituted items should be clearly identified.
@@ -430,7 +433,9 @@ delivery order.
   represents the selected native items, and no order is placed.
 - Fail criteria: Nothing reaches the Zepto review, unrelated items are added,
   quantities are materially wrong without explanation, native rows change, or
-  the UI claims success after a provider failure.
+  the UI claims success after a provider failure. A missing or unserviceable
+  address must fail before product search rather than marking every grocery
+  item unavailable.
 
 ### Scenario 7.2 - Selection, Pantry Exclusion, and Repeat Sync
 

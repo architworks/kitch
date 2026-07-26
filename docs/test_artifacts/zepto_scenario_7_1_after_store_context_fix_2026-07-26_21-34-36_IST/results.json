@@ -1,0 +1,71 @@
+{
+  "run": {
+    "scenario": "7.1",
+    "title": "Move Selected Native Cart Items to Zepto",
+    "tested_at": "2026-07-26T21:34:36+05:30",
+    "environment": "local",
+    "status": "failed",
+    "order_placed": false
+  },
+  "action": {
+    "prompt": null,
+    "steps": [
+      "Open Groceries",
+      "Select the saved home Zepto delivery address",
+      "Click Move to Zepto cart",
+      "Review the result without confirming an order"
+    ],
+    "selected_native_rows": 32
+  },
+  "evidence": {
+    "saved_addresses_http_status": 200,
+    "saved_address_count": 9,
+    "sync_http_status": 200,
+    "store_context_state": "store_context_ready",
+    "frontend_review_visible": true,
+    "resolved_native_rows": 17,
+    "unavailable_native_rows": 15,
+    "direct_zepto_cart_rows": 17,
+    "direct_zepto_total_quantity": 40,
+    "native_cart_rows_after_sync": 32,
+    "confirm_order_enabled": false,
+    "order_request_made": false
+  },
+  "checks": [
+    {
+      "name": "saved address required before sync",
+      "status": "passed",
+      "observation": "Move to Zepto cart was disabled until the home address was selected."
+    },
+    {
+      "name": "store context established before product search",
+      "status": "passed",
+      "observation": "The sync completed with store_context_ready and the UI displayed Zepto store ready."
+    },
+    {
+      "name": "Zepto review is populated",
+      "status": "passed",
+      "observation": "The review displayed 17 resolved rows and 15 unavailable rows."
+    },
+    {
+      "name": "native cart is preserved",
+      "status": "passed",
+      "observation": "The durable grocery_cart still contained 32 rows after sync."
+    },
+    {
+      "name": "no order is placed",
+      "status": "passed",
+      "observation": "Confirm Order remained disabled and no order request was made."
+    },
+    {
+      "name": "resolved products accurately represent native items",
+      "status": "failed",
+      "observation": "Unrelated substitutions included almond-milk biscuits for Milk / Almond Milk, Ash Gourd for Green Beans, and cough syrup for Sugar-Free Syrup."
+    }
+  ],
+  "diagnosis": {
+    "original_store_context_issue": "resolved",
+    "remaining_issue": "The provider adapter accepts the first available Zepto search result without adequate relevance validation or SKU deduplication.",
+    "layer": "application product-matching logic"
+  }
+}

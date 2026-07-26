@@ -88,6 +88,7 @@ def _build_zepto_order_review(
     native_items: List[Dict[str, Any]],
     mapped_items: List[Dict[str, Any]],
     result: Dict[str, Any],
+    selected_address_id: str,
 ) -> Dict[str, Any]:
     review_id = f"zepto_review_{uuid4()}"
     matched_items = result.get("items") or []
@@ -101,6 +102,8 @@ def _build_zepto_order_review(
         order_blockers.append("Zepto address options could not be read.")
     if checkout_context.get("payment_error"):
         order_blockers.append("Zepto payment options could not be read.")
+    if result.get("store_context", {}).get("status") != "ready":
+        order_blockers.append("Zepto store context is not ready for the selected address.")
 
     can_place_order = len(order_blockers) == 0
     confirmation_token = f"kitch_confirm_{uuid4()}" if can_place_order else None
@@ -115,8 +118,9 @@ def _build_zepto_order_review(
         "unavailable_items": unavailable_items,
         "zepto_cart": result.get("zepto_cart"),
         "checkout_context": checkout_context,
+        "store_context": result.get("store_context") or {},
         "available_tools": result.get("available_tools") or [],
-        "selected_address_id": None,
+        "selected_address_id": selected_address_id,
         "selected_payment_method_id": None,
         "order_review_acknowledged": False,
         "can_place_order": can_place_order,
@@ -638,7 +642,7 @@ async def export_grocery_endpoint(payload: Dict[str, Any]):
 
 @app.get("/api/grocery/zepto/status")
 async def zepto_status_endpoint():
-    """Returns Zepto MCP configuration/auth status for the grocery review UI."""
+    """Returns Zepto MCP configuration status for the grocery review UI."""
     try:
         return ZeptoProviderAdapter().status()
     except Exception as e:
@@ -649,6 +653,37 @@ async def zepto_status_endpoint():
             "message": str(e),
         }
 
+@app.get("/api/grocery/zepto/addresses")
+async def zepto_addresses_endpoint():
+    """Returns saved addresses so the user can choose store context before sync."""
+    try:
+        result = await ZeptoProviderAdapter().list_addresses()
+        if result.get("status") != "success":
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "detail": {
+                        "code": result.get("code", "zepto_address_lookup_failed"),
+                        "message": result.get("message", "Kitch could not read Zepto delivery addresses."),
+                        "provider": "zepto",
+                        "retryable": True,
+                    }
+                },
+            )
+        return result
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": {
+                    "code": "zepto_address_lookup_failed",
+                    "message": "Kitch could not read Zepto delivery addresses.",
+                    "provider": "zepto",
+                    "retryable": True,
+                }
+            },
+        )
+
 @app.post("/api/grocery/zepto/sync-cart")
 async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
     """
@@ -658,6 +693,20 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
     try:
         payload = payload or {}
         selected_ids = {str(i) for i in payload.get("cart_item_ids", [])}
+        selected_address_id = str(payload.get("selected_address_id") or "").strip()
+        if not selected_address_id:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "zepto_address_required",
+                        "message": "Select a Zepto delivery address before moving items to the cart.",
+                        "provider": "zepto",
+                        "retryable": False,
+                    }
+                },
+            )
+
         cart_items = get_grocery_cart()
         export_items = [
             item for item in cart_items
@@ -666,8 +715,33 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
         ]
 
         mapped_items = await apply_brand_memory_to_cart_items(export_items)
-        result = await ZeptoProviderAdapter().sync_cart(mapped_items)
-        review = _build_zepto_order_review(export_items, mapped_items, result)
+        result = await ZeptoProviderAdapter().sync_cart(
+            mapped_items,
+            selected_address_id=selected_address_id,
+        )
+        if result.get("status") == "error" and result.get("code") in {
+            "address_required",
+            "missing_select_address_tool",
+            "store_context_unavailable",
+        }:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "detail": {
+                        "code": result.get("code"),
+                        "message": result.get("message"),
+                        "provider": "zepto",
+                        "retryable": result.get("code") != "missing_select_address_tool",
+                    }
+                },
+            )
+
+        review = _build_zepto_order_review(
+            export_items,
+            mapped_items,
+            result,
+            selected_address_id,
+        )
         return {
             "status": result.get("status", "error"),
             "provider": "zepto",
@@ -702,7 +776,6 @@ async def update_zepto_review_endpoint(review_id: str, payload: Dict[str, Any]):
     """
     review = _get_zepto_review(review_id)
     allowed_fields = (
-        "selected_address_id",
         "selected_payment_method_id",
         "order_review_acknowledged",
     )
