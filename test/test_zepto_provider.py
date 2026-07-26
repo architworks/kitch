@@ -8,16 +8,26 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from dotenv import load_dotenv
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
+load_dotenv(ROOT / "backend" / ".env")
 
+from app.main import _review_hash  # noqa: E402
 from app.providers.zepto import ZeptoProviderAdapter  # noqa: E402
 
 
 class FakeSession:
-    def __init__(self, *, selection_error: str | None = None):
+    def __init__(
+        self,
+        *,
+        selection_error: str | None = None,
+        cart_payload: dict | None = None,
+    ):
         self.selection_error = selection_error
+        self.cart_payload = cart_payload
         self.calls: list[tuple[str, dict]] = []
         self.tools = [
             SimpleNamespace(
@@ -117,7 +127,7 @@ class FakeSession:
         if name == "update_cart":
             return {"isError": False, "structuredContent": {"updated": True}}
         if name == "view_cart":
-            return {
+            return self.cart_payload or {
                 "isError": False,
                 "structuredContent": {
                     "items": [
@@ -224,6 +234,112 @@ class ZeptoAddressFirstTests(unittest.TestCase):
             result["addresses"]["structuredContent"]["addresses"][0]["id"],
             "address-1",
         )
+
+    def test_normalizes_complete_cart_summary_from_provider_payload(self):
+        session = FakeSession(
+            cart_payload={
+                "isError": False,
+                "structuredContent": {
+                    "cart": {
+                        "subtotal": 42900,
+                        "discountAmount": 2500,
+                        "deliveryFee": 1900,
+                        "handlingFee": 900,
+                        "grandTotal": 45300,
+                        "currency": "INR",
+                    }
+                },
+            }
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(
+            adapter.sync_cart(
+                [{"id": 1, "name": "Milk", "amount": 1, "unit": "pack"}],
+                selected_address_id="address-1",
+            )
+        )
+
+        self.assertEqual(
+            result["cart_summary"],
+            {
+                "currency": "INR",
+                "subtotal_minor": 42900,
+                "discount_minor": 2500,
+                "fees": [
+                    {"label": "Delivery fee", "amount_minor": 1900},
+                    {"label": "Handling fee", "amount_minor": 900},
+                ],
+                "total_minor": 45300,
+            },
+        )
+
+    def test_cart_summary_keeps_missing_provider_values_null(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {
+                "structuredContent": {
+                    "cart": {
+                        "subtotal": "₹429.50",
+                        "fees": [{"label": "Rain fee", "amount": "₹12"}],
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(summary["subtotal_minor"], 42950)
+        self.assertEqual(summary["fees"], [{"label": "Rain fee", "amount_minor": 1200}])
+        self.assertIsNone(summary["discount_minor"])
+        self.assertIsNone(summary["total_minor"])
+
+    def test_malformed_cart_summary_does_not_invent_totals(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {
+                "structuredContent": {
+                    "items": [{"name": "Milk", "price": 9900}],
+                    "total": "not available",
+                }
+            }
+        )
+
+        self.assertEqual(
+            summary,
+            {
+                "currency": "INR",
+                "subtotal_minor": None,
+                "discount_minor": None,
+                "fees": [],
+                "total_minor": None,
+            },
+        )
+
+    def test_review_hash_covers_the_provider_cart_summary(self):
+        review = {
+            "native_items": [{"id": 1, "name": "Milk"}],
+            "matched_items": [{"native_item": {"id": 1}}],
+            "selected_address_id": "address-1",
+            "cart_summary": {
+                "currency": "INR",
+                "subtotal_minor": 9900,
+                "discount_minor": None,
+                "fees": [],
+                "total_minor": 9900,
+            },
+        }
+
+        original_hash = _review_hash(review)
+        changed_review = {
+            **review,
+            "cart_summary": {
+                **review["cart_summary"],
+                "total_minor": 10900,
+            },
+        }
+
+        self.assertNotEqual(original_hash, _review_hash(changed_review))
 
 
 if __name__ == "__main__":

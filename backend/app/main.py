@@ -69,6 +69,7 @@ def _review_hash(review: Dict[str, Any]) -> str:
         "matched_items": review.get("matched_items", []),
         "unavailable_items": review.get("unavailable_items", []),
         "zepto_cart": review.get("zepto_cart"),
+        "cart_summary": review.get("cart_summary"),
         "selected_address_id": review.get("selected_address_id"),
         "selected_payment_method_id": review.get("selected_payment_method_id"),
     }
@@ -117,6 +118,13 @@ def _build_zepto_order_review(
         "matched_items": matched_items,
         "unavailable_items": unavailable_items,
         "zepto_cart": result.get("zepto_cart"),
+        "cart_summary": result.get("cart_summary") or {
+            "currency": "INR",
+            "subtotal_minor": None,
+            "discount_minor": None,
+            "fees": [],
+            "total_minor": None,
+        },
         "checkout_context": checkout_context,
         "store_context": result.get("store_context") or {},
         "available_tools": result.get("available_tools") or [],

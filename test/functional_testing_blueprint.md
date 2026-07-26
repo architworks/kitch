@@ -407,26 +407,35 @@ recommending items already stocked.
 - Fail criteria: Image ignored, pantry not updated, or remaining grocery list
   ignores visible stocked items.
 
-## Section 7: Zepto Cart Integration
+## Section 7: Ordering App Integration
 
 These scenarios verify the essential handoff from Kitch's durable native
-grocery cart to Zepto. They stop at cart review and must not place a real
-delivery order.
+grocery cart to the selected ordering app. Zepto is the current live provider;
+Blinkit is a disabled future option. These tests stop before real order
+placement.
 
 ### Scenario 7.1 - Move Selected Native Cart Items to Zepto
 
 - Prerequisite: The native grocery cart contains at least two eligible,
   selected items, saved Zepto addresses load successfully, and the Zepto
   connection reports configured.
-- Prompt/action: Open **Groceries**, review the selected items, choose a saved
-  delivery address, and click **Move to Zepto cart**.
+- Workflow check: Open **Groceries** and confirm the main column shows the five
+  chronological stages: native cart, ordering app, address and transfer, Zepto
+  cart review, and payment and order. Later stages must remain visible but
+  locked until their prerequisites are satisfied.
+- Provider check: Confirm Zepto is selected by default. Blinkit must show
+  **Coming soon**, remain disabled, and issue no provider requests.
+- Prompt/action: Review the selected items, choose a saved delivery address,
+  and click **Move to Zepto cart** from the main workflow.
 - Expected behavior: Kitch establishes Zepto store context for the selected
   address before searching products, sends the selected eligible items to
   Zepto, and opens a review showing the resolved products, quantities, and
   availability.
 - Review check: Compare the native selection with the Zepto review. Every
   successfully resolved item should correspond to a selected native row;
-  unavailable or substituted items should be clearly identified.
+  unavailable or substituted items should be clearly identified. Review the
+  returned subtotal, discounts, fee lines, and total. Missing provider amounts
+  must say they are unavailable rather than showing an estimate or zero.
 - Native-state check: Syncing to Zepto must not delete, check off, or otherwise
   mutate the durable native grocery cart.
 - Concurrency and loading check: Start the sync and, while it is running,
@@ -434,9 +443,10 @@ delivery order.
   that selection, quantity, unit, add, delete, clear, quick-action, and address
   controls are disabled. If a native-cart save is already in progress, the
   Zepto sync must wait rather than snapshotting stale values.
-- Pass criteria: The sync completes, the Zepto review is visible and accurately
-  represents the selected native items, the cart stays locked only for the
-  duration of the request, and no order is placed.
+- Pass criteria: The sync completes, the prominent **Zepto cart review**
+  accurately represents the selected native items and provider-returned total,
+  the cart stays locked only for the duration of the request, payment/order
+  controls unlock only after review, and no order is placed.
 - Fail criteria: Nothing reaches the Zepto review, unrelated items are added,
   quantities are materially wrong without explanation, native rows change, or
   the UI claims success after a provider failure. A missing or unserviceable
@@ -453,8 +463,13 @@ delivery order.
   Zepto. Unselected and already-stocked rows are excluded. Repeating the same
   sync should refresh or reproduce the same reviewed cart rather than
   multiplying quantities or creating duplicate products.
-- Pass criteria: The review respects selection and pantry coverage, and the
-  second sync remains equivalent without duplicates.
+- Stale-review check: After a successful sync, change a native quantity,
+  selection, delivery address, or provider choice. The old provider review,
+  payment state, and acknowledgement must be invalidated, and order placement
+  must remain locked until another sync.
+- Pass criteria: The review respects selection and pantry coverage, the second
+  sync remains equivalent without duplicates, and any later native/provider
+  change invalidates the old review before ordering.
 - Fail criteria: Unselected or pantry-covered items are sent, selected eligible
   items disappear without explanation, or the retry duplicates products or
   quantities.

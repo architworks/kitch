@@ -89,7 +89,9 @@ Current duties:
 
 - Render the household dashboard.
 - Render the Recipes page for recipe+grocery artifacts.
-- Render the Groceries page for native cart review and Zepto checkout prep.
+- Render the Groceries page as a provider-neutral, five-step checkout workflow.
+- Show Zepto as the current live ordering app and Blinkit as a disabled future
+  provider without exposing unusable actions.
 - Render individual nutrition state.
 - Render shared weekly plan state.
 - Render pantry/grocery state from backend APIs.
@@ -243,9 +245,11 @@ Why this model:
 
 ---
 
-## Native Cart to Zepto Flow
+## Native Cart to Ordering Provider Flow
 
-Location: `backend/app/providers/zepto.py`
+The frontend flow is provider-neutral. Its current live adapter is
+`backend/app/providers/zepto.py`, and the existing Zepto-specific HTTP routes
+remain unchanged.
 
 ```mermaid
 sequenceDiagram
@@ -271,8 +275,8 @@ sequenceDiagram
     Adapter->>MCP: Search products
     Adapter->>MCP: Replace Zepto cart
     Adapter->>MCP: View Zepto cart
-    Adapter-->>API: Cart result + unavailable rows
-    API->>API: Save review snapshot + token
+    Adapter-->>API: Cart result + unavailable rows + normalized totals
+    API->>API: Save review snapshot + totals + token
     API-->>UI: Review snapshot
     UI->>UI: Close dialog; unlock edits; show review
     UI->>API: PATCH review selections/acknowledgement
@@ -284,6 +288,9 @@ Important rules:
 
 - User selection on the native cart means "include this row when moving to Zepto."
 - Pantry-covered rows are never included.
+- The main page chronology is native cart, ordering app, address and transfer,
+  provider cart review, then payment and order.
+- Zepto is selected by default. Blinkit is disabled and cannot issue API calls.
 - A saved delivery address is required before sync.
 - Zepto sync cannot start while a native-cart write is still in flight.
 - Once sync starts, the frontend disables native-cart selection, quantity,
@@ -291,9 +298,12 @@ Important rules:
   dialog retains focus until the request succeeds or fails.
 - Product search cannot start until Zepto confirms store context for that address.
 - A review is locked to the address/store context used during product resolution.
-- Changing address requires a new cart sync; patching an existing review cannot change it.
+- Changing the native cart, selection, provider, or address invalidates the
+  current review and requires a new cart sync.
 - Zepto sync can replace the current Zepto cart.
-- Prices and fees are shown only after Zepto returns them.
+- The backend exposes normalized `cart_summary` values in minor currency units.
+  Missing prices or totals remain unavailable and are never estimated.
+- The cart summary is included in the review snapshot hash.
 - Actual address labels should be shown with address details when exposed by Zepto.
 - The UI distinguishes "Zepto configured/connected" from "Zepto store ready."
 

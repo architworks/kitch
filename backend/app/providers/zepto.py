@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import timedelta
 from typing import Any, Dict, List
 
@@ -247,6 +249,7 @@ class ZeptoProviderAdapter:
                 "items": matched_items,
                 "unavailable_items": unavailable_items,
                 "zepto_cart": zepto_cart,
+                "cart_summary": self.normalize_cart_summary(zepto_cart),
                 "checkout_context": checkout_context,
                 "store_context": store_context,
                 "available_tools": list(tools.keys()),
@@ -324,6 +327,7 @@ class ZeptoProviderAdapter:
             "items": matched_items,
             "unavailable_items": unavailable_items,
             "zepto_cart": zepto_cart,
+            "cart_summary": self.normalize_cart_summary(zepto_cart),
             "checkout_context": checkout_context,
             "store_context": store_context,
             "available_tools": list(tools.keys()),
@@ -339,7 +343,12 @@ class ZeptoProviderAdapter:
                 if not get_cart_tool:
                     return self._error("missing_get_cart_tool", "Could not find a Zepto MCP tool to fetch the cart.", available_tools=list(tools.keys()))
                 cart = await self._call_tool(session, get_cart_tool, self._build_empty_or_default_args(tools[get_cart_tool]))
-                return {"status": "success", "provider": "zepto", "zepto_cart": cart}
+                return {
+                    "status": "success",
+                    "provider": "zepto",
+                    "zepto_cart": cart,
+                    "cart_summary": self.normalize_cart_summary(cart),
+                }
         except Exception as exc:
             return self._error("mcp_get_cart_failed", f"Zepto MCP cart read failed: {exc}")
 
@@ -360,6 +369,185 @@ class ZeptoProviderAdapter:
 
     def _error(self, code: str, message: str, **extra: Any) -> Dict[str, Any]:
         return {"status": "error", "provider": "zepto", "code": code, "message": message, **extra}
+
+    def normalize_cart_summary(self, payload: Any) -> Dict[str, Any]:
+        """Extract provider-returned totals without estimating missing values."""
+        summary: Dict[str, Any] = {
+            "currency": "INR",
+            "subtotal_minor": None,
+            "discount_minor": None,
+            "fees": [],
+            "total_minor": None,
+        }
+        objects: List[Dict[str, Any]] = []
+        self._collect_payload_objects(payload, objects)
+
+        summary["currency"] = self._first_text_value(
+            objects,
+            ("currency", "currency_code", "currencyCode"),
+        ) or "INR"
+        summary["subtotal_minor"] = self._first_minor_value(
+            objects,
+            (
+                "subtotal_minor",
+                "subtotal",
+                "sub_total",
+                "cart_subtotal",
+                "cartSubtotal",
+                "item_total",
+                "itemTotal",
+                "items_total",
+                "itemsTotal",
+            ),
+        )
+        summary["discount_minor"] = self._first_minor_value(
+            objects,
+            (
+                "discount_minor",
+                "discount",
+                "discount_amount",
+                "discountAmount",
+                "total_discount",
+                "totalDiscount",
+                "savings",
+            ),
+        )
+        if summary["discount_minor"] is not None:
+            summary["discount_minor"] = abs(summary["discount_minor"])
+        summary["total_minor"] = self._first_minor_value(
+            objects,
+            (
+                "total_minor",
+                "grand_total",
+                "grandTotal",
+                "total_amount",
+                "totalAmount",
+                "payable_amount",
+                "payableAmount",
+                "amount_payable",
+                "amountPayable",
+                "final_total",
+                "finalTotal",
+                "cart_total",
+                "cartTotal",
+            ),
+        )
+
+        fee_aliases = (
+            ("Delivery fee", ("delivery_fee", "deliveryFee", "delivery_charge", "deliveryCharge")),
+            ("Handling fee", ("handling_fee", "handlingFee", "handling_charge", "handlingCharge")),
+            ("Platform fee", ("platform_fee", "platformFee")),
+            ("Small cart fee", ("small_cart_fee", "smallCartFee")),
+            ("Surge fee", ("surge_fee", "surgeFee", "surge_charge", "surgeCharge")),
+        )
+        fees: List[Dict[str, Any]] = []
+        for label, aliases in fee_aliases:
+            amount_minor = self._first_minor_value(objects, aliases)
+            if amount_minor is not None:
+                fees.append({"label": label, "amount_minor": amount_minor})
+
+        if not fees:
+            fees = self._first_fee_list(objects)
+        summary["fees"] = fees
+        return summary
+
+    def _collect_payload_objects(self, value: Any, objects: List[Dict[str, Any]]) -> None:
+        if isinstance(value, dict):
+            objects.append(value)
+            text = value.get("text")
+            if isinstance(text, str):
+                try:
+                    self._collect_payload_objects(json.loads(text), objects)
+                except json.JSONDecodeError:
+                    pass
+            for child in value.values():
+                self._collect_payload_objects(child, objects)
+        elif isinstance(value, list):
+            for child in value:
+                self._collect_payload_objects(child, objects)
+
+    def _first_text_value(
+        self,
+        objects: List[Dict[str, Any]],
+        keys: tuple[str, ...],
+    ) -> str | None:
+        for item in objects:
+            for key in keys:
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip().upper()
+        return None
+
+    def _first_minor_value(
+        self,
+        objects: List[Dict[str, Any]],
+        keys: tuple[str, ...],
+    ) -> int | None:
+        for item in objects:
+            for key in keys:
+                if key in item:
+                    value = self._to_minor_units(item.get(key))
+                    if value is not None:
+                        return value
+        return None
+
+    def _first_fee_list(self, objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for item in objects:
+            raw_fees = item.get("fees") or item.get("fee_breakdown") or item.get("feeBreakdown")
+            if not isinstance(raw_fees, list):
+                continue
+
+            fees: List[Dict[str, Any]] = []
+            for index, fee in enumerate(raw_fees):
+                if not isinstance(fee, dict):
+                    continue
+                label = (
+                    fee.get("label")
+                    or fee.get("name")
+                    or fee.get("title")
+                    or f"Fee {index + 1}"
+                )
+                amount = self._to_minor_units(
+                    fee.get("amount_minor")
+                    if "amount_minor" in fee
+                    else fee.get("amount", fee.get("value"))
+                )
+                if amount is not None:
+                    fees.append({"label": str(label), "amount_minor": amount})
+            if fees:
+                return fees
+        return []
+
+    def _to_minor_units(self, value: Any) -> int | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, dict):
+            for key in ("amount_minor", "amount", "value"):
+                if key in value:
+                    return self._to_minor_units(value[key])
+            return None
+        if isinstance(value, (int, float, Decimal)):
+            try:
+                return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            except (InvalidOperation, ValueError):
+                return None
+        if not isinstance(value, str):
+            return None
+
+        text = value.strip()
+        if not text:
+            return None
+        is_major_currency = "₹" in text or re.search(r"\b(?:INR|RS\.?)\b", text, re.IGNORECASE)
+        numeric = re.sub(r"[^0-9.\-]", "", text.replace(",", ""))
+        if not numeric or numeric in {"-", ".", "-."}:
+            return None
+        try:
+            amount = Decimal(numeric)
+            if is_major_currency:
+                amount *= 100
+            return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except InvalidOperation:
+            return None
 
     def _session(self):
         try:

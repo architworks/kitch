@@ -414,6 +414,11 @@ npx -y mcp-remote https://mcp.zepto.co.in/mcp
 Current behavior:
 
 - Kitch syncs selected native cart rows into Zepto only through backend provider endpoints.
+- The Groceries UI uses provider-neutral state and metadata. Zepto is the live
+  default provider; Blinkit is a disabled `Coming soon` placeholder.
+- Checkout actions appear in one main-column sequence: native review, provider
+  choice, delivery address and transfer, provider cart review, then payment and
+  order. Sidebar cards contain summaries and cart-maintenance shortcuts.
 - The frontend loads saved Zepto addresses and requires the user to choose one before sync.
 - The frontend waits for pending native-cart writes before sync, then locks cart
   editing behind a modal, focus-retaining transfer animation until the provider
@@ -425,9 +430,15 @@ Current behavior:
   confirmed only after address selection succeeds.
 - A review remains locked to the address used for product resolution; changing
   address requires a fresh sync.
+- Native-cart or provider-selection changes also invalidate the review so a
+  stale snapshot cannot be ordered.
 - Existing Zepto cart is replaced before sync.
 - Unavailable/unresolved items are returned in the review.
-- Zepto cart details are shown as "Zepto Cart" in the UI, not "matched products."
+- The adapter normalizes provider-returned subtotal, discount, fee, and total
+  values into `cart_summary`; absent values stay null and are not estimated.
+- `cart_summary` is covered by the review snapshot hash.
+- Provider cart details are presented as a cart review, not internal matching
+  terminology.
 - Address labels are expanded with actual address text when Zepto exposes it.
 - Order placement requires final frontend approval.
 
