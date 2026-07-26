@@ -702,6 +702,8 @@ export default function Home() {
   const [isUpdatingZeptoReview, setIsUpdatingZeptoReview] = useState(false);
   const [excludedZeptoItemIds, setExcludedZeptoItemIds] = useState([]);
   const [isZeptoSyncing, setIsZeptoSyncing] = useState(false);
+  const [zeptoSyncStage, setZeptoSyncStage] = useState("idle");
+  const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingZeptoOrder, setIsPlacingZeptoOrder] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
@@ -718,6 +720,10 @@ export default function Home() {
   const [groceryCustomAmount, setGroceryCustomAmount] = useState(1);
   const [groceryCustomUnit, setGroceryCustomUnit] = useState("piece");
   const [groceryCustomCat, setGroceryCustomCat] = useState("Fresh Produce");
+  const groceryMutationCountRef = useRef(0);
+  const zeptoSyncInFlightRef = useRef(false);
+  const zeptoSyncTimersRef = useRef([]);
+  const zeptoSyncDialogRef = useRef(null);
 
   const applyConfirmedGroceryCart = useCallback((items) => {
     const confirmedItems = Array.isArray(items) ? items : [];
@@ -865,6 +871,34 @@ export default function Home() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (!isZeptoSyncing) return undefined;
+
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => {
+      zeptoSyncDialogRef.current?.focus();
+    });
+    const keepFocusInDialog = (event) => {
+      if (event.key === "Escape" || event.key === "Tab") {
+        event.preventDefault();
+        zeptoSyncDialogRef.current?.focus();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", keepFocusInDialog);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", keepFocusInDialog);
+      if (previousFocus instanceof HTMLElement) {
+        previousFocus.focus();
+      }
+    };
+  }, [isZeptoSyncing]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       setPlanningWeekDates(getUpcomingPlanningWeekDates());
     }, 0);
@@ -930,6 +964,30 @@ export default function Home() {
     setAlertBanner({ show: true, text });
   };
 
+  const beginGroceryMutation = () => {
+    groceryMutationCountRef.current += 1;
+    setGroceryMutationCount(groceryMutationCountRef.current);
+  };
+
+  const endGroceryMutation = () => {
+    groceryMutationCountRef.current = Math.max(0, groceryMutationCountRef.current - 1);
+    setGroceryMutationCount(groceryMutationCountRef.current);
+  };
+
+  const clearZeptoSyncTimers = () => {
+    zeptoSyncTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    zeptoSyncTimersRef.current = [];
+  };
+
+  const startZeptoSyncProgress = () => {
+    clearZeptoSyncTimers();
+    setZeptoSyncStage("preparing");
+    zeptoSyncTimersRef.current = [
+      window.setTimeout(() => setZeptoSyncStage("transferring"), 700),
+      window.setTimeout(() => setZeptoSyncStage("finalizing"), 6000)
+    ];
+  };
+
   const saveHouseholdProfile = async (dietType, size) => {
     const res = await fetch(apiUrl("/api/household/profile"), {
       method: "PATCH",
@@ -973,7 +1031,7 @@ export default function Home() {
   };
 
   const toggleZeptoItemSelection = (item) => {
-    if (!item || item.alreadyStocked) return;
+    if (zeptoSyncInFlightRef.current || !item || item.alreadyStocked) return;
     const key = cartItemKey(item);
     if (!key) return;
     setExcludedZeptoItemIds(prev => (
@@ -984,8 +1042,9 @@ export default function Home() {
   };
 
   const updateGroceryCartItemDetails = async (item, updates) => {
-    if (!item?.id) return;
+    if (zeptoSyncInFlightRef.current || !item?.id) return;
 
+    beginGroceryMutation();
     try {
       const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "PATCH",
@@ -1001,12 +1060,15 @@ export default function Home() {
       console.error("Failed to update grocery cart item", e);
       setCustomGroceryItems(confirmedGroceryItemsRef.current);
       triggerBannerAlert(apiErrorMessage(e, "Could not update the grocery item."));
+    } finally {
+      endGroceryMutation();
     }
   };
 
   const deleteGroceryCartItem = async (item) => {
-    if (!item?.id) return;
+    if (zeptoSyncInFlightRef.current || !item?.id) return;
 
+    beginGroceryMutation();
     try {
       const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "DELETE"
@@ -1019,10 +1081,15 @@ export default function Home() {
     } catch (e) {
       console.error("Failed to delete grocery cart item", e);
       triggerBannerAlert(apiErrorMessage(e, "Could not delete the grocery item."));
+    } finally {
+      endGroceryMutation();
     }
   };
 
   const clearPlannedGroceryRows = async () => {
+    if (zeptoSyncInFlightRef.current) return;
+
+    beginGroceryMutation();
     try {
       const res = await fetch(apiUrl("/api/grocery/cart/planned"), {
         method: "DELETE"
@@ -1036,11 +1103,13 @@ export default function Home() {
     } catch (e) {
       console.error("Failed to clear planned grocery rows", e);
       triggerBannerAlert(apiErrorMessage(e, "Could not clear planned grocery rows."));
+    } finally {
+      endGroceryMutation();
     }
   };
 
   const addCustomGroceryItem = async (name, category, amount = 1, unit = "piece") => {
-    if (!name.trim()) return;
+    if (zeptoSyncInFlightRef.current || !name.trim()) return;
 
     const requestedItem = {
       name: name.trim(),
@@ -1053,6 +1122,7 @@ export default function Home() {
       stockNote: ""
     };
 
+    beginGroceryMutation();
     try {
       const res = await fetch(apiUrl("/api/grocery/cart/items"), {
         method: "POST",
@@ -1071,10 +1141,17 @@ export default function Home() {
     } catch (e) {
       console.error("Failed to add grocery cart item", e);
       triggerBannerAlert(apiErrorMessage(e, "Could not add the grocery item."));
+    } finally {
+      endGroceryMutation();
     }
   };
 
   const syncNativeCartToZepto = async () => {
+    if (zeptoSyncInFlightRef.current) return;
+    if (groceryMutationCountRef.current > 0) {
+      triggerBannerAlert("Please wait for the native cart to finish saving before moving items to Zepto.");
+      return;
+    }
     if (checkoutItems.length === 0) {
       triggerBannerAlert("Select at least one native cart item for Zepto.");
       return;
@@ -1084,7 +1161,9 @@ export default function Home() {
       return;
     }
 
+    zeptoSyncInFlightRef.current = true;
     setIsZeptoSyncing(true);
+    startZeptoSyncProgress();
     try {
       const res = await fetch(apiUrl("/api/grocery/zepto/sync-cart"), {
         method: "POST",
@@ -1101,12 +1180,21 @@ export default function Home() {
       setSelectedZeptoAddress(review.selected_address_id || "");
       setSelectedZeptoPaymentMethod(review.selected_payment_method_id || "");
       setZeptoReviewAcknowledged(Boolean(review.order_review_acknowledged));
+      clearZeptoSyncTimers();
+      setZeptoSyncStage("complete");
+      await new Promise(resolve => window.setTimeout(resolve, 450));
       triggerBannerAlert(data.status === "success" ? "Zepto cart sync completed for review." : "Zepto cart sync needs attention.");
     } catch (e) {
       console.error("Failed to sync Zepto cart", e);
+      clearZeptoSyncTimers();
+      setZeptoSyncStage("failed");
+      await new Promise(resolve => window.setTimeout(resolve, 650));
       triggerBannerAlert(apiErrorMessage(e, "Failed to sync the native cart to Zepto."));
     } finally {
+      clearZeptoSyncTimers();
+      zeptoSyncInFlightRef.current = false;
       setIsZeptoSyncing(false);
+      setZeptoSyncStage("idle");
       syncZeptoStatus();
     }
   };
@@ -1139,6 +1227,7 @@ export default function Home() {
   };
 
   const selectZeptoSyncAddress = (value) => {
+    if (zeptoSyncInFlightRef.current) return;
     setSelectedZeptoAddress(value);
     setZeptoCartReview(null);
     setSelectedZeptoPaymentMethod("");
@@ -1641,6 +1730,120 @@ export default function Home() {
           </linearGradient>
         </defs>
       </svg>
+
+      {isZeptoSyncing && (
+        <div className="zepto-transfer-overlay">
+          <section
+            ref={zeptoSyncDialogRef}
+            className={`zepto-transfer-dialog stage-${zeptoSyncStage}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="zepto-transfer-title"
+            aria-describedby="zepto-transfer-description"
+            tabIndex={-1}
+          >
+            <div className="zepto-transfer-visual" aria-hidden="true">
+              <svg viewBox="0 0 680 220">
+                <defs>
+                  <linearGradient id="transferGlow" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#eff7df" />
+                    <stop offset="100%" stopColor="#fff8ec" />
+                  </linearGradient>
+                  <linearGradient id="bagPaper" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#e9c78b" />
+                    <stop offset="100%" stopColor="#cfa45e" />
+                  </linearGradient>
+                  <linearGradient id="zeptoPurple" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#8c62d8" />
+                    <stop offset="100%" stopColor="#573099" />
+                  </linearGradient>
+                </defs>
+                <path className="transfer-glow" d="M90 184C130 55 260 18 366 71c89 44 141-9 223 45v68H90Z" fill="url(#transferGlow)" />
+                <g className="kitch-transfer-bag">
+                  <path d="M91 87h128l17 112H75L91 87Z" fill="url(#bagPaper)" />
+                  <path d="M113 95c2-35 17-52 42-52s40 17 42 52" fill="none" stroke="#b98a47" strokeWidth="10" strokeLinecap="round" />
+                  <circle cx="115" cy="73" r="25" fill="#76a35a" />
+                  <circle cx="148" cy="65" r="31" fill="#557f45" />
+                  <circle cx="183" cy="75" r="25" fill="#8aad63" />
+                  <path d="M102 75c-20-31-12-52-1-57 17 9 22 29 12 57M137 57c-4-34 7-50 21-53 13 17 10 38-5 57M184 68c8-29 23-39 36-36 6 20-6 36-25 46" fill="#638b4d" />
+                  <circle cx="166" cy="92" r="19" fill="#df6645" />
+                  <path d="m156 75 10 8 10-8-4 12" fill="#3c713a" />
+                  <path d="M126 132c18-17 38-17 56 0v34h-56v-34Z" fill="none" stroke="#69834d" strokeWidth="6" />
+                  <path d="M139 145v15m14-19v19m14-15v15" stroke="#69834d" strokeWidth="4" strokeLinecap="round" />
+                </g>
+                <path className="transfer-dash-path" d="M245 112c72-58 130-58 196 0" fill="none" stroke="#82915b" strokeWidth="4" strokeDasharray="10 12" strokeLinecap="round" />
+                <path d="m430 96 15 18-23 5" fill="none" stroke="#82915b" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                <g className="zepto-flying-grocery">
+                  <circle cx="273" cy="81" r="13" fill="#dd6543" />
+                  <path d="m266 67 7 7 8-8" fill="none" stroke="#4f7f43" strokeWidth="4" />
+                  <path d="M296 63c18-9 30-4 34 4-9 14-21 17-34 9Z" fill="#6d9e55" />
+                </g>
+                <g className="zepto-transfer-basket">
+                  <path d="M460 100h150l-13 92H473l-13-92Z" fill="url(#zeptoPurple)" />
+                  <path d="M483 113c8-55 94-55 103 0" fill="none" stroke="#3f246f" strokeWidth="11" strokeLinecap="round" />
+                  <path d="M466 113h138" stroke="#a985ea" strokeWidth="9" strokeLinecap="round" />
+                  <circle cx="493" cy="100" r="20" fill="#df6645" />
+                  <path d="m485 83 8 8 9-9" fill="none" stroke="#477b3e" strokeWidth="5" />
+                  <path d="M527 98c-8-27 2-43 15-47 14 15 12 34-2 51M557 101c8-30 23-39 36-34 4 18-6 33-26 42" fill="#6b9852" />
+                  <text x="535" y="160" textAnchor="middle" fill="#fff" fontSize="29" fontWeight="800">zepto</text>
+                </g>
+                <circle className="transfer-spark spark-one" cx="334" cy="42" r="5" fill="#b8ce75" />
+                <circle className="transfer-spark spark-two" cx="425" cy="55" r="4" fill="#d1df9c" />
+                <path className="transfer-spark spark-three" d="m626 53 5 10 10 5-10 5-5 10-5-10-10-5 10-5Z" fill="#b8ce75" />
+              </svg>
+            </div>
+
+            <div className="zepto-transfer-copy">
+              <span className="zepto-transfer-kicker">Secure cart handoff</span>
+              <h2 id="zepto-transfer-title">
+                {zeptoSyncStage === "complete"
+                  ? "Your Zepto cart is ready"
+                  : zeptoSyncStage === "failed"
+                    ? "The transfer needs attention"
+                    : "Moving your items to Zepto…"}
+              </h2>
+              <p id="zepto-transfer-description">
+                {zeptoSyncStage === "complete"
+                  ? "The reviewed products and unavailable items are ready for you to inspect."
+                  : zeptoSyncStage === "failed"
+                    ? "Kitch could not complete the handoff. Your native cart was left unchanged."
+                    : "We’ve paused cart editing while Zepto selects your store, matches products, and builds the review."}
+              </p>
+            </div>
+
+            <div className="zepto-transfer-progress" aria-label="Zepto cart transfer progress">
+              {[
+                ["preparing", "Preparing your list"],
+                ["transferring", "Matching Zepto items"],
+                ["finalizing", "Building cart review"]
+              ].map(([stage, label], index, stages) => {
+                const currentIndex = stages.findIndex(([candidate]) => candidate === zeptoSyncStage);
+                const isComplete = zeptoSyncStage === "complete" || currentIndex > index;
+                const isActive = currentIndex === index;
+                return (
+                  <div key={stage} className={`zepto-transfer-step ${isComplete ? "complete" : ""} ${isActive ? "active" : ""}`}>
+                    <span className="zepto-step-indicator">{isComplete ? "✓" : index + 1}</span>
+                    <strong>{label}</strong>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="zepto-transfer-note">
+              <span className="zepto-transfer-note-icon" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+              <div>
+                <strong>{zeptoSyncStage === "finalizing" ? "Almost there!" : "Your cart is locked for consistency"}</strong>
+                <span>
+                  {checkoutItems.length} selected {checkoutItems.length === 1 ? "item is" : "items are"} being processed.
+                  Please keep this window open.
+                </span>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {scanningOverlay.active && (
         <div id="vision-scanner" className="vision-scanner-overlay active">
@@ -2410,8 +2613,8 @@ export default function Home() {
                   <p>Review Kitch’s household cart before moving eligible items to Zepto.</p>
                 </div>
                 <div className="grocery-header-actions">
-                  <button type="button" onClick={() => setActiveTab("recipes")}>Import from recipe</button>
-                  <button type="button" onClick={() => setChatInput("Add groceries for tomorrow to the native grocery cart")}>Ask Kitch</button>
+                  <button type="button" disabled={isZeptoSyncing} onClick={() => setActiveTab("recipes")}>Import from recipe</button>
+                  <button type="button" disabled={isZeptoSyncing} onClick={() => setChatInput("Add groceries for tomorrow to the native grocery cart")}>Ask Kitch</button>
                 </div>
               </div>
 
@@ -2462,7 +2665,7 @@ export default function Home() {
                                     type="checkbox"
                                     aria-label={`Add ${item.name} to Zepto`}
                                     checked={selectedForZepto}
-                                    disabled={item.alreadyStocked}
+                                    disabled={item.alreadyStocked || isZeptoSyncing}
                                     onChange={() => toggleZeptoItemSelection(item)}
                                   />
                                 </label>
@@ -2471,24 +2674,26 @@ export default function Home() {
                                   <span>{item.source === "manual" ? "Manual" : "Recipe planned"}{item.stockNote ? ` · ${item.stockNote}` : ""}</span>
                                 </div>
                                 <div className="native-cart-quantity">
-                                  <button type="button" onClick={() => updateGroceryCartItemDetails(item, { amount: Math.max(0.1, itemAmount - 1) })}>−</button>
+                                  <button type="button" disabled={isZeptoSyncing} onClick={() => updateGroceryCartItemDetails(item, { amount: Math.max(0.1, itemAmount - 1) })}>−</button>
                                   <input
                                     aria-label={`Quantity for ${item.name}`}
                                     type="number"
                                     min="0.1"
                                     step="0.1"
                                     value={item.amount}
+                                    disabled={isZeptoSyncing}
                                     onChange={(e) => {
                                       const nextAmount = parseFloat(e.target.value) || 1;
                                       setCustomGroceryItems(prev => prev.map(current => current.id === item.id ? { ...current, amount: nextAmount } : current));
                                     }}
                                     onBlur={(e) => updateGroceryCartItemDetails(item, { amount: parseFloat(e.target.value) || 1 })}
                                   />
-                                  <button type="button" onClick={() => updateGroceryCartItemDetails(item, { amount: itemAmount + 1 })}>+</button>
+                                  <button type="button" disabled={isZeptoSyncing} onClick={() => updateGroceryCartItemDetails(item, { amount: itemAmount + 1 })}>+</button>
                                   <input
                                     aria-label={`Unit for ${item.name}`}
                                     type="text"
                                     value={item.unit || ""}
+                                    disabled={isZeptoSyncing}
                                     onChange={(e) => setCustomGroceryItems(prev => prev.map(current => current.id === item.id ? { ...current, unit: e.target.value } : current))}
                                     onBlur={(e) => updateGroceryCartItemDetails(item, { unit: e.target.value || "piece" })}
                                   />
@@ -2496,7 +2701,7 @@ export default function Home() {
                                 <span className="native-cart-have">{haveText}</span>
                                 <span className="native-cart-buy">{toBuyText}</span>
                                 <div className="native-cart-actions">
-                                  <button type="button" aria-label={`Delete ${item.name}`} onClick={() => deleteGroceryCartItem(item)}>×</button>
+                                  <button type="button" disabled={isZeptoSyncing} aria-label={`Delete ${item.name}`} onClick={() => deleteGroceryCartItem(item)}>×</button>
                                 </div>
                               </div>
                             );
@@ -2507,17 +2712,17 @@ export default function Home() {
                   )}
 
                   <div className="cart-add-row">
-                    <input type="text" placeholder="Add custom item..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
-                    <input type="number" min="0.1" step="0.1" value={groceryCustomAmount} onChange={(e) => setGroceryCustomAmount(parseFloat(e.target.value) || 1)} />
-                    <input type="text" value={groceryCustomUnit} onChange={(e) => setGroceryCustomUnit(e.target.value)} />
-                    <select value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
+                    <input type="text" disabled={isZeptoSyncing} placeholder="Add custom item..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
+                    <input type="number" disabled={isZeptoSyncing} min="0.1" step="0.1" value={groceryCustomAmount} onChange={(e) => setGroceryCustomAmount(parseFloat(e.target.value) || 1)} />
+                    <input type="text" disabled={isZeptoSyncing} value={groceryCustomUnit} onChange={(e) => setGroceryCustomUnit(e.target.value)} />
+                    <select disabled={isZeptoSyncing} value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
                       <option value="Fresh Produce">Fresh Produce</option>
                       <option value="Proteins & Dairy">Proteins & Dairy</option>
                       <option value="Grains & Bakery">Grains & Bakery</option>
                       <option value="Pantry & Spices">Pantry & Spices</option>
                       <option value="General">General</option>
                     </select>
-                    <button type="button" onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
+                    <button type="button" disabled={isZeptoSyncing} onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
                   </div>
                 </section>
 
@@ -2552,7 +2757,7 @@ export default function Home() {
                       <select
                         aria-label="Zepto delivery address for cart sync"
                         value={selectedZeptoAddress}
-                        disabled={isZeptoAddressLoading || zeptoSavedAddressOptions.length === 0}
+                        disabled={isZeptoSyncing || isZeptoAddressLoading || zeptoSavedAddressOptions.length === 0}
                         onChange={(e) => selectZeptoSyncAddress(e.target.value)}
                       >
                         <option value="">
@@ -2575,18 +2780,18 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={syncNativeCartToZepto}
-                      disabled={isZeptoSyncing || checkoutItems.length === 0 || !selectedZeptoAddress}
+                      disabled={isZeptoSyncing || groceryMutationCount > 0 || checkoutItems.length === 0 || !selectedZeptoAddress}
                     >
-                      {isZeptoSyncing ? "Moving to Zepto..." : "Move to Zepto cart"}
+                      {groceryMutationCount > 0 ? "Saving native cart…" : isZeptoSyncing ? "Moving to Zepto…" : "Move to Zepto cart"}
                     </button>
                   </article>
 
                   <article className="grocery-side-card quick-actions-card">
                     <h3>Quick actions</h3>
-                    <button type="button" onClick={() => setCustomGroceryItems(prev => [...prev].sort((a, b) => (a.category || "").localeCompare(b.category || "")))}>Sort by category</button>
-                    <button type="button" onClick={() => setExcludedZeptoItemIds([])}>Select all for Zepto</button>
-                    <button type="button" onClick={() => setExcludedZeptoItemIds(groceryList.filter(item => !item.alreadyStocked).map(cartItemKey).filter(Boolean))}>Clear Zepto selection</button>
-                    <button type="button" onClick={clearPlannedGroceryRows}>Clear planned rows</button>
+                    <button type="button" disabled={isZeptoSyncing} onClick={() => setCustomGroceryItems(prev => [...prev].sort((a, b) => (a.category || "").localeCompare(b.category || "")))}>Sort by category</button>
+                    <button type="button" disabled={isZeptoSyncing} onClick={() => setExcludedZeptoItemIds([])}>Select all for Zepto</button>
+                    <button type="button" disabled={isZeptoSyncing} onClick={() => setExcludedZeptoItemIds(groceryList.filter(item => !item.alreadyStocked).map(cartItemKey).filter(Boolean))}>Clear Zepto selection</button>
+                    <button type="button" disabled={isZeptoSyncing} onClick={clearPlannedGroceryRows}>Clear planned rows</button>
                   </article>
                 </aside>
               </div>

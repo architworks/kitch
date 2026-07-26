@@ -429,8 +429,14 @@ delivery order.
   unavailable or substituted items should be clearly identified.
 - Native-state check: Syncing to Zepto must not delete, check off, or otherwise
   mutate the durable native grocery cart.
+- Concurrency and loading check: Start the sync and, while it is running,
+  confirm that a modal transfer animation is visible and retains focus. Verify
+  that selection, quantity, unit, add, delete, clear, quick-action, and address
+  controls are disabled. If a native-cart save is already in progress, the
+  Zepto sync must wait rather than snapshotting stale values.
 - Pass criteria: The sync completes, the Zepto review is visible and accurately
-  represents the selected native items, and no order is placed.
+  represents the selected native items, the cart stays locked only for the
+  duration of the request, and no order is placed.
 - Fail criteria: Nothing reaches the Zepto review, unrelated items are added,
   quantities are materially wrong without explanation, native rows change, or
   the UI claims success after a provider failure. A missing or unserviceable

@@ -147,17 +147,20 @@ The Zepto flow is:
 1. The user reviews native Kitch grocery rows in the Groceries page.
 2. The user selects eligible rows to move to Zepto.
 3. The user selects a saved delivery address before sync.
-4. FastAPI excludes unselected and pantry-covered rows.
-5. Backend code applies household brand preferences to provider search terms where possible.
-6. `ZeptoProviderAdapter` calls `select_saved_address` to establish serviceable
+4. Kitch waits for pending native-cart saves, then locks cart editing and shows
+   a blocking transfer dialog for the duration of the sync.
+5. FastAPI excludes unselected and pantry-covered rows.
+6. Backend code applies household brand preferences to provider search terms where possible.
+7. `ZeptoProviderAdapter` calls `select_saved_address` to establish serviceable
    store context before any catalog search.
-7. The adapter searches products, replaces/updates the Zepto cart, and reads
+8. The adapter searches products, replaces/updates the Zepto cart, and reads
    the resulting provider cart.
-8. FastAPI saves a Zepto review snapshot locked to the selected address, with
+9. FastAPI saves a Zepto review snapshot locked to the selected address, with
    matched items, unavailable items, checkout context, snapshot hash, and
    confirmation token.
-9. The frontend displays the actual provider cart for review.
-10. A real order can only be placed after explicit frontend approval using the saved review snapshot.
+10. The frontend unlocks the native cart and displays the actual provider cart
+    for review.
+11. A real order can only be placed after explicit frontend approval using the saved review snapshot.
 
 Configuration readiness and shopping readiness are distinct. A configured
 OAuth bridge is not enough to search products: saved addresses must load and a

@@ -261,6 +261,7 @@ sequenceDiagram
     Adapter->>MCP: List saved addresses
     MCP-->>UI: Saved address options
     UI->>UI: User selects delivery address
+    UI->>UI: Wait for native saves; lock edits; show transfer dialog
     UI->>API: POST /api/grocery/zepto/sync-cart + address id
     API->>DB: Read native cart rows
     API->>API: Exclude unselected and pantry-covered rows
@@ -273,6 +274,7 @@ sequenceDiagram
     Adapter-->>API: Cart result + unavailable rows
     API->>API: Save review snapshot + token
     API-->>UI: Review snapshot
+    UI->>UI: Close dialog; unlock edits; show review
     UI->>API: PATCH review selections/acknowledgement
     UI->>API: POST place-order after final approval
     API->>Adapter: place_order(review)
@@ -283,6 +285,10 @@ Important rules:
 - User selection on the native cart means "include this row when moving to Zepto."
 - Pantry-covered rows are never included.
 - A saved delivery address is required before sync.
+- Zepto sync cannot start while a native-cart write is still in flight.
+- Once sync starts, the frontend disables native-cart selection, quantity,
+  unit, add, delete, clear, address, and quick-action controls. A modal progress
+  dialog retains focus until the request succeeds or fails.
 - Product search cannot start until Zepto confirms store context for that address.
 - A review is locked to the address/store context used during product resolution.
 - Changing address requires a new cart sync; patching an existing review cannot change it.

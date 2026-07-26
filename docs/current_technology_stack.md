@@ -415,6 +415,9 @@ Current behavior:
 
 - Kitch syncs selected native cart rows into Zepto only through backend provider endpoints.
 - The frontend loads saved Zepto addresses and requires the user to choose one before sync.
+- The frontend waits for pending native-cart writes before sync, then locks cart
+  editing behind a modal, focus-retaining transfer animation until the provider
+  request completes.
 - FastAPI passes the selected address id to the provider adapter.
 - The adapter calls `select_saved_address` before catalog search so Zepto can
   establish location serviceability and store context.
