@@ -198,6 +198,11 @@ legacy service-role key. If you create real auth users through Supabase Auth,
 copy their UUIDs into the household config files instead of using the prototype
 UUIDs above. Never expose either elevated key to the frontend.
 
+FastAPI fails startup unless durable storage is ready: the elevated credential,
+all required tables and columns, and the configured household profile must be
+available. Database failures are returned as a safe HTTP 503; the UI retains
+the last confirmed state and does not present a successful save.
+
 ### 3. Create Backend Environment File
 
 Create `backend/.env`:
@@ -461,8 +466,11 @@ docs/
 ## Current Limitations
 
 - Multi-household registration and auth-backed membership are deferred.
-- ADK sessions and memory currently use in-memory local services, so backend restarts clear chat/session memory and flexible preferences.
+- ADK sessions and preference memory are explicitly ephemeral process-local
+  services, so backend restarts clear them until the Vertex AI migration.
 - Supabase persists product-critical records.
+- A recipe artifact and replacement of agent-generated cart rows are saved in
+  one transaction; either both are confirmed or neither is changed.
 - Blinkit live cart insertion is not implemented.
 - Pantry quantity reconciliation across arbitrary units is intentionally limited.
 - Zepto MCP auth and catalog behavior depend on the external provider.

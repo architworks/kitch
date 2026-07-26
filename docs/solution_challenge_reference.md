@@ -25,6 +25,12 @@ The complex problem is not "generate a meal plan." The complex problem is:
 
 > How do you help a real household decide what to cook, remember what is already in the kitchen, convert meals into groceries, prepare a delivery cart, and track individual nutrition without losing trust when AI is wrong?
 
+Current persistence guardrail: the browser has no direct Supabase access. The
+backend uses an elevated credential behind RLS, treats only confirmed database
+results as saved, and returns a clear failure instead of inventing local state.
+ADK preference memory remains intentionally ephemeral until the Vertex AI
+migration.
+
 That requires a system because the app has to coordinate:
 
 - Multiple household members.

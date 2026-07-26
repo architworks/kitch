@@ -18,8 +18,8 @@ The current design separates responsibilities deliberately:
 - FastAPI owns browser-facing APIs, state hydration, multimodal request orchestration, and provider approval boundaries.
 - ADK agents reason about user intent and call Python tools.
 - Python tools perform deterministic side effects.
-- Supabase stores structured product state.
-- ADK memory stores flexible household food and brand preferences.
+- Supabase stores authoritative structured product state.
+- ADK memory stores explicitly ephemeral household food and brand preferences.
 - Provider adapters translate Kitch's native cart into provider carts.
 
 ```mermaid
@@ -129,6 +129,7 @@ Current routes:
 | `POST /api/upload-photo` | Sends image bytes and optional text to ADK; handles photo-plus-grocery two-step orchestration. |
 | `GET /api/state/{user_name}` | Returns dashboard state: profile, pantry, macro diary, weekly plan, native cart, and latest recipe+grocery metadata. |
 | `POST /api/pantry/add` | Adds pantry stock manually. |
+| `PATCH /api/household/profile` | Persists shared diet and household-size settings. |
 | `DELETE /api/pantry/remove/{user_name}/{item_name}` | Removes pantry stock manually. |
 | `POST /api/diary/clear/{user_name}` | Clears one user's macro diary. |
 | `GET /api/grocery/cart` | Returns the shared native household grocery cart. |
@@ -145,7 +146,7 @@ Current routes:
 | `GET /api/grocery/zepto/review/{review_id}` | Returns a saved Zepto review snapshot. |
 | `PATCH /api/grocery/zepto/review/{review_id}` | Updates review-only metadata such as address/payment selection and acknowledgement. |
 | `POST /api/grocery/zepto/place-order` | Places a Zepto order only after explicit frontend approval and token validation. |
-| `GET /api/health` | Health check. |
+| `GET /api/health` | Readiness check for elevated database access, required schema, and the configured household profile. |
 
 Why the backend owns review snapshots:
 
@@ -222,6 +223,22 @@ Why this model:
 - Meal plans need to be lightweight.
 - Recipes and grocery rows need an auditable artifact.
 - Provider carts should never become Kitch's source of truth.
+
+### Durable-storage contract
+
+- All six tables have RLS enabled. Browser roles have no table or sequence
+  privileges; the browser accesses state only through FastAPI.
+- FastAPI requires `SUPABASE_SECRET_KEY` (`sb_secret_...`) or the temporary
+  legacy `SUPABASE_SERVICE_ROLE_KEY`. Publishable, anon, malformed, and
+  ambiguous `SUPABASE_KEY` credentials prevent startup.
+- Empty reads are valid state. Authorization, connection, schema, malformed
+  response, and unconfirmed-write failures are not empty state: they become a
+  safe HTTP 503 response and no success action is returned to the UI.
+- Saving a recipe artifact and replacing agent-generated cart rows is one
+  PostgreSQL transaction. A cart failure rolls back the artifact write and
+  leaves the previous cart unchanged.
+- Frontend state changes only after a confirmed 2xx response. A persistence
+  failure preserves the last confirmed state and shows that nothing was saved.
 
 ---
 
@@ -309,8 +326,9 @@ Why the migration is deferred:
 
 ## Known Boundaries
 
-- Local backend restarts clear ADK sessions and in-memory preferences.
-- Supabase schema must stay in sync with `recipe_grocery_plans` and `grocery_cart_items.recipe_grocery_plan_id`.
+- Local backend restarts clear ephemeral ADK sessions and preferences.
+- Apply versioned Supabase migrations before starting FastAPI in every
+  environment. The bootstrap schema must remain synchronized with them.
 - Zepto MCP OAuth/auth is external to Kitch.
 - Blinkit live integration is not implemented.
 - Multi-household registration is not implemented.

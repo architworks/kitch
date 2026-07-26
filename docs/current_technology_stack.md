@@ -196,6 +196,20 @@ Important implementation note:
 
 - The `meal_plans` schema still uses legacy column names like `breakfast_recipe_id`, but these fields now store meal name strings. Do not reintroduce static recipe IDs.
 
+Persistence contract:
+
+- RLS is enabled for all six structured-data tables. `anon` and
+  `authenticated` have no CRUD or sequence access because the frontend uses
+  FastAPI rather than direct Supabase access.
+- FastAPI uses a Supabase secret key (preferred) or temporary legacy
+  service-role key. It refuses startup for `SUPABASE_KEY`, anon, publishable,
+  malformed, or missing credentials.
+- Database errors are fail-loud: only successful empty reads return an empty
+  collection. Failed reads and writes return a standardized HTTP 503 rather
+  than a local fallback or apparent success.
+- `save_recipe_grocery_plan_with_cart` is a transactional RPC, so an agent cart
+  replacement either commits with its artifact or rolls back completely.
+
 ---
 
 ## Prototype Household Configuration

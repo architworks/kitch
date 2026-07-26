@@ -11,6 +11,11 @@ user would: asking the assistant for meal plans, logging food, uploading
 images, updating pantry state, requesting grocery lists, and checking whether
 the app remembers preferences.
 
+Structured product state is durable only after FastAPI receives a confirmed
+Supabase result. Food and brand preferences currently use intentionally
+ephemeral process-local ADK memory, so they are tested for same-process recall,
+not persistence across a backend restart.
+
 ## Artifact Reporting Standard
 
 Every test run should produce a dated artifact that is detailed enough for
@@ -30,6 +35,9 @@ For each scenario, record:
 - Rationale for the status in plain language.
 - Any environmental caveat, such as model outage, missing persistence table,
   provider unavailability, or image fixture mismatch.
+- For a persistence failure, the HTTP status and safe backend error detail,
+  confirmation that no success action/banner appeared, and confirmation that
+  the last confirmed UI state was retained.
 
 Recommended per-scenario result format:
 
@@ -52,8 +60,11 @@ Before running the scenarios, prepare a consistent household test context.
 
 - Use the same active household member throughout the run unless the scenario
   explicitly requires otherwise.
+- Confirm `/api/health` reports ready before starting. It verifies the elevated
+  backend credential, required tables/columns, and configured household profile.
 - Confirm the app can read and write user profile, meal plan, pantry, food
-  diary, grocery, and preference state.
+  diary, grocery, and recipe-artifact state. Preference memory is explicitly
+  ephemeral in this release.
 - Use a stable local date and timezone in the artifact. Relative-date scenarios
   must record the actual calendar date used during the test.
 - Use known image fixtures for image scenarios and link or copy them into the
@@ -154,8 +165,9 @@ cuisine preference.
 - Observe: Meals should be plausibly keto: eggs, avocado, paneer, chicken,
   fish, tofu, salads, low-carb vegetables, nuts, chia, or similar items. Heavy
   carb staples should not dominate the plan.
-- Persistence check: Confirm the weekly plan is stored and the keto preference
-  is reflected in later meal or grocery requests.
+- Persistence and recall check: Confirm the weekly plan is stored and the keto
+  preference is reflected in later meal or grocery requests within the same
+  backend process.
 - Pass criteria: Complete keto plan is saved and later behavior respects keto.
 - Fail criteria: Incomplete plan, non-keto plan, preference not remembered, or
   old cuisine plan remains.
@@ -355,18 +367,19 @@ recommending items already stocked.
 - Fail criteria: Image ignored, pantry not updated, or remaining grocery list
   ignores visible stocked items.
 
-## Section 7: Preference Persistence
+## Section 7: Ephemeral Preference Recall
 
-These scenarios verify that brand and category preferences persist and affect
-later grocery or delivery-preparation behavior.
+These scenarios verify that brand and category preferences affect later grocery
+or delivery-preparation behavior within the running backend process. They do
+not claim persistence across a backend restart until Vertex AI memory is used.
 
 ### Scenario 7.1 - Bread Brand Preference
 
 - Prompt/action: "For bread, always get Baker's Dozen whole wheat"
 - Expected behavior: The assistant stores a bread brand/type preference.
 - Observe: The response should acknowledge the specific brand and bread type.
-- Persistence check: Later ask for or preview a bread grocery item and confirm
-  the preference is recalled or applied.
+- Recall check: Later ask for or preview a bread grocery item in the same
+  backend process and confirm the preference is recalled or applied.
 - Pass criteria: Bread preference is remembered and used in later grocery or
   provider payload preparation.
 - Fail criteria: Preference not acknowledged, not remembered, or later bread
@@ -380,8 +393,9 @@ later grocery or delivery-preparation behavior.
   grocery guidance respects it.
 - Observe: The response should acknowledge cereals and cookies as excluded and
   the allowed categories as dairy, fruits, and vegetables.
-- Persistence check: Later grocery list requests should not include cereals or
-  cookies unless the user explicitly overrides the preference.
+- Recall check: Later grocery list requests in the same backend process should
+  not include cereals or cookies unless the user explicitly overrides the
+  preference.
 - Pass criteria: The exclusion is remembered and applied.
 - Fail criteria: Preference not saved, ignored later, or grocery lists include
   excluded categories without user override.
@@ -391,8 +405,8 @@ later grocery or delivery-preparation behavior.
 - Prompt/action: "I prefer Amul butter over any other brand"
 - Expected behavior: The assistant stores an Amul butter brand preference.
 - Observe: The response should clearly acknowledge Amul butter.
-- Persistence check: Later ask for butter or preview a butter grocery item and
-  confirm Amul is recalled or applied.
+- Recall check: Later ask for butter or preview a butter grocery item in the
+  same backend process and confirm Amul is recalled or applied.
 - Pass criteria: Amul butter preference is remembered and used in later grocery
   or provider payload preparation.
 - Fail criteria: Preference not acknowledged, not remembered, or provider
@@ -453,7 +467,7 @@ Close every artifact with a functional summary.
 - Image macro logging:
 - Grocery generation:
 - Pantry-aware groceries:
-- Preference persistence:
+- Ephemeral preference recall:
 - Datetime awareness:
 
 ## Regressions Found
@@ -487,4 +501,3 @@ Future runs should continue to report against them.
   timezone.
 - Daily calorie totals are computed from the persisted diary for the current
   date.
-

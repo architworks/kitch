@@ -55,9 +55,11 @@ Chat text can plan groceries and prepare a provider cart. Chat text must not pla
 
 **Why:** Zepto is a real consumer-facing service. Catalog substitutions, payment state, address state, and accidental orders are high-risk. Human-in-the-loop final approval is a product safety requirement, not a UI preference.
 
-### 6. Preferences stay flexible in memory
+### 6. Preferences stay flexible in ephemeral memory
 
-Food preferences and brand preferences are stored as household-level plain-text memory, not strict preference tables.
+Food preferences and brand preferences are stored as household-level plain-text
+memory, not strict preference tables. This memory is intentionally process-local
+until the planned Vertex AI migration, so it must not be described as durable.
 
 Examples:
 
@@ -154,6 +156,8 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-023 | New agent grocery plans replace prior agent-generated cart rows but preserve manual rows. | Lets the user add household staples manually without losing them every time the agent replans groceries. |
 | REQ-024 | Pantry-covered rows remain visible but disabled/muted and excluded from provider sync. | Users should see why something was not ordered instead of wondering whether it was forgotten. |
 | REQ-025 | Fridge-photo grocery requests update pantry first, then plan groceries against the updated pantry. | Prevents reordering things the user just showed Kitch they already have. |
+| REQ-026 | A recipe artifact and its agent-generated cart replacement commit together or not at all. | Prevents a recipe history entry from claiming a cart change that did not persist. |
+| REQ-027 | When durable storage is unavailable, preserve confirmed UI state and explain that nothing was saved. | Users must not be misled by optimistic changes or agent prose. |
 
 ### Pantry and vision requirements
 

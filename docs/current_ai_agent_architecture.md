@@ -383,7 +383,7 @@ Food and brand preferences remain flexible text for agent reference. They are in
 
 # Part 2: AI Runtime Architecture
 
-Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents handle culinary reasoning and call Python tools. Python tools perform deterministic side effects. Supabase persists structured records. ADK memory stores flexible household preferences.
+Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway. Agents handle culinary reasoning and call Python tools. Python tools perform deterministic side effects. Supabase persists structured records. ADK memory stores flexible but explicitly ephemeral household preferences.
 
 ---
 
@@ -611,7 +611,7 @@ Supabase stores structured state:
 - Macro logs.
 - Household profile settings.
 
-ADK memory stores flexible household preferences:
+ADK memory stores flexible, explicitly ephemeral household preferences:
 
 - Food preferences such as "we prefer not to use tofu."
 - Category exclusions such as "avoid mushrooms."
@@ -621,7 +621,15 @@ ADK memory stores flexible household preferences:
 Why this split:
 
 - Structured UI records need deterministic storage and schema.
-- Preferences need natural-language flexibility.
+- Preferences need natural-language flexibility, but they are not durable until
+  the planned Vertex migration.
+
+Persistence rule for every agent:
+
+- A tool result may be described as saved or updated only after it returns
+  success. A failed or missing persistence result means nothing was saved; the
+  FastAPI request postcondition enforces this even if an agent framework
+  continues after a tool error.
 
 ---
 

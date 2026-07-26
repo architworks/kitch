@@ -349,8 +349,9 @@ Example prompts:
 
 1. User states a preference naturally.
 2. Kitch identifies the target item or category.
-3. Kitch saves the preference as household memory.
-4. Kitch confirms the preference in plain language.
+3. Kitch stores the preference in explicitly ephemeral household memory.
+4. Kitch confirms the preference in plain language without implying that it
+   survives a backend restart.
 5. Future grocery preparation uses the preference.
 
 ### Functional UX Requirements
