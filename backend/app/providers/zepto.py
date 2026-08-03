@@ -161,6 +161,24 @@ class ZeptoProviderAdapter:
                 f"Zepto MCP cart sync failed: {exc}",
             )
 
+    async def revalidate_cart(self, draft: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and, when needed, rebuild a durable Kitch-managed cart."""
+        if not self.enabled:
+            return self._error("disabled", "Zepto MCP integration is disabled.")
+        selected_address_id = str(draft.get("selected_address_id") or "").strip()
+        if not selected_address_id:
+            return self._error(
+                "address_required",
+                "The saved checkout draft has no Zepto delivery address.",
+            )
+        try:
+            return await self._revalidate_cart(draft, selected_address_id)
+        except Exception as exc:
+            return self._error(
+                "mcp_revalidation_failed",
+                f"Zepto cart revalidation failed: {exc}",
+            )
+
     async def _sync_cart(
         self,
         items: List[Dict[str, Any]],
@@ -296,9 +314,13 @@ class ZeptoProviderAdapter:
                 unavailable_items.append({"name": item.get("name"), "reason": f"Zepto search failed: {exc}"})
                 continue
 
-            product = self._first_product(search_result)
+            product = self._first_orderable_product(search_result, item)
             if not product:
-                unavailable_items.append({"name": item.get("name"), "reason": "No available Zepto product was returned."})
+                unavailable_items.append({
+                    "name": item.get("name"),
+                    "native_item": item,
+                    "reason": "Zepto did not confirm an orderable product with sufficient stock.",
+                })
                 continue
 
             cart_item = self._build_zepto_cart_item(product, item)
@@ -328,12 +350,36 @@ class ZeptoProviderAdapter:
                     "cartItems": cart_items,
                 },
             )
+            update_error = self._tool_error_message(update_result)
+            if update_error:
+                return self._error(
+                    "cart_update_failed",
+                    f"Zepto rejected the cart update: {update_error}",
+                    unavailable_items=unavailable_items,
+                    store_context=store_context,
+                    checkout_context=checkout_context,
+                )
+            zepto_cart = await self._call_tool(session, "view_cart", {})
+            cart_error = self._tool_error_message(zepto_cart)
+            if cart_error:
+                return self._error(
+                    "cart_read_failed",
+                    f"Zepto could not confirm the updated cart: {cart_error}",
+                    unavailable_items=unavailable_items,
+                    store_context=store_context,
+                    checkout_context=checkout_context,
+                )
+            matched_items, reconciliation_unavailable = self._reconcile_matches(
+                matched_items,
+                zepto_cart,
+                reason="Zepto did not confirm this product and quantity in the resulting cart.",
+            )
+            unavailable_items.extend(reconciliation_unavailable)
             for index, match in enumerate(matched_items):
                 match["add_result"] = update_result if index == 0 else {"status": "batched_update"}
-            zepto_cart = await self._call_tool(session, "view_cart", {})
 
         return {
-            "status": "success" if matched_items else "error",
+            "status": "success" if matched_items and not unavailable_items else "blocked",
             "provider": "zepto",
             "items": matched_items,
             "unavailable_items": unavailable_items,
@@ -342,8 +388,234 @@ class ZeptoProviderAdapter:
             "checkout_context": checkout_context,
             "store_context": store_context,
             "available_tools": list(tools.keys()),
-            "message": f"Synced {len(matched_items)} items to Zepto cart." if matched_items else "No Zepto products could be added to the cart.",
+            "message": (
+                f"Synced and confirmed {len(matched_items)} items in the Zepto cart."
+                if matched_items and not unavailable_items
+                else "The Zepto cart could not be confirmed for every selected item."
+            ),
         }
+
+    async def _revalidate_cart(
+        self,
+        draft: Dict[str, Any],
+        selected_address_id: str,
+    ) -> Dict[str, Any]:
+        async with self._session() as session:
+            tools = await self._list_tools(session)
+            required_tools = {
+                "get_product_details",
+                "search_products",
+                "update_cart",
+                "view_cart",
+            }
+            missing_tools = sorted(required_tools.difference(tools))
+            if missing_tools:
+                return self._error(
+                    "missing_revalidation_tools",
+                    "Zepto does not expose every tool required for safe cart revalidation.",
+                    missing_tools=missing_tools,
+                )
+
+            store_context = await self._select_store_context(
+                session,
+                tools,
+                selected_address_id,
+            )
+            if store_context.get("status") != "ready":
+                return {**store_context, "available_tools": list(tools.keys())}
+
+            checkout_context = await self._checkout_context(session, tools)
+            live_cart = await self._call_tool(session, "view_cart", {})
+            live_cart_error = self._tool_error_message(live_cart)
+            if live_cart_error:
+                return self._error(
+                    "cart_read_failed",
+                    f"Zepto could not read the current cart: {live_cart_error}",
+                )
+
+            previous_matches = draft.get("matched_items") or []
+            target_matches: List[Dict[str, Any]] = []
+            unavailable_items: List[Dict[str, Any]] = []
+            replacements: List[Dict[str, Any]] = []
+            changes: List[Dict[str, Any]] = []
+
+            for previous_match in previous_matches:
+                native_item = previous_match.get("native_item") or {}
+                previous_product = previous_match.get("matched_product") or {}
+                previous_cart_item = previous_match.get("cart_item") or {}
+                product_variant_id = self._product_variant_id(previous_product) or self._product_variant_id(previous_cart_item)
+                desired_quantity = self._positive_quantity(previous_cart_item.get("quantity")) or 1
+                current_product = None
+
+                if product_variant_id:
+                    details_payload = await self._call_tool(
+                        session,
+                        "get_product_details",
+                        {"product_variant_id": product_variant_id},
+                    )
+                    details_error = self._tool_error_message(details_payload)
+                    if not details_error:
+                        candidate = self._first_product(details_payload)
+                        candidate_with_identity = dict(candidate or {})
+                        if candidate:
+                            candidate_with_identity.setdefault(
+                                "productVariantId",
+                                product_variant_id,
+                            )
+                            candidate_with_identity.setdefault(
+                                "storeProductId",
+                                self._store_product_id(previous_product)
+                                or self._store_product_id(previous_cart_item),
+                            )
+                        if candidate and self._product_is_orderable(candidate_with_identity, desired_quantity):
+                            current_product = {**previous_product, **candidate_with_identity}
+
+                live_line = self._find_cart_line(
+                    live_cart,
+                    previous_cart_item,
+                    desired_quantity,
+                )
+                if current_product:
+                    refreshed_match = {
+                        "native_item": native_item,
+                        "matched_product": {**previous_product, **current_product},
+                        "cart_item": {
+                            **previous_cart_item,
+                            **(live_line or {}),
+                            "quantity": desired_quantity,
+                        },
+                    }
+                    target_matches.append(refreshed_match)
+                    change = self._describe_match_change(previous_match, refreshed_match)
+                    if change:
+                        changes.append(change)
+                    if not live_line:
+                        changes.append(
+                            {
+                                "type": "provider_cart_drift",
+                                "native_item": native_item,
+                                "product": current_product,
+                                "reason": "The expected product or quantity was missing from the live Zepto cart.",
+                            }
+                        )
+                    continue
+
+                search_term = str(
+                    native_item.get("search_name")
+                    or native_item.get("name")
+                    or ""
+                ).strip()
+                replacement_product = None
+                if search_term:
+                    search_payload = await self._call_tool(
+                        session,
+                        "search_products",
+                        {"query": search_term, "pageNumber": 0},
+                    )
+                    if not self._tool_error_message(search_payload):
+                        replacement_product = self._first_orderable_product(
+                            search_payload,
+                            native_item,
+                            exclude_product_variant_id=product_variant_id,
+                        )
+
+                replacement_cart_item = (
+                    self._build_zepto_cart_item(replacement_product, native_item)
+                    if replacement_product
+                    else None
+                )
+                if not replacement_product or not replacement_cart_item:
+                    unavailable_items.append(
+                        {
+                            "name": native_item.get("name"),
+                            "native_item": native_item,
+                            "previous_product": previous_product,
+                            "reason": "The previous Zepto product is no longer orderable and no confirmed alternative was found.",
+                        }
+                    )
+                    continue
+
+                replacement_match = {
+                    "native_item": native_item,
+                    "matched_product": replacement_product,
+                    "cart_item": replacement_cart_item,
+                }
+                target_matches.append(replacement_match)
+                replacement = {
+                    "native_item": native_item,
+                    "previous_product": previous_product,
+                    "replacement_product": replacement_product,
+                    "reason": "The previously selected Zepto product was no longer orderable.",
+                }
+                replacements.append(replacement)
+                changes.append({"type": "replacement", **replacement})
+
+            target_cart_items = [match["cart_item"] for match in target_matches]
+            rebuild_required = bool(replacements or unavailable_items)
+            rebuild_required = rebuild_required or not self._cart_matches_targets(
+                live_cart,
+                target_cart_items,
+            )
+
+            confirmed_cart = live_cart
+            if target_cart_items and rebuild_required:
+                update_result = await self._call_tool(
+                    session,
+                    "update_cart",
+                    {
+                        "deviceId": "kitch-native-cart",
+                        "replaceCart": True,
+                        "cartItems": target_cart_items,
+                    },
+                )
+                update_error = self._tool_error_message(update_result)
+                if update_error:
+                    return self._error(
+                        "cart_update_failed",
+                        f"Zepto rejected the repaired cart: {update_error}",
+                    )
+                confirmed_cart = await self._call_tool(session, "view_cart", {})
+                confirmed_error = self._tool_error_message(confirmed_cart)
+                if confirmed_error:
+                    return self._error(
+                        "cart_read_failed",
+                        f"Zepto could not confirm the repaired cart: {confirmed_error}",
+                    )
+
+            confirmed_matches, confirmation_failures = self._reconcile_matches(
+                target_matches,
+                confirmed_cart,
+                reason="Zepto did not confirm this product and quantity after cart repair.",
+            )
+            unavailable_items.extend(confirmation_failures)
+            summary = self.normalize_cart_summary(confirmed_cart, confirmed_matches)
+            material_changed = bool(
+                changes
+                or unavailable_items
+                or rebuild_required
+                or self._stable_projection(previous_matches, draft.get("cart_summary") or {})
+                != self._stable_projection(confirmed_matches, summary)
+            )
+
+            return {
+                "status": "success" if confirmed_matches and not unavailable_items else "blocked",
+                "provider": "zepto",
+                "items": confirmed_matches,
+                "unavailable_items": unavailable_items,
+                "replacements": replacements,
+                "changes": changes,
+                "changed": material_changed,
+                "zepto_cart": confirmed_cart,
+                "cart_summary": summary,
+                "checkout_context": checkout_context,
+                "store_context": store_context,
+                "available_tools": list(tools.keys()),
+                "message": (
+                    "The Zepto cart is still orderable and unchanged."
+                    if not material_changed
+                    else "The Zepto cart was refreshed and requires another review."
+                ),
+            }
 
     async def get_cart(self) -> Dict[str, Any]:
         """Fetch the current Zepto cart through MCP."""
@@ -374,6 +646,12 @@ class ZeptoProviderAdapter:
                 if not order_tool:
                     return self._error("missing_place_order_tool", "Could not find a Zepto MCP tool to place an order.", available_tools=list(tools.keys()))
                 result = await self._call_tool(session, order_tool, self._build_order_args(tools[order_tool], review or {}))
+                result_error = self._tool_error_message(result)
+                if result_error:
+                    return self._error(
+                        "order_rejected",
+                        f"Zepto rejected the order: {result_error}",
+                    )
                 return {"status": "success", "provider": "zepto", "order_result": result}
         except Exception as exc:
             return self._error("mcp_order_failed", f"Zepto MCP order placement failed: {exc}")
@@ -947,6 +1225,261 @@ class ZeptoProviderAdapter:
             "cartProductId": product.get("cartProductId") or product_variant_id,
         }
 
+    def _product_variant_id(self, value: Dict[str, Any]) -> str:
+        if not isinstance(value, dict):
+            return ""
+        return str(
+            value.get("productVariantId")
+            or value.get("product_variant_id")
+            or value.get("variantId")
+            or value.get("variant_id")
+            or value.get("id")
+            or ""
+        ).strip()
+
+    def _store_product_id(self, value: Dict[str, Any]) -> str:
+        if not isinstance(value, dict):
+            return ""
+        return str(
+            value.get("storeProductId")
+            or value.get("store_product_id")
+            or ""
+        ).strip()
+
+    def _positive_quantity(self, value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            quantity = int(Decimal(str(value)))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+        return quantity if quantity > 0 else None
+
+    def _desired_quantity(self, item: Dict[str, Any]) -> int:
+        unit = str(item.get("unit") or "").lower()
+        if unit not in {"piece", "pieces", "pc", "pcs", "pack", "packs"}:
+            return 1
+        try:
+            return max(1, round(float(item.get("amount") or 1)))
+        except (TypeError, ValueError):
+            return 1
+
+    def _product_is_orderable(self, product: Dict[str, Any], quantity: int) -> bool:
+        if not isinstance(product, dict):
+            return False
+        if not self._product_variant_id(product) or not self._store_product_id(product):
+            return False
+
+        explicit_values = [
+            product.get(key)
+            for key in (
+                "available",
+                "isAvailable",
+                "is_available",
+                "inStock",
+                "in_stock",
+                "isOrderable",
+                "is_orderable",
+            )
+            if key in product
+        ]
+        if any(value is False for value in explicit_values):
+            return False
+
+        available_quantity = None
+        for key in ("availableQuantity", "available_quantity", "stockQuantity", "stock_quantity"):
+            if product.get(key) is not None:
+                available_quantity = self._positive_quantity(product.get(key))
+                if available_quantity is None:
+                    return False
+                break
+        if available_quantity is not None:
+            return available_quantity >= quantity
+
+        availability = str(
+            product.get("availability")
+            or product.get("stockStatus")
+            or product.get("stock_status")
+            or ""
+        ).strip().lower()
+        if availability:
+            if availability in {"available", "in_stock", "in stock", "orderable"}:
+                return True
+            return False
+
+        return any(value is True for value in explicit_values)
+
+    def _first_orderable_product(
+        self,
+        payload: Any,
+        native_item: Dict[str, Any],
+        exclude_product_variant_id: str = "",
+    ) -> Dict[str, Any] | None:
+        products: List[Dict[str, Any]] = []
+        self._collect_products(payload, products)
+        required_quantity = self._desired_quantity(native_item)
+        for product in products:
+            if (
+                exclude_product_variant_id
+                and self._product_variant_id(product) == exclude_product_variant_id
+            ):
+                continue
+            if self._product_is_orderable(product, required_quantity):
+                return product
+        return None
+
+    def _cart_lines(self, payload: Any) -> List[Dict[str, Any]]:
+        objects: List[Dict[str, Any]] = []
+        self._collect_payload_objects(payload, objects)
+        lines: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, int]] = set()
+        for item in objects:
+            product_variant_id = self._product_variant_id(item)
+            store_product_id = self._store_product_id(item)
+            quantity = self._positive_quantity(
+                item.get("quantity", item.get("qty", item.get("count")))
+            )
+            if not product_variant_id or not store_product_id or quantity is None:
+                continue
+            identity = (product_variant_id, store_product_id, quantity)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            lines.append(item)
+        return lines
+
+    def _find_cart_line(
+        self,
+        payload: Any,
+        desired: Dict[str, Any],
+        quantity: int | None = None,
+    ) -> Dict[str, Any] | None:
+        product_variant_id = self._product_variant_id(desired)
+        store_product_id = self._store_product_id(desired)
+        desired_quantity = quantity or self._positive_quantity(desired.get("quantity"))
+        if not product_variant_id or not store_product_id or desired_quantity is None:
+            return None
+        for line in self._cart_lines(payload):
+            if (
+                self._product_variant_id(line) == product_variant_id
+                and self._store_product_id(line) == store_product_id
+                and self._positive_quantity(line.get("quantity", line.get("qty"))) == desired_quantity
+            ):
+                return line
+        return None
+
+    def _cart_matches_targets(
+        self,
+        payload: Any,
+        targets: List[Dict[str, Any]],
+    ) -> bool:
+        actual = sorted(
+            (
+                self._product_variant_id(line),
+                self._store_product_id(line),
+                self._positive_quantity(line.get("quantity", line.get("qty"))),
+            )
+            for line in self._cart_lines(payload)
+        )
+        expected = sorted(
+            (
+                self._product_variant_id(line),
+                self._store_product_id(line),
+                self._positive_quantity(line.get("quantity")),
+            )
+            for line in targets
+        )
+        return actual == expected
+
+    def _reconcile_matches(
+        self,
+        matches: List[Dict[str, Any]],
+        cart_payload: Any,
+        reason: str,
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        confirmed: List[Dict[str, Any]] = []
+        unavailable: List[Dict[str, Any]] = []
+        for match in matches:
+            cart_item = match.get("cart_item") or {}
+            line = self._find_cart_line(cart_payload, cart_item)
+            if line:
+                confirmed.append({**match, "cart_item": {**cart_item, **line}})
+                continue
+            native_item = match.get("native_item") or {}
+            unavailable.append(
+                {
+                    "name": native_item.get("name"),
+                    "native_item": native_item,
+                    "matched_product": match.get("matched_product") or {},
+                    "reason": reason,
+                }
+            )
+        return confirmed, unavailable
+
+    def _describe_match_change(
+        self,
+        previous: Dict[str, Any],
+        current: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        previous_product = previous.get("matched_product") or {}
+        current_product = current.get("matched_product") or {}
+        previous_cart = previous.get("cart_item") or {}
+        current_cart = current.get("cart_item") or {}
+        fields = {
+            "product": (
+                self._product_variant_id(previous_product),
+                self._product_variant_id(current_product),
+            ),
+            "price": (
+                previous_product.get("price", previous_cart.get("price")),
+                current_product.get("price", current_cart.get("price")),
+            ),
+            "pack_size": (
+                previous_product.get("packSize", previous_cart.get("packSize")),
+                current_product.get("packSize", current_cart.get("packSize")),
+            ),
+            "quantity": (previous_cart.get("quantity"), current_cart.get("quantity")),
+        }
+        changed_fields = {
+            field: {"before": before, "after": after}
+            for field, (before, after) in fields.items()
+            if before != after
+        }
+        if not changed_fields:
+            return None
+        return {
+            "type": "product_update",
+            "native_item": current.get("native_item") or {},
+            "product": current_product,
+            "fields": changed_fields,
+        }
+
+    def _stable_projection(
+        self,
+        matches: List[Dict[str, Any]],
+        summary: Dict[str, Any],
+    ) -> str:
+        lines = []
+        for match in matches:
+            product = match.get("matched_product") or {}
+            cart_item = match.get("cart_item") or {}
+            lines.append(
+                {
+                    "native_item_id": (match.get("native_item") or {}).get("id"),
+                    "product_variant_id": self._product_variant_id(product) or self._product_variant_id(cart_item),
+                    "store_product_id": self._store_product_id(product) or self._store_product_id(cart_item),
+                    "quantity": cart_item.get("quantity"),
+                    "price": product.get("price", cart_item.get("price")),
+                    "pack_size": product.get("packSize", cart_item.get("packSize")),
+                }
+            )
+        return json.dumps(
+            {"lines": sorted(lines, key=lambda line: str(line)), "summary": summary},
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+
     async def _checkout_context(self, session: Any, tools: Dict[str, Any]) -> Dict[str, Any]:
         context: Dict[str, Any] = {
             "addresses": None,
@@ -1015,7 +1548,10 @@ class ZeptoProviderAdapter:
         if selected_payment:
             payment_tool = self._find_tool(tools, required=("payment",), preferred=("select", "set", "update", "choose"))
             if payment_tool:
-                await self._call_tool(session, payment_tool, self._build_selection_args(tools[payment_tool], selected_payment, "payment"))
+                payment_result = await self._call_tool(session, payment_tool, self._build_selection_args(tools[payment_tool], selected_payment, "payment"))
+                payment_error = self._tool_error_message(payment_result)
+                if payment_error:
+                    raise RuntimeError(payment_error)
 
     def _build_empty_or_default_args(self, tool: Any) -> Dict[str, Any]:
         props = self._schema_properties(tool)

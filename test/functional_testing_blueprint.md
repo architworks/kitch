@@ -439,7 +439,9 @@ placement.
   Zepto, and opens a review showing the resolved products, quantities, and
   availability.
 - Review check: Compare the native selection with the Zepto review. Every
-  successfully resolved item should correspond to a selected native row;
+  successfully resolved item should correspond to a selected native row and
+  must appear in the provider-confirmed cart with the exact returned product
+  id, store-product id, and quantity;
   unavailable or substituted items should be clearly identified. Confirm the
   cart-item list uses the main-column width and the order summary appears in
   the right sidebar. Review the subtotal, discounts, fee lines, total, and
@@ -457,6 +459,10 @@ placement.
   the total must be **Unavailable**; Kitch must not calculate it.
 - Native-state check: Syncing to Zepto must not delete, check off, or otherwise
   mutate the durable native grocery cart.
+- Availability check: A catalog search result alone must not count as success.
+  Products with missing, ambiguous, false, or insufficient availability must
+  remain unresolved, and items absent from the confirmed cart must not appear
+  as successfully transferred.
 - Concurrency and loading check: Start the sync and, while it is running,
   confirm that a modal transfer animation is visible and retains focus. Verify
   that selection, quantity, unit, add, delete, clear, quick-action, and address
@@ -487,6 +493,20 @@ placement.
   selection, delivery address, or provider choice. The old provider review,
   payment state, and acknowledgement must be invalidated, and order placement
   must remain locked until another sync.
+- Durable-draft check: Reload the frontend or restart the backend and return to
+  Groceries. The same Supabase-backed checkout draft should be restored rather
+  than disappearing or being reconstructed from browser-local state. A true
+  reload must require a fresh final acknowledgement.
+- Timed revalidation check: Make the draft older than five minutes or return
+  focus after that interval. Confirm that Kitch locks checkout editing, reads
+  the live Zepto cart, and revalidates expected products before unlocking it.
+- Repair check: Simulate one previously orderable product becoming unavailable.
+  Kitch should search in the same address/store context, replace it with a
+  confirmed orderable alternative, rebuild the complete provider cart, and
+  show the before/after product. Payment and acknowledgement must reset.
+- Unresolved check: If no orderable alternative exists, keep the unresolved
+  native item visible and block the complete order rather than silently
+  removing it or allowing a partial checkout.
 - Pass criteria: The review respects selection and pantry coverage, the second
   sync remains equivalent without duplicates, and any later native/provider
   change invalidates the old review before ordering.
@@ -505,6 +525,11 @@ placement.
   exact Zepto cart, delivery address, payment method, and final acknowledgement
   have been reviewed. Do not grant final approval or place a real order during
   this functional test.
+- Final-revalidation check: With a test double or other non-ordering fixture,
+  make the provider cart change during the final availability check. The API
+  must return `409`, show the updated draft, reset approval, and never invoke
+  order placement. An unchanged fixture may proceed only up to the mocked
+  provider-order boundary; never place a live order during this test.
 - Pass criteria: Provider problems are visible and recoverable, native state is
   preserved, and no order can be placed accidentally or from a stale review.
 - Fail criteria: The UI hides the failure, loses native cart state, shows false

@@ -84,7 +84,7 @@ flowchart TD
 
 ### 4. Durable Storage and Credential Security
 
-* **Backend-only access**: All six structured Supabase tables use RLS. Browser
+* **Backend-only access**: All seven structured Supabase tables use RLS. Browser
   roles are denied CRUD access; the browser uses FastAPI only.
 * **Accepted credentials**: FastAPI requires `SUPABASE_SECRET_KEY`
   (`sb_secret_...`) or the temporary legacy `SUPABASE_SERVICE_ROLE_KEY`.

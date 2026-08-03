@@ -4314,6 +4314,13 @@ button {
   border-radius: 14px;
 }
 
+.provider-cart-notice small {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .provider-cart-notice.error {
   background: var(--danger-soft);
 }
@@ -4337,6 +4344,27 @@ button {
 
 .provider-cart-notice p {
   font-size: 13px;
+}
+
+.provider-cart-change-summary {
+  display: grid;
+  gap: 7px;
+  margin: -4px 0 18px;
+  padding: 14px 16px;
+  color: #704313;
+  background: rgba(255, 239, 207, 0.62);
+  border: 1px solid rgba(177, 113, 40, 0.2);
+  border-radius: 14px;
+}
+
+.provider-cart-change-summary strong {
+  color: #5d3710;
+  font-size: 13px;
+}
+
+.provider-cart-change-summary span {
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .provider-cart-table {

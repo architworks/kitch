@@ -243,6 +243,26 @@ class MigrationContractTests(unittest.TestCase):
             "save_recipe_grocery_plan_with_cart",
             schema,
         )
+        self.assertIn("provider_checkout_drafts", schema)
+        self.assertIn("claim_provider_checkout_operation", schema)
+
+    def test_provider_checkout_migration_is_durable_and_backend_only(self):
+        migration = (
+            ROOT
+            / "backend"
+            / "database"
+            / "migrations"
+            / "20260803_create_provider_checkout_drafts.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("BEGIN;", migration)
+        self.assertIn("COMMIT;", migration)
+        self.assertIn("CREATE TABLE IF NOT EXISTS public.provider_checkout_drafts", migration)
+        self.assertIn("UNIQUE (profile_id, provider)", migration)
+        self.assertIn("ENABLE ROW LEVEL SECURITY", migration)
+        self.assertIn("FROM PUBLIC, anon, authenticated", migration)
+        self.assertIn("TO service_role", migration)
+        self.assertIn("claim_provider_checkout_operation", migration)
+        self.assertIn("release_provider_checkout_operation", migration)
 
 
 if __name__ == "__main__":

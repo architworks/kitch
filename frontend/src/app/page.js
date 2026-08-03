@@ -66,6 +66,7 @@ const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
 const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
 const DEFAULT_ORDERING_PROVIDER = "zepto";
+const PROVIDER_REVALIDATE_AFTER_MS = 5 * 60 * 1000;
 const ORDERING_PROVIDERS = [
   {
     id: "zepto",
@@ -81,7 +82,8 @@ const ORDERING_PROVIDERS = [
       status: "/api/grocery/zepto/status",
       addresses: "/api/grocery/zepto/addresses",
       syncCart: "/api/grocery/zepto/sync-cart",
-      review: (reviewId) => `/api/grocery/zepto/review/${reviewId}`,
+      checkoutDraft: "/api/grocery/zepto/checkout-draft",
+      revalidateCart: "/api/grocery/zepto/revalidate-cart",
       placeOrder: "/api/grocery/zepto/place-order"
     }
   },
@@ -703,6 +705,7 @@ export default function Home() {
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
   const confirmedGroceryItemsRef = useRef([]);
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
+  const [liveStateUser, setLiveStateUser] = useState("");
   const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
   // UI state variables
@@ -744,11 +747,28 @@ export default function Home() {
   const [groceryCustomCat, setGroceryCustomCat] = useState("Fresh Produce");
   const groceryMutationCountRef = useRef(0);
   const providerSyncInFlightRef = useRef(false);
+  const providerDraftRestoreInFlightRef = useRef(false);
   const providerSyncTimersRef = useRef([]);
   const providerSyncDialogRef = useRef(null);
   const selectedProvider = ORDERING_PROVIDERS.find(
     provider => provider.id === selectedOrderingProvider
   ) || ORDERING_PROVIDERS[0];
+
+  const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
+    if (!review) {
+      setProviderCartReview(null);
+      setSelectedProviderPaymentMethod("");
+      setProviderReviewAcknowledged(false);
+      return;
+    }
+    setProviderCartReview(review);
+    setSelectedProviderAddress(review.selected_address_id || "");
+    setSelectedProviderPaymentMethod(review.selected_payment_method_id || "");
+    setProviderReviewAcknowledged(
+      resetAcknowledgement ? false : Boolean(review.order_review_acknowledged)
+    );
+    setIsProviderOrderComplete(false);
+  }, []);
 
   const invalidateProviderReview = useCallback(() => {
     setProviderCartReview(null);
@@ -867,6 +887,7 @@ export default function Home() {
     try {
       const data = await fetchLiveState(userName);
       applyLiveState(userName, data);
+      setLiveStateUser(userName);
       await syncLatestRecipeGroceryPlan();
       return data;
     } catch (e) {
@@ -883,6 +904,7 @@ export default function Home() {
         const data = await fetchLiveState(activeUser);
         if (!ignore) {
           applyLiveState(activeUser, data);
+          setLiveStateUser(activeUser);
           await syncLatestRecipeGroceryPlan();
         }
       } catch (e) {
@@ -995,9 +1017,9 @@ export default function Home() {
   const providerSelectedCount = groceryList.filter(item => !item.alreadyStocked && !excludedProviderItemIds.includes(cartItemKey(item))).length;
 
   // 3. Application operations
-  const triggerBannerAlert = (text) => {
+  const triggerBannerAlert = useCallback((text) => {
     setAlertBanner({ show: true, text });
-  };
+  }, []);
 
   const beginGroceryMutation = () => {
     groceryMutationCountRef.current += 1;
@@ -1009,19 +1031,19 @@ export default function Home() {
     setGroceryMutationCount(groceryMutationCountRef.current);
   };
 
-  const clearProviderSyncTimers = () => {
+  const clearProviderSyncTimers = useCallback(() => {
     providerSyncTimersRef.current.forEach(timer => window.clearTimeout(timer));
     providerSyncTimersRef.current = [];
-  };
+  }, []);
 
-  const startProviderSyncProgress = () => {
+  const startProviderSyncProgress = useCallback(() => {
     clearProviderSyncTimers();
     setProviderSyncStage("preparing");
     providerSyncTimersRef.current = [
       window.setTimeout(() => setProviderSyncStage("transferring"), 700),
       window.setTimeout(() => setProviderSyncStage("finalizing"), 6000)
     ];
-  };
+  }, [clearProviderSyncTimers]);
 
   const saveHouseholdProfile = async (dietType, size) => {
     const res = await fetch(apiUrl("/api/household/profile"), {
@@ -1221,10 +1243,7 @@ export default function Home() {
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const review = data.review || data;
-      setProviderCartReview(review);
-      setSelectedProviderAddress(review.selected_address_id || "");
-      setSelectedProviderPaymentMethod(review.selected_payment_method_id || "");
-      setProviderReviewAcknowledged(Boolean(review.order_review_acknowledged));
+      applyProviderDraft(review);
       clearProviderSyncTimers();
       setProviderSyncStage("complete");
       await new Promise(resolve => window.setTimeout(resolve, 450));
@@ -1246,23 +1265,123 @@ export default function Home() {
     }
   };
 
+  const revalidateProviderCart = useCallback(async ({ announce = true } = {}) => {
+    if (providerSyncInFlightRef.current || !selectedProvider.routes?.revalidateCart) return null;
+    providerSyncInFlightRef.current = true;
+    setIsProviderSyncing(true);
+    startProviderSyncProgress();
+    try {
+      const res = await fetch(apiUrl(selectedProvider.routes.revalidateCart), {
+        method: "POST"
+      });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      const review = data.draft || null;
+      if (review) applyProviderDraft(review);
+      clearProviderSyncTimers();
+      setProviderSyncStage("complete");
+      await new Promise(resolve => window.setTimeout(resolve, 350));
+      if (announce) {
+        triggerBannerAlert(data.changed
+          ? `${selectedProvider.label} cart changed and needs another review.`
+          : `${selectedProvider.label} cart availability is up to date.`);
+      }
+      return data;
+    } catch (e) {
+      const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
+      if (changedDraft) applyProviderDraft(changedDraft, { resetAcknowledgement: true });
+      clearProviderSyncTimers();
+      setProviderSyncStage("failed");
+      await new Promise(resolve => window.setTimeout(resolve, 500));
+      if (announce || changedDraft) {
+        triggerBannerAlert(apiErrorMessage(e, `Could not refresh the ${selectedProvider.label} cart.`));
+      }
+      return null;
+    } finally {
+      clearProviderSyncTimers();
+      providerSyncInFlightRef.current = false;
+      setIsProviderSyncing(false);
+      setProviderSyncStage("idle");
+    }
+  }, [applyProviderDraft, clearProviderSyncTimers, selectedProvider, startProviderSyncProgress, triggerBannerAlert]);
+
+  const restoreProviderCheckoutDraft = useCallback(async () => {
+    if (
+      providerDraftRestoreInFlightRef.current
+      || !selectedProvider.routes?.checkoutDraft
+    ) return null;
+    providerDraftRestoreInFlightRef.current = true;
+    try {
+      const res = await fetch(apiUrl(selectedProvider.routes.checkoutDraft));
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      let review = data.draft || null;
+      if (!review || !Array.isArray(review.native_items) || review.native_items.length === 0) {
+        return null;
+      }
+
+      if (review.order_review_acknowledged) {
+        const resetRes = await fetch(apiUrl(selectedProvider.routes.checkoutDraft), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_review_acknowledged: false })
+        });
+        await requireSuccessfulResponse(resetRes);
+        review = (await resetRes.json()).draft || review;
+      }
+      applyProviderDraft(review, { resetAcknowledgement: true });
+
+      const validatedAt = Date.parse(review.last_validated_at || "");
+      if (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS) {
+        await revalidateProviderCart({ announce: false });
+      }
+      return review;
+    } catch (e) {
+      console.error(`Failed to restore ${selectedProvider.label} checkout draft`, e);
+      triggerBannerAlert(apiErrorMessage(e, `Could not restore the ${selectedProvider.label} checkout review.`));
+      return null;
+    } finally {
+      providerDraftRestoreInFlightRef.current = false;
+    }
+  }, [applyProviderDraft, revalidateProviderCart, selectedProvider, triggerBannerAlert]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries" || liveStateUser !== activeUser) return undefined;
+    const timer = window.setTimeout(() => restoreProviderCheckoutDraft(), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, activeUser, liveStateUser, restoreProviderCheckoutDraft]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries" || !providerCartReview?.last_validated_at) return undefined;
+    const revalidateIfStale = () => {
+      if (document.visibilityState === "hidden") return;
+      const validatedAt = Date.parse(providerCartReview.last_validated_at || "");
+      if (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS) {
+        revalidateProviderCart({ announce: true });
+      }
+    };
+    window.addEventListener("focus", revalidateIfStale);
+    document.addEventListener("visibilitychange", revalidateIfStale);
+    return () => {
+      window.removeEventListener("focus", revalidateIfStale);
+      document.removeEventListener("visibilitychange", revalidateIfStale);
+    };
+  }, [activeTab, providerCartReview?.last_validated_at, revalidateProviderCart]);
+
   const updateProviderReview = async (updates) => {
     if (!providerCartReview?.review_id || !selectedProvider.routes) return null;
     setIsUpdatingProviderReview(true);
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.review(providerCartReview.review_id)), {
+      const res = await fetch(apiUrl(selectedProvider.routes.checkoutDraft), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
-      if (data.review) {
-        setProviderCartReview(data.review);
-        setSelectedProviderAddress(data.review.selected_address_id || "");
-        setSelectedProviderPaymentMethod(data.review.selected_payment_method_id || "");
-        setProviderReviewAcknowledged(Boolean(data.review.order_review_acknowledged));
-        return data.review;
+      if (data.draft) {
+        applyProviderDraft(data.draft);
+        return data.draft;
       }
     } catch (e) {
       console.error(`Failed to update ${selectedProvider.label} review`, e);
@@ -1291,6 +1410,7 @@ export default function Home() {
   };
 
   const placeProviderOrder = async () => {
+    if (providerSyncInFlightRef.current) return;
     if (!providerCartReview?.review_id || !providerCartReview?.confirmation_token) {
       triggerBannerAlert(`Final ${selectedProvider.label} approval token is missing. Sync the cart again before placing the order.`);
       return;
@@ -1300,6 +1420,9 @@ export default function Home() {
       return;
     }
 
+    providerSyncInFlightRef.current = true;
+    setIsProviderSyncing(true);
+    startProviderSyncProgress();
     setIsPlacingProviderOrder(true);
     try {
       const latestReview = await updateProviderReview({
@@ -1320,13 +1443,25 @@ export default function Home() {
       const data = await res.json();
       setProviderCartReview(data.review || data);
       setIsProviderOrderComplete(data.status === "success");
+      clearProviderSyncTimers();
+      setProviderSyncStage("complete");
       triggerBannerAlert(data.status === "success"
         ? `${selectedProvider.label} order placement request completed.`
         : `${selectedProvider.label} order could not be placed.`);
     } catch (e) {
       console.error(`Failed to place ${selectedProvider.label} order`, e);
+      const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
+      if (changedDraft) {
+        applyProviderDraft(changedDraft, { resetAcknowledgement: true });
+      }
+      clearProviderSyncTimers();
+      setProviderSyncStage("failed");
       triggerBannerAlert(apiErrorMessage(e, `Failed to contact the backend ${selectedProvider.label} order endpoint.`));
     } finally {
+      clearProviderSyncTimers();
+      providerSyncInFlightRef.current = false;
+      setIsProviderSyncing(false);
+      setProviderSyncStage("idle");
       setIsPlacingProviderOrder(false);
     }
   };
@@ -1667,6 +1802,16 @@ export default function Home() {
   const providerUnavailableItems = Array.isArray(providerCartReview?.unavailable_items)
     ? providerCartReview.unavailable_items
     : Array.isArray(providerCartReview?.result?.unavailable_items) ? providerCartReview.result.unavailable_items : [];
+  const providerCartChanges = Array.isArray(providerCartReview?.changes) ? providerCartReview.changes : [];
+  const providerReplacements = Array.isArray(providerCartReview?.replacements) ? providerCartReview.replacements : [];
+  const providerLastChecked = providerCartReview?.last_validated_at
+    ? new Intl.DateTimeFormat("en-IN", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(new Date(providerCartReview.last_validated_at))
+    : "Not checked yet";
   const providerCartDetails = providerCartReview?.zepto_cart || providerCartReview?.result?.zepto_cart || providerCartReview?.result || null;
   const providerCartSummary = providerCartReview?.cart_summary || {
     currency: "INR",
@@ -1708,7 +1853,9 @@ export default function Home() {
   const nativeCartStageComplete = checkoutItems.length > 0;
   const providerStageComplete = Boolean(selectedProvider.enabled);
   const addressStageComplete = Boolean(selectedProviderAddress);
-  const transferStageComplete = providerReviewStatus === "success" && providerMatchedItems.length > 0;
+  const providerReviewConfirmed = ["success", "ready", "changed"].includes(providerReviewStatus)
+    && providerMatchedItems.length > 0;
+  const transferStageComplete = providerReviewConfirmed;
   const reviewStageComplete = transferStageComplete && providerReviewAcknowledged;
   const canPlaceProviderOrder = providerCartReview?.can_place_order
     && Boolean(providerCartReview?.confirmation_token)
@@ -1897,17 +2044,27 @@ export default function Home() {
               <span className="provider-transfer-kicker">Secure cart handoff</span>
               <h2 id="provider-transfer-title">
                 {providerSyncStage === "complete"
-                  ? `Your ${selectedProvider.label} cart is ready`
+                  ? isPlacingProviderOrder
+                    ? `Your ${selectedProvider.label} checkout is confirmed`
+                    : `Your ${selectedProvider.label} cart is ready`
                   : providerSyncStage === "failed"
                     ? "The transfer needs attention"
-                    : `Moving your items to ${selectedProvider.label}…`}
+                    : isPlacingProviderOrder
+                      ? `Checking ${selectedProvider.label} availability before ordering…`
+                      : providerCartReview
+                        ? `Refreshing your ${selectedProvider.label} cart…`
+                        : `Moving your items to ${selectedProvider.label}…`}
               </h2>
               <p id="provider-transfer-description">
                 {providerSyncStage === "complete"
                   ? "The reviewed products and unavailable items are ready for you to inspect."
                   : providerSyncStage === "failed"
                     ? "Kitch could not complete the handoff. Your native cart was left unchanged."
-                    : `We’ve paused cart editing while ${selectedProvider.label} selects your store, matches products, and builds the review.`}
+                    : isPlacingProviderOrder
+                      ? `Kitch is confirming every approved product and quantity with ${selectedProvider.label} before placing the order.`
+                      : providerCartReview
+                        ? `We’ve paused cart editing while ${selectedProvider.label} checks availability and replaces stale products when necessary.`
+                        : `We’ve paused cart editing while ${selectedProvider.label} selects your store, matches products, and builds the review.`}
               </p>
             </div>
 
@@ -3001,15 +3158,35 @@ export default function Home() {
                             </div>
                           </header>
 
-                          <div className={`provider-cart-notice ${providerReviewStatus === "success" ? "success" : "error"}`}>
-                            <span aria-hidden="true">{providerReviewStatus === "success" ? "✓" : "!"}</span>
+                          <div className={`provider-cart-notice ${providerReviewConfirmed ? "success" : "error"}`}>
+                            <span aria-hidden="true">{providerReviewConfirmed ? "✓" : "!"}</span>
                             <p>
-                              {providerReviewStatus === "success"
+                              {providerReviewConfirmed
                                 ? `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
                                 : providerCartReview.message || `${selectedProvider.label} cart synchronization needs attention.`}
                               {providerUnavailableItems.length > 0 && ` ${providerUnavailableItems.length} selected ${providerUnavailableItems.length === 1 ? "item was" : "items were"} unavailable.`}
                             </p>
+                            <small>Last checked {providerLastChecked}</small>
                           </div>
+
+                          {(providerReplacements.length > 0 || providerCartChanges.length > 0) && (
+                            <div className="provider-cart-change-summary" role="status">
+                              <strong>Zepto cart changes require review</strong>
+                              {providerReplacements.map((replacement, index) => {
+                                const nativeName = replacement.native_item?.name || "Selected item";
+                                const before = replacement.previous_product?.name || replacement.previous_product?.title || "previous product";
+                                const after = replacement.replacement_product?.name || replacement.replacement_product?.title || "replacement product";
+                                return <span key={`replacement-${nativeName}-${index}`}>{nativeName}: {before} → {after}</span>;
+                              })}
+                              {providerCartChanges
+                                .filter(change => change.type !== "replacement")
+                                .map((change, index) => (
+                                  <span key={`provider-change-${index}`}>
+                                    {change.native_item?.name || "Cart item"}: price, pack size, quantity, or provider details changed.
+                                  </span>
+                                ))}
+                            </div>
+                          )}
 
                           {providerCartRows.length === 0 ? (
                             <p className="provider-cart-empty">No {selectedProvider.label} cart items were added.</p>

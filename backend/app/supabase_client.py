@@ -107,6 +107,35 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "fiber_g",
         "logged_at",
     ),
+    "provider_checkout_drafts": (
+        "id",
+        "profile_id",
+        "provider",
+        "selected_address_id",
+        "selected_native_item_ids",
+        "native_items",
+        "mapped_items",
+        "matched_items",
+        "unavailable_items",
+        "replacements",
+        "changes",
+        "provider_cart",
+        "cart_summary",
+        "checkout_context",
+        "store_context",
+        "selected_payment_method_id",
+        "order_review_acknowledged",
+        "can_place_order",
+        "order_blockers",
+        "confirmation_token",
+        "snapshot_hash",
+        "status",
+        "last_validated_at",
+        "operation_id",
+        "lease_expires_at",
+        "created_at",
+        "updated_at",
+    ),
 }
 
 
@@ -796,6 +825,163 @@ def clear_planned_grocery_cart(user_name: str | None = None) -> bool:
     return not any(
         item.get("source") == "agent" for item in get_grocery_cart(user_name)
     )
+
+
+# Durable provider checkout drafts
+_PROVIDER_DRAFT_JSON_FIELDS = {
+    "selected_native_item_ids",
+    "native_items",
+    "mapped_items",
+    "matched_items",
+    "unavailable_items",
+    "replacements",
+    "changes",
+    "provider_cart",
+    "cart_summary",
+    "checkout_context",
+    "store_context",
+    "order_blockers",
+}
+
+_PROVIDER_DRAFT_WRITABLE_FIELDS = {
+    "selected_address_id",
+    "selected_native_item_ids",
+    "native_items",
+    "mapped_items",
+    "matched_items",
+    "unavailable_items",
+    "replacements",
+    "changes",
+    "provider_cart",
+    "cart_summary",
+    "checkout_context",
+    "store_context",
+    "selected_payment_method_id",
+    "order_review_acknowledged",
+    "can_place_order",
+    "order_blockers",
+    "confirmation_token",
+    "snapshot_hash",
+    "status",
+    "last_validated_at",
+}
+
+
+def _normalize_provider_checkout_draft_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(row)
+    for field in _PROVIDER_DRAFT_JSON_FIELDS:
+        default = {} if field in {
+            "cart_summary",
+            "checkout_context",
+            "store_context",
+        } else []
+        normalized[field] = _coerce_json(normalized.get(field), default)
+    return normalized
+
+
+def get_provider_checkout_draft(provider: str = "zepto") -> Dict[str, Any] | None:
+    rows = _read_rows(
+        "get_provider_checkout_draft",
+        "provider_checkout_drafts",
+        lambda: supabase.table("provider_checkout_drafts")
+        .select("*")
+        .eq("profile_id", get_household_profile_id())
+        .eq("provider", provider)
+        .limit(1)
+        .execute(),
+    )
+    return _normalize_provider_checkout_draft_row(rows[0]) if rows else None
+
+
+def save_provider_checkout_draft(
+    draft: Dict[str, Any],
+    provider: str = "zepto",
+) -> Dict[str, Any]:
+    payload = {
+        key: value
+        for key, value in draft.items()
+        if key in _PROVIDER_DRAFT_WRITABLE_FIELDS
+    }
+    payload.update(
+        {
+            "profile_id": get_household_profile_id(),
+            "provider": provider,
+            "updated_at": _now_iso(),
+        }
+    )
+    row = _confirmed_row(
+        "save_provider_checkout_draft",
+        "provider_checkout_drafts",
+        lambda: supabase.table("provider_checkout_drafts")
+        .upsert(payload, on_conflict="profile_id,provider")
+        .execute(),
+    )
+    return _normalize_provider_checkout_draft_row(row)
+
+
+def delete_provider_checkout_draft(provider: str = "zepto") -> bool:
+    _confirmed_row(
+        "delete_provider_checkout_draft",
+        "provider_checkout_drafts",
+        lambda: supabase.table("provider_checkout_drafts")
+        .delete()
+        .eq("profile_id", get_household_profile_id())
+        .eq("provider", provider)
+        .execute(),
+    )
+    return True
+
+
+def claim_provider_checkout_operation(
+    operation_id: str,
+    provider: str = "zepto",
+    lease_seconds: int = 120,
+) -> bool:
+    data = _execute(
+        "claim_provider_checkout_operation",
+        "provider_checkout_drafts",
+        lambda: supabase.rpc(
+            "claim_provider_checkout_operation",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_provider": provider,
+                "p_operation_id": operation_id,
+                "p_lease_seconds": lease_seconds,
+            },
+        ).execute(),
+    )
+    if isinstance(data, list) and len(data) == 1:
+        data = data[0]
+    if not isinstance(data, bool):
+        raise malformed_persistence_response(
+            "claim_provider_checkout_operation", "provider_checkout_drafts"
+        )
+    return data
+
+
+def release_provider_checkout_operation(
+    operation_id: str,
+    provider: str = "zepto",
+) -> bool:
+    data = _execute(
+        "release_provider_checkout_operation",
+        "provider_checkout_drafts",
+        lambda: supabase.rpc(
+            "release_provider_checkout_operation",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_provider": provider,
+                "p_operation_id": operation_id,
+            },
+        ).execute(),
+    )
+    if isinstance(data, list) and len(data) == 1:
+        data = data[0]
+    if not isinstance(data, bool):
+        raise malformed_persistence_response(
+            "release_provider_checkout_operation", "provider_checkout_drafts"
+        )
+    return data
 
 
 # Recipe and grocery artifacts

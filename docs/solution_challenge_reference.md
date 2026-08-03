@@ -99,7 +99,10 @@ Core data flows:
    User uploads fridge photo with grocery request -> vision scanner updates pantry first -> grocery planner runs against updated pantry -> pantry-covered rows are muted/excluded from provider sync.
 
 4. **Provider flow**
-   User selects native cart rows -> backend syncs selected non-stocked rows to Zepto -> backend saves review snapshot -> user must explicitly approve order placement.
+   User selects native cart rows -> backend syncs and reconciles selected
+   non-stocked rows to Zepto -> backend saves a durable checkout draft -> stale
+   products are revalidated/repaired -> user must explicitly approve an
+   unchanged final cart before order placement.
 
 Agent harness talking points:
 

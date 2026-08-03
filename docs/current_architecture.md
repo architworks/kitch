@@ -99,7 +99,9 @@ Current duties:
 - Send text chat turns to `POST /api/chat`.
 - Upload image-plus-text requests to `POST /api/upload-photo`.
 - Trigger Zepto cart sync through `POST /api/grocery/zepto/sync-cart`.
-- Patch Zepto review selections through `PATCH /api/grocery/zepto/review/{review_id}`.
+- Restore and patch the durable checkout through
+  `GET/PATCH /api/grocery/zepto/checkout-draft`.
+- Trigger availability repair through `POST /api/grocery/zepto/revalidate-cart`.
 - Trigger final order placement through `POST /api/grocery/zepto/place-order`.
 
 The frontend does not:
@@ -146,17 +148,19 @@ Current routes:
 | `POST /api/grocery/export` | Legacy provider payload preview. |
 | `GET /api/grocery/zepto/status` | Returns Zepto configuration state; it does not claim store readiness. |
 | `GET /api/grocery/zepto/addresses` | Reads saved Zepto delivery addresses before cart sync. |
-| `POST /api/grocery/zepto/sync-cart` | Requires a saved address id, establishes store context, then replaces Zepto cart from selected, non-stocked native rows and creates a review snapshot with normalized `cart_summary` values. |
-| `GET /api/grocery/zepto/review/{review_id}` | Returns a saved Zepto review snapshot, including `cart_summary` when the provider returned pricing. |
-| `PATCH /api/grocery/zepto/review/{review_id}` | Updates review-only payment selection and acknowledgement. Changing the native cart, ordering provider, or address requires a new review instead. |
-| `POST /api/grocery/zepto/place-order` | Places a Zepto order only after explicit frontend approval and token validation. |
+| `POST /api/grocery/zepto/sync-cart` | Establishes address/store context, accepts explicitly orderable matches, replaces the cart, reconciles the returned cart, and saves a durable checkout draft. |
+| `GET /api/grocery/zepto/checkout-draft` | Restores the current Supabase-backed checkout draft across browser and backend restarts. |
+| `PATCH /api/grocery/zepto/checkout-draft` | Updates payment selection and acknowledgement on the durable draft. |
+| `POST /api/grocery/zepto/revalidate-cart` | Rechecks current product availability, repairs stale products, reconciles the rebuilt cart, and resets approval after any material change. |
+| `POST /api/grocery/zepto/place-order` | Revalidates first, returns `409` when the approved cart changed, and orders only an unchanged explicitly approved snapshot. |
 | `GET /api/health` | Readiness check for elevated database access, required schema, and the configured household profile. |
 
-Why the backend owns review snapshots:
+Why the backend owns durable checkout drafts:
 
 - A user must approve the exact provider cart they saw.
 - Order placement should not rerun LLM reasoning or product matching after approval.
 - Confirmation token plus snapshot hash prevents stale or modified reviews from being submitted silently.
+- Persisted operation leases serialize sync, repair, and order operations per household/provider.
 
 ---
 
@@ -213,6 +217,7 @@ Supabase tables:
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
 | `grocery_cart_items` | Shared household | Stores native provider-agnostic cart rows. |
 | `macro_diary` | Individual | Stores active-user nutrition logs. |
+| `provider_checkout_drafts` | Shared household | Stores durable provider cart projections, repair history, approval state, and serialized operation leases. |
 
 Important modeling decisions:
 
@@ -230,7 +235,7 @@ Why this model:
 
 ### Durable-storage contract
 
-- All six tables have RLS enabled. Browser roles have no table or sequence
+- All seven tables have RLS enabled. Browser roles have no table or sequence
   privileges; the browser accesses state only through FastAPI.
 - FastAPI requires `SUPABASE_SECRET_KEY` (`sb_secret_...`) or the temporary
   legacy `SUPABASE_SERVICE_ROLE_KEY`. Publishable, anon, malformed, and
@@ -277,11 +282,14 @@ sequenceDiagram
     Adapter->>MCP: Replace Zepto cart
     Adapter->>MCP: View Zepto cart
     Adapter-->>API: Cart result + unavailable rows + normalized totals
-    API->>API: Save review snapshot + totals + token
-    API-->>UI: Review snapshot
+    API->>DB: Save durable draft + totals + token
+    API-->>UI: Confirmed checkout draft
     UI->>UI: Close dialog; unlock edits; show review
-    UI->>API: PATCH review selections/acknowledgement
+    UI->>API: PATCH checkout draft selections/acknowledgement
+    UI->>API: POST revalidate after five minutes or page focus
+    API->>Adapter: Validate products; repair and reconcile if necessary
     UI->>API: POST place-order after final approval
+    API->>Adapter: Mandatory final revalidation
     API->>Adapter: place_order(review)
 ```
 
@@ -302,6 +310,9 @@ Important rules:
   unit, add, delete, clear, address, and quick-action controls. A modal progress
   dialog retains focus until the request succeeds or fails.
 - Product search cannot start until Zepto confirms store context for that address.
+- Search results do not count as cart success. The adapter must confirm exact
+  product/store identifiers and quantities in the returned Zepto cart.
+- Missing or ambiguous availability is unverified and cannot unlock ordering.
 - A review is locked to the address/store context used during product resolution.
 - Changing the native cart, selection, provider, or address invalidates the
   current review and requires a new cart sync.
@@ -312,6 +323,11 @@ Important rules:
   cart quantities only when the response contains no fee, tax, discount, or
   other adjustment. Otherwise the total remains unavailable.
 - The cart summary is included in the review snapshot hash.
+- Drafts are stored in `provider_checkout_drafts` with backend-only RLS and
+  survive frontend/backend restarts.
+- Groceries-page entry and focus revalidate drafts older than five minutes.
+- Replacements, price changes, pack changes, quantity changes, and cart drift
+  reset payment and acknowledgement. Unresolved native items block the order.
 - The cart-item review occupies the main workflow; subtotal, fees, discount,
   total, and total-source explanation are shown in the right summary sidebar.
 - Provider-cart rows show the provider image, mapped native item, unit price,

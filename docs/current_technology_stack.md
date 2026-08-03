@@ -176,6 +176,7 @@ Current tables:
 - `pantry_stock`
 - `grocery_cart_items`
 - `macro_diary`
+- `provider_checkout_drafts`
 
 State ownership:
 
@@ -185,6 +186,8 @@ State ownership:
 - `pantry_stock`: shared household pantry/fridge inventory.
 - `grocery_cart_items`: shared native grocery cart, optionally linked to a recipe+grocery artifact.
 - `macro_diary`: individual macro logs.
+- `provider_checkout_drafts`: durable provider cart mappings, availability
+  state, approval snapshots, repair history, and operation leases.
 
 Why Supabase:
 
@@ -198,7 +201,7 @@ Important implementation note:
 
 Persistence contract:
 
-- RLS is enabled for all six structured-data tables. `anon` and
+- RLS is enabled for all seven structured-data tables. `anon` and
   `authenticated` have no CRUD or sequence access because the frontend uses
   FastAPI rather than direct Supabase access.
 - FastAPI uses a Supabase secret key (preferred) or temporary legacy
@@ -434,7 +437,17 @@ Current behavior:
 - Native-cart or provider-selection changes also invalidate the review so a
   stale snapshot cannot be ordered.
 - Existing Zepto cart is replaced before sync.
-- Unavailable/unresolved items are returned in the review.
+- Search matches require explicit sufficient availability and are counted as
+  successful only after exact product/store ids and quantities appear in the
+  confirmed Zepto cart.
+- Durable checkout drafts live in Supabase rather than backend process memory.
+- Drafts older than five minutes are revalidated on Groceries entry/focus.
+- `get_product_details` validates expected products; unavailable products are
+  replaced through a new store-context search and the complete cart is rebuilt
+  and reconciled. Unresolved rows block final ordering.
+- Final order placement repeats revalidation and returns `409` when any
+  approved product, quantity, pack, price, or total changed.
+- Unavailable/unresolved items and replacement history are returned in the review.
 - The adapter normalizes provider-returned subtotal, discount, fee, and total
   values into `cart_summary`. Zepto's final total always wins. When it is
   absent, the adapter can sum exact returned selling prices and cart quantities

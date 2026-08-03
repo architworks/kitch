@@ -1,7 +1,5 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
-import hashlib
-import json
 import time
 from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
@@ -15,6 +13,14 @@ from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
 from app.agent.tools import get_weekly_schedule_dict, export_to_delivery, apply_brand_memory_to_cart_items
 from app.providers.zepto import ZeptoProviderAdapter
+from app.checkout_drafts import (
+    draft_row_to_review,
+    invalidate_draft_for_native_drift,
+    native_snapshot_matches,
+    save_initial_draft,
+    save_revalidated_draft,
+    update_draft_review_fields,
+)
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, canonical_user_name, household_members_text
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
@@ -37,6 +43,10 @@ from app.supabase_client import (
     get_household_profile,
     update_household_profile,
     validate_persistence_readiness,
+    claim_provider_checkout_operation,
+    delete_provider_checkout_draft,
+    get_provider_checkout_draft,
+    release_provider_checkout_operation,
 )
 from app.persistence import (
     PersistenceConfigurationError,
@@ -47,110 +57,6 @@ from app.persistence import (
 )
 
 load_dotenv()
-
-ZEPTO_ORDER_REVIEWS: Dict[str, Dict[str, Any]] = {}
-ZEPTO_ORDER_REVIEW_TTL_SECONDS = 60 * 60
-
-def _json_safe(value: Any) -> Any:
-    try:
-        json.dumps(value)
-        return value
-    except TypeError:
-        if isinstance(value, dict):
-            return {str(k): _json_safe(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_json_safe(v) for v in value]
-        return str(value)
-
-def _review_hash(review: Dict[str, Any]) -> str:
-    stable_payload = {
-        "native_items": review.get("native_items", []),
-        "mapped_items": review.get("mapped_items", []),
-        "matched_items": review.get("matched_items", []),
-        "unavailable_items": review.get("unavailable_items", []),
-        "zepto_cart": review.get("zepto_cart"),
-        "cart_summary": review.get("cart_summary"),
-        "selected_address_id": review.get("selected_address_id"),
-        "selected_payment_method_id": review.get("selected_payment_method_id"),
-    }
-    encoded = json.dumps(_json_safe(stable_payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-def _prune_zepto_reviews() -> None:
-    cutoff = time.time() - ZEPTO_ORDER_REVIEW_TTL_SECONDS
-    expired = [
-        review_id for review_id, review in ZEPTO_ORDER_REVIEWS.items()
-        if float(review.get("created_at", 0)) < cutoff
-    ]
-    for review_id in expired:
-        ZEPTO_ORDER_REVIEWS.pop(review_id, None)
-
-def _build_zepto_order_review(
-    native_items: List[Dict[str, Any]],
-    mapped_items: List[Dict[str, Any]],
-    result: Dict[str, Any],
-    selected_address_id: str,
-) -> Dict[str, Any]:
-    review_id = f"zepto_review_{uuid4()}"
-    matched_items = result.get("items") or []
-    unavailable_items = result.get("unavailable_items") or []
-    checkout_context = result.get("checkout_context") or {}
-    order_blockers: List[str] = []
-
-    if result.get("status") != "success" or len(matched_items) == 0:
-        order_blockers.append("Zepto cart sync must succeed with at least one Zepto cart item.")
-    if checkout_context.get("address_error"):
-        order_blockers.append("Zepto address options could not be read.")
-    if checkout_context.get("payment_error"):
-        order_blockers.append("Zepto payment options could not be read.")
-    if result.get("store_context", {}).get("status") != "ready":
-        order_blockers.append("Zepto store context is not ready for the selected address.")
-
-    can_place_order = len(order_blockers) == 0
-    confirmation_token = f"kitch_confirm_{uuid4()}" if can_place_order else None
-
-    review = {
-        "review_id": review_id,
-        "provider": "zepto",
-        "status": result.get("status", "error"),
-        "native_items": native_items,
-        "mapped_items": mapped_items,
-        "matched_items": matched_items,
-        "unavailable_items": unavailable_items,
-        "zepto_cart": result.get("zepto_cart"),
-        "cart_summary": result.get("cart_summary") or {
-            "currency": "INR",
-            "subtotal_minor": None,
-            "discount_minor": None,
-            "fees": [],
-            "total_minor": None,
-            "total_source": "unavailable",
-            "total_notice": "Zepto did not return a final cart total.",
-        },
-        "checkout_context": checkout_context,
-        "store_context": result.get("store_context") or {},
-        "available_tools": result.get("available_tools") or [],
-        "selected_address_id": selected_address_id,
-        "selected_payment_method_id": None,
-        "order_review_acknowledged": False,
-        "can_place_order": can_place_order,
-        "order_blockers": order_blockers,
-        "confirmation_token": confirmation_token,
-        "created_at": time.time(),
-        "updated_at": time.time(),
-        "message": result.get("message", ""),
-    }
-
-    review["snapshot_hash"] = _review_hash(review)
-    ZEPTO_ORDER_REVIEWS[review_id] = review
-    return review
-
-def _get_zepto_review(review_id: str) -> Dict[str, Any]:
-    _prune_zepto_reviews()
-    review = ZEPTO_ORDER_REVIEWS.get(review_id)
-    if not review:
-        raise HTTPException(status_code=404, detail="Zepto review was not found or has expired.")
-    return review
 
 def looks_like_grocery_request(text: str) -> bool:
     """Detects fridge-photo follow-ups that need grocery planning after pantry update."""
@@ -700,6 +606,19 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
     Replaces the user's Zepto cart with approved native Kitch cart rows.
     This does not place an order.
     """
+    operation_id = str(uuid4())
+    if not claim_provider_checkout_operation(operation_id):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": "provider_checkout_busy",
+                    "message": "Another Zepto checkout operation is already running.",
+                    "provider": "zepto",
+                    "retryable": True,
+                }
+            },
+        )
     try:
         payload = payload or {}
         selected_ids = {str(i) for i in payload.get("cart_item_ids", [])}
@@ -729,11 +648,7 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
             mapped_items,
             selected_address_id=selected_address_id,
         )
-        if result.get("status") == "error" and result.get("code") in {
-            "address_required",
-            "missing_select_address_tool",
-            "store_context_unavailable",
-        }:
+        if result.get("status") == "error":
             return JSONResponse(
                 status_code=502,
                 content={
@@ -741,12 +656,15 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
                         "code": result.get("code"),
                         "message": result.get("message"),
                         "provider": "zepto",
-                        "retryable": result.get("code") != "missing_select_address_tool",
+                        "retryable": result.get("code") not in {
+                            "missing_select_address_tool",
+                            "missing_cart_tools",
+                        },
                     }
                 },
             )
 
-        review = _build_zepto_order_review(
+        review = save_initial_draft(
             export_items,
             mapped_items,
             result,
@@ -760,41 +678,97 @@ async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
             "review_id": review["review_id"],
             "confirmation_token": review.get("confirmation_token")
         }
-    except Exception as e:
-        return {
-            "status": "error",
-            "provider": "zepto",
-            "result": {
-                "status": "error",
-                "provider": "zepto",
-                "code": "mcp_sync_failed",
-                "message": str(e)
+    finally:
+        release_provider_checkout_operation(operation_id)
+
+
+@app.get("/api/grocery/zepto/checkout-draft")
+async def get_zepto_checkout_draft_endpoint():
+    """Restore the durable checkout draft without contacting Zepto."""
+    draft = draft_row_to_review(get_provider_checkout_draft())
+    return {"status": "success", "provider": "zepto", "draft": draft}
+
+
+@app.patch("/api/grocery/zepto/checkout-draft")
+async def update_zepto_checkout_draft_endpoint(payload: Dict[str, Any]):
+    """Update payment and explicit review acknowledgement on the durable draft."""
+    draft_row = get_provider_checkout_draft()
+    if not draft_row:
+        raise HTTPException(status_code=404, detail="No Zepto checkout draft exists.")
+    allowed_fields = {
+        key: payload[key]
+        for key in (
+            "selected_payment_method_id",
+            "order_review_acknowledged",
+        )
+        if key in payload
+    }
+    if not allowed_fields:
+        raise HTTPException(status_code=422, detail="No supported checkout fields were provided.")
+    review = update_draft_review_fields(draft_row, allowed_fields)
+    return {"status": "success", "provider": "zepto", "draft": review}
+
+
+@app.post("/api/grocery/zepto/revalidate-cart")
+async def revalidate_zepto_cart_endpoint():
+    """Revalidate and automatically repair a durable Zepto checkout draft."""
+    operation_id = str(uuid4())
+    if not claim_provider_checkout_operation(operation_id):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": "provider_checkout_busy",
+                    "message": "Another Zepto checkout operation is already running.",
+                    "provider": "zepto",
+                    "retryable": True,
+                }
             },
-            "confirmation_token": None
+        )
+    try:
+        draft_row = get_provider_checkout_draft()
+        if not draft_row or not draft_row.get("native_items"):
+            raise HTTPException(status_code=404, detail="No Zepto checkout draft exists.")
+        if not native_snapshot_matches(draft_row, get_grocery_cart()):
+            review = invalidate_draft_for_native_drift(draft_row)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "native_cart_changed",
+                        "message": "The native cart changed. Move the selected items to Zepto again.",
+                        "provider": "zepto",
+                        "retryable": False,
+                        "draft": review,
+                    }
+                },
+            )
+
+        result = await ZeptoProviderAdapter().revalidate_cart(
+            draft_row_to_review(draft_row) or {}
+        )
+        if result.get("status") == "error":
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "detail": {
+                        "code": result.get("code", "zepto_revalidation_failed"),
+                        "message": result.get("message", "Zepto cart revalidation failed."),
+                        "provider": "zepto",
+                        "retryable": True,
+                    }
+                },
+            )
+        review, changed = save_revalidated_draft(draft_row, result)
+        return {
+            "status": result.get("status", "error"),
+            "provider": "zepto",
+            "changed": changed,
+            "changes": result.get("changes") or [],
+            "draft": review,
         }
-
-@app.get("/api/grocery/zepto/review/{review_id}")
-async def get_zepto_review_endpoint(review_id: str):
-    """Returns a saved Zepto cart/order review snapshot."""
-    return {"status": "success", "provider": "zepto", "review": _get_zepto_review(review_id)}
-
-@app.patch("/api/grocery/zepto/review/{review_id}")
-async def update_zepto_review_endpoint(review_id: str, payload: Dict[str, Any]):
-    """
-    Updates user-selected review metadata before final order approval.
-    This never calls Zepto or places an order.
-    """
-    review = _get_zepto_review(review_id)
-    allowed_fields = (
-        "selected_payment_method_id",
-        "order_review_acknowledged",
-    )
-    for field in allowed_fields:
-        if field in payload:
-            review[field] = payload[field]
-    review["updated_at"] = time.time()
-    review["snapshot_hash"] = _review_hash(review)
-    return {"status": "success", "provider": "zepto", "review": review}
+    finally:
+        release_provider_checkout_operation(operation_id)
 
 @app.post("/api/grocery/zepto/place-order")
 async def place_zepto_order_endpoint(payload: Dict[str, Any]):
@@ -802,11 +776,27 @@ async def place_zepto_order_endpoint(payload: Dict[str, Any]):
     Places the reviewed Zepto cart order. Requires explicit frontend approval
     through a confirmation token returned by /sync-cart.
     """
+    operation_id = str(uuid4())
+    if not claim_provider_checkout_operation(operation_id):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": "provider_checkout_busy",
+                    "message": "Another Zepto checkout operation is already running.",
+                    "provider": "zepto",
+                    "retryable": True,
+                }
+            },
+        )
     try:
         review_id = payload.get("review_id", "")
         confirmation_token = payload.get("confirmation_token", "")
         approved_snapshot_hash = payload.get("approved_snapshot_hash", "")
-        review = _get_zepto_review(review_id)
+        draft_row = get_provider_checkout_draft()
+        review = draft_row_to_review(draft_row)
+        if not draft_row or not review or review_id != review.get("review_id"):
+            raise HTTPException(status_code=404, detail="Zepto checkout draft was not found.")
 
         if not review.get("can_place_order"):
             raise HTTPException(status_code=403, detail="This Zepto review is not eligible for order placement.")
@@ -814,26 +804,62 @@ async def place_zepto_order_endpoint(payload: Dict[str, Any]):
             raise HTTPException(status_code=403, detail="Final frontend approval token is missing or expired.")
         if approved_snapshot_hash != review.get("snapshot_hash"):
             raise HTTPException(status_code=409, detail="Zepto review changed after approval. Review the cart again before placing the order.")
-        if not payload.get("order_review_acknowledged") and not review.get("order_review_acknowledged"):
+        if not payload.get("order_review_acknowledged") or not review.get("order_review_acknowledged"):
             raise HTTPException(status_code=403, detail="Final order review acknowledgement is required.")
 
-        result = await ZeptoProviderAdapter().place_order(review=review)
+        if not native_snapshot_matches(draft_row, get_grocery_cart()):
+            changed_review = invalidate_draft_for_native_drift(draft_row)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "native_cart_changed",
+                        "message": "The native cart changed after approval. Sync and review it again.",
+                        "provider": "zepto",
+                        "retryable": False,
+                        "draft": changed_review,
+                    }
+                },
+            )
+
+        validation = await ZeptoProviderAdapter().revalidate_cart(review)
+        if validation.get("status") == "error":
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "detail": {
+                        "code": validation.get("code", "zepto_revalidation_failed"),
+                        "message": validation.get("message", "Zepto cart revalidation failed."),
+                        "provider": "zepto",
+                        "retryable": True,
+                    }
+                },
+            )
+        refreshed_review, changed = save_revalidated_draft(draft_row, validation)
+        if changed or refreshed_review.get("snapshot_hash") != approved_snapshot_hash:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "provider_cart_changed",
+                        "message": "The Zepto cart changed during the final availability check. Review it again before ordering.",
+                        "provider": "zepto",
+                        "retryable": False,
+                        "draft": refreshed_review,
+                    }
+                },
+            )
+        if not refreshed_review.get("can_place_order"):
+            raise HTTPException(status_code=403, detail="The refreshed Zepto cart is not eligible for ordering.")
+
+        result = await ZeptoProviderAdapter().place_order(review=refreshed_review)
         if result.get("status") == "success":
-            ZEPTO_ORDER_REVIEWS.pop(review_id, None)
-        return {"status": result.get("status", "error"), "provider": "zepto", "result": result, "review": review}
+            delete_provider_checkout_draft()
+        return {"status": result.get("status", "error"), "provider": "zepto", "result": result, "review": refreshed_review}
     except HTTPException:
         raise
-    except Exception as e:
-        return {
-            "status": "error",
-            "provider": "zepto",
-            "result": {
-                "status": "error",
-                "provider": "zepto",
-                "code": "mcp_order_failed",
-                "message": str(e)
-            }
-        }
+    finally:
+        release_provider_checkout_operation(operation_id)
 
 @app.get("/api/health")
 async def health_check():

@@ -53,7 +53,7 @@ Kitch is split into five main runtime layers:
 4. **Supabase PostgreSQL** stores deterministic product records such as meal plans, pantry stock, recipe artifacts, native cart rows, profiles, and macro diary logs.
 5. **Provider adapters** translate Kitch's native grocery cart into external provider carts. Zepto MCP is the current live provider integration.
 
-The browser does not call the model, ADK, Supabase admin APIs, or Zepto MCP directly. It talks to FastAPI, and FastAPI owns secrets, context preparation, tool execution, provider review snapshots, and order safety boundaries.
+The browser does not call the model, ADK, Supabase admin APIs, or Zepto MCP directly. It talks to FastAPI, and FastAPI owns secrets, context preparation, tool execution, durable provider checkout drafts, and order safety boundaries.
 
 ### Agent Topology
 
@@ -155,21 +155,32 @@ The provider-neutral checkout UI currently routes its live operations to Zepto:
 7. Backend code applies household brand preferences to provider search terms where possible.
 8. `ZeptoProviderAdapter` calls `select_saved_address` to establish serviceable
    store context before any catalog search.
-9. The adapter searches products, replaces/updates the Zepto cart, and reads
-   the resulting provider cart.
+9. The adapter accepts only products with explicit sufficient availability,
+   replaces/updates the Zepto cart, and reconciles every product id, store id,
+   and quantity against the resulting `view_cart` response.
 10. The adapter prefers Zepto's final total. When Zepto returns exact
     line-item selling prices and quantities with no tax, fee, discount, or
     other adjustment, it may calculate their sum; if any adjustment exists,
     only a Zepto-returned final total is accepted.
-11. FastAPI saves a Zepto review snapshot locked to the selected address, with
+11. FastAPI saves a durable Supabase checkout draft locked to the selected address, with
     matched items, unavailable items, normalized cart summary, checkout
     context, snapshot hash, and confirmation token.
 12. The frontend unlocks the native cart and displays the actual provider cart
     in the main workflow and the financial summary in the right sidebar.
-13. A real order can only be placed after explicit frontend approval using the saved review snapshot.
+13. Returning to Groceries restores the draft and revalidates it after five
+    minutes. Unavailable products are replaced with confirmed alternatives;
+    every material change resets payment and approval.
+14. A real order can only be placed after explicit frontend approval. FastAPI
+    performs one final Zepto revalidation and returns `409` instead of ordering
+    if the reviewed cart changed.
 
 Any native-cart, provider-selection, or address change invalidates the current
 provider review and requires another sync before order placement.
+
+The `20260803_create_provider_checkout_drafts.sql` migration must be applied
+before starting this version of FastAPI. Checkout drafts are backend-only,
+RLS-protected structured state; browser storage and process memory are not
+used as substitutes.
 
 Configuration readiness and shopping readiness are distinct. A configured
 OAuth bridge is not enough to search products: saved addresses must load and a
@@ -214,7 +225,7 @@ The default prototype IDs are:
 | Anubhav | `11111111-1111-1111-1111-111111111111` |
 | Naman | `22222222-2222-2222-2222-222222222222` |
 
-All six structured-data tables use Row Level Security with browser roles denied.
+All seven structured-data tables use Row Level Security with browser roles denied.
 FastAPI must use a backend-only Supabase secret key (preferred) or the temporary
 legacy service-role key. If you create real auth users through Supabase Auth,
 copy their UUIDs into the household config files instead of using the prototype
@@ -483,7 +494,8 @@ docs/
 - Pantry-covered rows remain visible but are excluded from provider sync.
 - Provider prices and fees should only come from provider responses.
 - Chat cannot place real orders.
-- Zepto order placement requires a saved review snapshot, confirmation token, and explicit frontend approval.
+- Zepto order placement requires a durable reviewed checkout draft, confirmation
+  token, explicit frontend approval, and an unchanged final availability check.
 
 ## Current Limitations
 

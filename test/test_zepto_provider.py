@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 load_dotenv(ROOT / "backend" / ".env")
 
-from app.main import _review_hash  # noqa: E402
+from app.checkout_drafts import checkout_snapshot_hash  # noqa: E402
 from app.providers.zepto import ZeptoProviderAdapter  # noqa: E402
 
 
@@ -25,9 +25,17 @@ class FakeSession:
         *,
         selection_error: str | None = None,
         cart_payload: dict | None = None,
+        cart_payloads: list[dict] | None = None,
+        search_products: list[dict] | None = None,
+        details_payload: dict | None = None,
+        update_error: str | None = None,
     ):
         self.selection_error = selection_error
         self.cart_payload = cart_payload
+        self.cart_payloads = list(cart_payloads or [])
+        self.search_product_rows = search_products
+        self.details_payload = details_payload
+        self.update_error = update_error
         self.calls: list[tuple[str, dict]] = []
         self.tools = [
             SimpleNamespace(
@@ -59,6 +67,11 @@ class FakeSession:
                         "pageNumber": {"type": "integer", "default": 0},
                     }
                 },
+            ),
+            SimpleNamespace(
+                name="get_product_details",
+                description="Get product details and current availability",
+                inputSchema={"properties": {"product_variant_id": {"type": "string"}}},
             ),
             SimpleNamespace(
                 name="update_cart",
@@ -115,19 +128,41 @@ class FakeSession:
             return {
                 "isError": False,
                 "structuredContent": {
-                    "products": [
+                    "products": self.search_product_rows if self.search_product_rows is not None else [
                         {
                             "name": f"Matched {args['query']}",
                             "productVariantId": "variant-1",
                             "storeProductId": "store-product-1",
                             "price": 9900,
+                            "availableQuantity": 10,
                         }
                     ]
                 },
             }
+        if name == "get_product_details":
+            return self.details_payload or {
+                "isError": False,
+                "structuredContent": {
+                    "product": {
+                        "name": "Matched Milk",
+                        "productVariantId": args["product_variant_id"],
+                        "storeProductId": "store-product-1",
+                        "price": 9900,
+                        "packSize": "1 pack",
+                        "availableQuantity": 10,
+                    }
+                },
+            }
         if name == "update_cart":
+            if self.update_error:
+                return {
+                    "isError": True,
+                    "content": [{"type": "text", "text": self.update_error}],
+                }
             return {"isError": False, "structuredContent": {"updated": True}}
         if name == "view_cart":
+            if self.cart_payloads:
+                return self.cart_payloads.pop(0)
             return self.cart_payload or {
                 "isError": False,
                 "structuredContent": {
@@ -136,6 +171,8 @@ class FakeSession:
                             "name": "Matched Milk",
                             "productVariantId": "variant-1",
                             "storeProductId": "store-product-1",
+                            "quantity": 1,
+                            "price": 9900,
                         }
                     ]
                 },
@@ -160,6 +197,44 @@ class ZeptoAddressFirstTests(unittest.TestCase):
         adapter.enabled = True
         adapter._session = lambda: FakeSessionContext(session)
         return adapter
+
+    def make_draft(self) -> dict:
+        native_item = {"id": 1, "name": "Milk", "amount": 1, "unit": "pack"}
+        product = {
+            "name": "Matched Milk",
+            "productVariantId": "variant-1",
+            "storeProductId": "store-product-1",
+            "price": 9900,
+            "packSize": "1 pack",
+            "availableQuantity": 10,
+        }
+        return {
+            "selected_address_id": "address-1",
+            "native_items": [native_item],
+            "mapped_items": [native_item],
+            "matched_items": [
+                {
+                    "native_item": native_item,
+                    "matched_product": product,
+                    "cart_item": {
+                        **product,
+                        "quantity": 1,
+                    },
+                }
+            ],
+            "cart_summary": {
+                "currency": "INR",
+                "subtotal_minor": 9900,
+                "discount_minor": None,
+                "fees": [],
+                "total_minor": 9900,
+                "total_source": "line_items",
+                "total_notice": (
+                    "Calculated from Zepto-returned selling prices and cart quantities; "
+                    "the response contained no additional charges."
+                ),
+            },
+        }
 
     def test_sync_requires_an_address_before_opening_provider_session(self):
         adapter = ZeptoProviderAdapter()
@@ -222,6 +297,203 @@ class ZeptoAddressFirstTests(unittest.TestCase):
         self.assertEqual(result["code"], "store_context_unavailable")
         self.assertNotIn("search_products", call_names)
         self.assertNotIn("update_cart", call_names)
+
+    def test_initial_sync_rejects_search_match_missing_from_confirmed_cart(self):
+        session = FakeSession(
+            cart_payload={"isError": False, "structuredContent": {"items": []}}
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(
+            adapter.sync_cart(
+                [{"id": 1, "name": "Milk", "amount": 1, "unit": "pack"}],
+                selected_address_id="address-1",
+            )
+        )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["items"], [])
+        self.assertEqual(len(result["unavailable_items"]), 1)
+
+    def test_initial_sync_fails_when_update_cart_rejects_batch(self):
+        session = FakeSession(update_error="One product is no longer available.")
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(
+            adapter.sync_cart(
+                [{"id": 1, "name": "Milk", "amount": 1, "unit": "pack"}],
+                selected_address_id="address-1",
+            )
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "cart_update_failed")
+
+    def test_initial_sync_requires_explicit_sufficient_availability(self):
+        session = FakeSession(
+            search_products=[
+                {
+                    "name": "Low-stock milk",
+                    "productVariantId": "variant-1",
+                    "storeProductId": "store-product-1",
+                    "availableQuantity": 1,
+                }
+            ]
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(
+            adapter.sync_cart(
+                [{"id": 1, "name": "Milk", "amount": 2, "unit": "pack"}],
+                selected_address_id="address-1",
+            )
+        )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["items"], [])
+        self.assertNotIn("update_cart", [name for name, _ in session.calls])
+
+    def test_revalidation_preserves_unchanged_orderable_cart(self):
+        session = FakeSession()
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(adapter.revalidate_cart(self.make_draft()))
+
+        self.assertEqual(result["status"], "success")
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["replacements"], [])
+        self.assertNotIn("update_cart", [name for name, _ in session.calls])
+
+    def test_revalidation_replaces_unavailable_product_and_confirms_rebuilt_cart(self):
+        session = FakeSession(
+            details_payload={
+                "isError": False,
+                "structuredContent": {
+                    "product": {
+                        "name": "Matched Milk",
+                        "productVariantId": "variant-1",
+                        "storeProductId": "store-product-1",
+                        "availableQuantity": 0,
+                    }
+                },
+            },
+            search_products=[
+                {
+                    "name": "Replacement Milk",
+                    "productVariantId": "variant-2",
+                    "storeProductId": "store-product-2",
+                    "price": 10900,
+                    "packSize": "1 pack",
+                    "availableQuantity": 8,
+                }
+            ],
+            cart_payloads=[
+                {
+                    "isError": False,
+                    "structuredContent": {
+                        "items": [
+                            {
+                                "name": "Matched Milk",
+                                "productVariantId": "variant-1",
+                                "storeProductId": "store-product-1",
+                                "quantity": 1,
+                                "price": 9900,
+                            }
+                        ]
+                    },
+                },
+                {
+                    "isError": False,
+                    "structuredContent": {
+                        "items": [
+                            {
+                                "name": "Replacement Milk",
+                                "productVariantId": "variant-2",
+                                "storeProductId": "store-product-2",
+                                "quantity": 1,
+                                "price": 10900,
+                            }
+                        ]
+                    },
+                },
+            ],
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(adapter.revalidate_cart(self.make_draft()))
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["changed"])
+        self.assertEqual(len(result["replacements"]), 1)
+        self.assertEqual(
+            result["items"][0]["matched_product"]["productVariantId"],
+            "variant-2",
+        )
+        self.assertIn("update_cart", [name for name, _ in session.calls])
+
+    def test_revalidation_blocks_when_no_orderable_alternative_exists(self):
+        session = FakeSession(
+            details_payload={
+                "isError": False,
+                "structuredContent": {
+                    "product": {
+                        "name": "Matched Milk",
+                        "productVariantId": "variant-1",
+                        "storeProductId": "store-product-1",
+                        "availableQuantity": 0,
+                    }
+                },
+            },
+            search_products=[],
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(adapter.revalidate_cart(self.make_draft()))
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["items"], [])
+        self.assertEqual(len(result["unavailable_items"]), 1)
+
+    def test_revalidation_rebuilds_provider_cart_drift(self):
+        session = FakeSession(
+            cart_payloads=[
+                {
+                    "isError": False,
+                    "structuredContent": {
+                        "items": [
+                            {
+                                "name": "Unrelated item",
+                                "productVariantId": "other-variant",
+                                "storeProductId": "other-store-product",
+                                "quantity": 1,
+                            }
+                        ]
+                    },
+                },
+                {
+                    "isError": False,
+                    "structuredContent": {
+                        "items": [
+                            {
+                                "name": "Matched Milk",
+                                "productVariantId": "variant-1",
+                                "storeProductId": "store-product-1",
+                                "quantity": 1,
+                                "price": 9900,
+                            }
+                        ]
+                    },
+                },
+            ]
+        )
+        adapter = self.make_adapter(session)
+
+        result = asyncio.run(adapter.revalidate_cart(self.make_draft()))
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["changed"])
+        self.assertTrue(any(change["type"] == "provider_cart_drift" for change in result["changes"]))
+        self.assertIn("update_cart", [name for name, _ in session.calls])
 
     def test_saved_addresses_can_be_loaded_before_sync(self):
         session = FakeSession()
@@ -405,7 +677,7 @@ class ZeptoAddressFirstTests(unittest.TestCase):
             },
         }
 
-        original_hash = _review_hash(review)
+        original_hash = checkout_snapshot_hash(review)
         changed_review = {
             **review,
             "cart_summary": {
@@ -414,7 +686,7 @@ class ZeptoAddressFirstTests(unittest.TestCase):
             },
         }
 
-        self.assertNotEqual(original_hash, _review_hash(changed_review))
+        self.assertNotEqual(original_hash, checkout_snapshot_hash(changed_review))
 
 
 if __name__ == "__main__":

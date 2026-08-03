@@ -321,8 +321,9 @@ Example prompts:
 4. The user starts the transfer in a separate, clearly numbered stage.
 5. Kitch uses the native cart as the source of truth, excluding unselected and
    pantry-covered rows and applying known brand preferences.
-6. Kitch clears/replaces the Zepto cart, selects matching products, and reads
-   the resulting provider cart.
+6. Kitch selects only explicitly orderable matches, clears/replaces the Zepto
+   cart, and confirms exact product/store identifiers and quantities in the
+   resulting provider cart.
 7. The main column shows the actual Zepto cart and unavailable items. The
    read-only rows show product images, mapped native items, unit prices,
    quantities, pack sizes, and line subtotals ordered from highest to lowest
@@ -331,7 +332,12 @@ Example prompts:
 8. The sidebar uses Zepto's total when returned. If no adjustment exists, it
    may show the exact sum of returned line prices and quantities, clearly
    labelled as a line-item total.
-9. The user must acknowledge the exact review before any order is placed.
+9. Returning later restores the durable checkout draft. After five minutes,
+   Kitch rechecks availability and automatically replaces stale products.
+10. Replacements and other material changes are highlighted and reset payment
+    and approval. An unresolved selected item blocks the complete order.
+11. The user must acknowledge the exact review before any order is placed;
+    Kitch runs a final revalidation immediately before ordering.
 
 ### Functional UX Requirements
 
@@ -347,6 +353,10 @@ Example prompts:
 - Auth, payment, address, and OTP issues should surface as recoverable states.
 - Editing a native row or selection, changing provider, or changing address
   invalidates the review and locks order placement until a fresh sync.
+- Automatic refresh uses the same blocking progress dialog and locks checkout
+  editing until the provider cart has been reconciled.
+- If final revalidation changes the cart, no order is placed and the user is
+  returned to the updated Zepto cart review.
 
 ### Current Product Boundary
 

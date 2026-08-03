@@ -94,6 +94,39 @@ CREATE TABLE IF NOT EXISTS public.macro_diary (
     logged_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 7. Create Durable Provider Checkout Draft Table
+CREATE TABLE IF NOT EXISTS public.provider_checkout_drafts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL CHECK (length(btrim(provider)) > 0),
+    selected_address_id TEXT NOT NULL DEFAULT '',
+    selected_native_item_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    native_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    mapped_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    matched_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    unavailable_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    replacements JSONB NOT NULL DEFAULT '[]'::jsonb,
+    changes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    provider_cart JSONB,
+    cart_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    checkout_context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    store_context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    selected_payment_method_id TEXT,
+    order_review_acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
+    can_place_order BOOLEAN NOT NULL DEFAULT FALSE,
+    order_blockers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    confirmation_token TEXT,
+    snapshot_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'ready', 'changed', 'blocked', 'ordered')),
+    last_validated_at TIMESTAMP WITH TIME ZONE,
+    operation_id UUID,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE (profile_id, provider)
+);
+
 -- --- INDEXING FOR OPTIMAL QUERY PERFORMANCE ---
 CREATE INDEX IF NOT EXISTS idx_meal_plans_profile_id ON public.meal_plans(profile_id);
 CREATE INDEX IF NOT EXISTS idx_pantry_stock_profile_id ON public.pantry_stock(profile_id);
@@ -102,6 +135,8 @@ CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_id ON public.grocery_c
 CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_source ON public.grocery_cart_items(profile_id, source);
 CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_recipe_plan ON public.grocery_cart_items(profile_id, recipe_grocery_plan_id);
 CREATE INDEX IF NOT EXISTS idx_macro_diary_profile_id_date ON public.macro_diary(profile_id, logged_at);
+CREATE INDEX IF NOT EXISTS idx_provider_checkout_drafts_profile_provider
+    ON public.provider_checkout_drafts(profile_id, provider);
 
 -- --- BACKEND-ONLY SECURITY ---
 -- Kitch's browser talks only to FastAPI. The backend uses a Supabase secret
@@ -117,7 +152,8 @@ BEGIN
         'pantry_stock',
         'recipe_grocery_plans',
         'grocery_cart_items',
-        'macro_diary'
+        'macro_diary',
+        'provider_checkout_drafts'
     ]
     LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
@@ -151,6 +187,79 @@ GRANT USAGE, SELECT ON SEQUENCE public.meal_plans_id_seq TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.pantry_stock_id_seq TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.grocery_cart_items_id_seq TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.macro_diary_id_seq TO service_role;
+
+-- --- PROVIDER CHECKOUT OPERATION LEASES ---
+CREATE OR REPLACE FUNCTION public.claim_provider_checkout_operation(
+    p_profile_id uuid,
+    p_provider text,
+    p_operation_id uuid,
+    p_lease_seconds integer DEFAULT 120
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    affected_rows integer := 0;
+BEGIN
+    INSERT INTO public.provider_checkout_drafts (profile_id, provider)
+    VALUES (p_profile_id, p_provider)
+    ON CONFLICT (profile_id, provider) DO NOTHING;
+
+    UPDATE public.provider_checkout_drafts
+    SET operation_id = p_operation_id,
+        lease_expires_at = now() + make_interval(secs => GREATEST(1, p_lease_seconds)),
+        updated_at = now()
+    WHERE profile_id = p_profile_id
+      AND provider = p_provider
+      AND (
+          operation_id IS NULL
+          OR lease_expires_at IS NULL
+          OR lease_expires_at <= now()
+          OR operation_id = p_operation_id
+      );
+
+    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+    RETURN affected_rows > 0;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.release_provider_checkout_operation(
+    p_profile_id uuid,
+    p_provider text,
+    p_operation_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    affected_rows integer := 0;
+BEGIN
+    UPDATE public.provider_checkout_drafts
+    SET operation_id = NULL,
+        lease_expires_at = NULL,
+        updated_at = now()
+    WHERE profile_id = p_profile_id
+      AND provider = p_provider
+      AND operation_id = p_operation_id;
+
+    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+    RETURN affected_rows > 0;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.claim_provider_checkout_operation(uuid, text, uuid, integer)
+    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.release_provider_checkout_operation(uuid, text, uuid)
+    FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.claim_provider_checkout_operation(uuid, text, uuid, integer)
+    TO service_role;
+GRANT EXECUTE ON FUNCTION public.release_provider_checkout_operation(uuid, text, uuid)
+    TO service_role;
 
 -- --- TRANSACTIONAL RECIPE/CART PERSISTENCE ---
 CREATE OR REPLACE FUNCTION public.replace_planned_grocery_cart(

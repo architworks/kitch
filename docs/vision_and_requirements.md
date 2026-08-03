@@ -182,13 +182,17 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-041 | Use Zepto MCP for live Zepto cart sync. | Zepto MCP exposes search/cart/order tools that are suitable for testing native-cart-to-provider-cart translation. |
 | REQ-042 | Before provider sync, show "not synced" rather than fake prices. After sync, prefer the provider's final total; an exact line-item sum is allowed only when no tax, fee, discount, or other adjustment is present. | A simple sum is useful when it is mathematically complete, but must never masquerade as a checkout total when provider adjustments exist. |
 | REQ-043 | Moving items to Zepto may replace the existing Zepto cart after the user clicks the sync action. | The user explicitly asked to move selected Kitch rows to Zepto, and replacing avoids ambiguous merges. |
-| REQ-044 | Order placement requires a saved review snapshot and confirmation token. | Ensures the order is based on exactly what the user reviewed. |
+| REQ-044 | Order placement requires a durable checkout draft, confirmation token, and unchanged final revalidation. | Ensures the order is based on exactly what the user reviewed and that it remains orderable. |
 | REQ-045 | The app must surface unavailable or unresolved provider items. | Silent failures would lead to missing groceries. |
 | REQ-046 | Blinkit provider sync is deferred. | No Blinkit MCP connection is currently configured. |
 | REQ-047 | Keep checkout stages visible in chronological order while locking unavailable actions. | Users should understand the full path from native cart review to final approval without being able to bypass a prerequisite. |
 | REQ-048 | Invalidate a provider review when its native-cart inputs or delivery context change. | A user must never place an order from a stale cart, address, or total snapshot. |
 | REQ-049 | Keep provider cart items full-width in the main workflow and put the financial order summary in the information sidebar. | The summary must stay visible without consuming the horizontal space needed to review product mappings. |
 | REQ-050 | Use minimal numbered vertical stage markers and make the native cart collapsible. Pending markers are light green; completed markers are dark green and must revert when their underlying state is invalidated. | The checkout sequence should remain obvious while accurately reflecting whether a transfer or review is still valid. |
+| REQ-051 | Persist provider checkout drafts in backend-only Supabase state and restore them across browser/backend restarts. | Provider cart approval must not depend on misleading process-local or browser-local state. |
+| REQ-052 | Reconcile every initial provider update against the confirmed cart and treat ambiguous availability as unverified. | A search result is not proof that the requested product and quantity were added or remain orderable. |
+| REQ-053 | Revalidate drafts after five minutes on page entry/focus and immediately before ordering; automatically repair stale products and reset approval after every material change. | Provider availability and prices are time-sensitive, so an older snapshot must not authorize an order. |
+| REQ-054 | Block the complete order when any selected native item has no confirmed orderable alternative. | Missing groceries must not be silently dropped from an approved checkout. |
 
 ---
 
