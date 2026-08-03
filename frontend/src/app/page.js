@@ -516,20 +516,6 @@ const providerValue = (sources, keys) => {
   return "";
 };
 
-const formatProviderPrice = (value) => {
-  if (value === undefined || value === null || value === "") return "";
-  if (typeof value === "string" && value.includes("₹")) return value;
-  const normalized = typeof value === "string" ? value.replace(/[^\d.]/g, "") : value;
-  const numeric = Number(normalized);
-  if (!Number.isFinite(numeric)) return String(value);
-  const rupees = numeric >= 100 ? numeric / 100 : numeric;
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: rupees % 1 === 0 ? 0 : 2
-  }).format(rupees);
-};
-
 const formatMinorCurrency = (value, currency = "INR") => {
   if (value === null || value === undefined || value === "") return "";
   if (!Number.isFinite(Number(value))) return "";
@@ -540,42 +526,31 @@ const formatMinorCurrency = (value, currency = "INR") => {
   }).format(Number(value) / 100);
 };
 
-const formatProviderCartQuantity = (match) => {
-  const quantity = providerValue(
-    [match?.cart_item, match?.add_result, match?.matched_product],
-    ["quantity", "qty", "count"]
-  );
-  if (quantity === "") return "";
-  return String(quantity);
+const providerPriceToMinor = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const isCurrencyString = typeof value === "string" && /₹|\b(?:INR|RS\.?)\b/i.test(value);
+  const normalized = typeof value === "string" ? value.replace(/[^\d.-]/g, "") : value;
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.round(isCurrencyString || Math.abs(numeric) < 100 ? numeric * 100 : numeric);
 };
 
-const getProviderProductMeta = (match) => {
+const getProviderCartLineData = (match) => {
   const product = match?.matched_product || {};
   const cartItem = match?.cart_item || {};
-  const native = match?.native_item || {};
-  const price = formatProviderPrice(providerValue([cartItem, product], ["price", "sellingPrice", "selling_price", "discountedPrice"]));
-  const quantity = formatProviderCartQuantity(match);
-  const packSize = providerValue([cartItem, product], ["packSize", "pack_size", "unit", "unitOfQuantity", "unit_of_quantity", "quantityUnit"]);
-  const company = providerValue([product, cartItem], [
-    "manufacturer",
-    "manufacturerName",
-    "manufacturer_name",
-    "company",
-    "companyName",
-    "brand",
-    "brandName",
-    "seller",
-    "sellerName"
-  ]);
-  const requested = formatCartQuantity(native.amount, native.unit);
+  const rawPrice = providerValue([cartItem, product], ["price", "sellingPrice", "selling_price", "discountedPrice"]);
+  const rawQuantity = providerValue([cartItem, match?.add_result, product], ["quantity", "qty", "count"]);
+  const priceMinor = providerPriceToMinor(rawPrice);
+  const parsedQuantity = Number(rawQuantity);
+  const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
 
-  return [
-    company && ["Company", company],
-    price && ["Price", price],
-    quantity && ["Qty", quantity],
-    packSize && ["Unit of qty", packSize],
-    requested && ["Kitch needed", requested]
-  ].filter(Boolean);
+  return {
+    priceMinor,
+    quantity,
+    subtotalMinor: priceMinor === null ? null : Math.round(priceMinor * quantity),
+    packSize: providerValue([cartItem, product], ["packSize", "pack_size", "unit", "unitOfQuantity", "unit_of_quantity", "quantityUnit"]),
+    imageUrl: providerValue([cartItem, product], ["imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"])
+  };
 };
 
 const cartItemKey = (item) => String(item?.id || item?.name || "");
@@ -736,6 +711,7 @@ export default function Home() {
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [selectedOrderingProvider, setSelectedOrderingProvider] = useState(DEFAULT_ORDERING_PROVIDER);
+  const [isNativeCartExpanded, setIsNativeCartExpanded] = useState(false);
   const [providerCartReview, setProviderCartReview] = useState(null);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState(null);
   const [providerSavedAddresses, setProviderSavedAddresses] = useState(null);
@@ -750,6 +726,7 @@ export default function Home() {
   const [providerSyncStage, setProviderSyncStage] = useState("idle");
   const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
+  const [isProviderOrderComplete, setIsProviderOrderComplete] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
     active: false,
@@ -777,6 +754,7 @@ export default function Home() {
     setProviderCartReview(null);
     setSelectedProviderPaymentMethod("");
     setProviderReviewAcknowledged(false);
+    setIsProviderOrderComplete(false);
   }, []);
 
   const applyConfirmedGroceryCart = useCallback((items) => {
@@ -1227,6 +1205,7 @@ export default function Home() {
       return;
     }
 
+    invalidateProviderReview();
     providerSyncInFlightRef.current = true;
     setIsProviderSyncing(true);
     startProviderSyncProgress();
@@ -1340,6 +1319,7 @@ export default function Home() {
       await requireSuccessfulResponse(res);
       const data = await res.json();
       setProviderCartReview(data.review || data);
+      setIsProviderOrderComplete(data.status === "success");
       triggerBannerAlert(data.status === "success"
         ? `${selectedProvider.label} order placement request completed.`
         : `${selectedProvider.label} order could not be placed.`);
@@ -1646,7 +1626,7 @@ export default function Home() {
   ).filter(ingredient => getIngredientName(ingredient));
   const activeRecipeSteps = getRecipeSteps(activeRecipeCard);
   const recipePlanScope = latestRecipeGroceryPlan?.scope || {};
-  const recipePlanLabel = latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || latestRecipeGroceryPlan?.request || "Latest recipe plan";
+  const recipePlanLabel = latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || activeRecipeCard?.scope || "Recipe plan";
   const recipeServings = activeRecipeCard?.servings || activeRecipeCard?.serves || latestRecipeGroceryPlan?.householdSize || householdSize;
   const recipeCookTime = activeRecipeCard?.cookTime || activeRecipeCard?.cook_time || activeRecipeCard?.time || "";
   const recipeCalories = activeRecipeCard?.calories || activeRecipeCard?.caloriesPerServing || activeRecipeCard?.calories_per_serving || "";
@@ -1674,6 +1654,16 @@ export default function Home() {
   const providerMatchedItems = Array.isArray(providerCartReview?.matched_items)
     ? providerCartReview.matched_items
     : Array.isArray(providerCartReview?.result?.items) ? providerCartReview.result.items : [];
+  const providerCartRows = providerMatchedItems
+    .map((match, index) => ({
+      match,
+      index,
+      ...getProviderCartLineData(match)
+    }))
+    .sort((left, right) => (
+      (right.subtotalMinor ?? -1) - (left.subtotalMinor ?? -1)
+      || left.index - right.index
+    ));
   const providerUnavailableItems = Array.isArray(providerCartReview?.unavailable_items)
     ? providerCartReview.unavailable_items
     : Array.isArray(providerCartReview?.result?.unavailable_items) ? providerCartReview.result.unavailable_items : [];
@@ -1683,7 +1673,9 @@ export default function Home() {
     subtotal_minor: null,
     discount_minor: null,
     fees: [],
-    total_minor: null
+    total_minor: null,
+    total_source: "unavailable",
+    total_notice: ""
   };
   const providerCurrency = providerCartSummary.currency || "INR";
   const providerSubtotal = formatMinorCurrency(providerCartSummary.subtotal_minor, providerCurrency);
@@ -1697,6 +1689,12 @@ export default function Home() {
       .filter(fee => fee.value)
     : [];
   const providerTotal = formatMinorCurrency(providerCartSummary.total_minor, providerCurrency);
+  const providerTotalSource = providerCartSummary.total_source || (providerTotal ? "provider" : "unavailable");
+  const providerTotalNotice = providerCartSummary.total_notice || (
+    providerTotal
+      ? `Final total returned by ${selectedProvider.label}.`
+      : `${selectedProvider.label} did not return enough information for a safe total.`
+  );
   const providerCheckoutContext = providerCartReview?.checkout_context || providerCartReview?.result?.checkout_context || {};
   const providerSavedAddressOptions = collectObjectsWithAnyKey(providerSavedAddresses, ["address", "address_line", "addressLine", "id"]);
   const selectedProviderAddressOption = providerSavedAddressOptions.find((option, idx) => (
@@ -1707,6 +1705,11 @@ export default function Home() {
     : null;
   const providerPaymentOptions = collectObjectsWithAnyKey(providerCheckoutContext.payment_methods, ["payment", "method", "payment_method", "id"]);
   const providerOrderBlockers = Array.isArray(providerCartReview?.order_blockers) ? providerCartReview.order_blockers : [];
+  const nativeCartStageComplete = checkoutItems.length > 0;
+  const providerStageComplete = Boolean(selectedProvider.enabled);
+  const addressStageComplete = Boolean(selectedProviderAddress);
+  const transferStageComplete = providerReviewStatus === "success" && providerMatchedItems.length > 0;
+  const reviewStageComplete = transferStageComplete && providerReviewAcknowledged;
   const canPlaceProviderOrder = providerCartReview?.can_place_order
     && Boolean(providerCartReview?.confirmation_token)
     && Boolean(providerCartReview?.snapshot_hash)
@@ -1741,21 +1744,6 @@ export default function Home() {
     failed: `Reconnect ${selectedProvider.label} and try again.`,
     unknown: `Checking whether ${selectedProvider.label} is ready.`
   }[providerConnectionState] || "");
-  const workflowCurrentStep = providerCartReview
-    ? 4
-    : checkoutItems.length > 0 && selectedProvider.enabled
-      ? 2
-      : checkoutItems.length > 0
-        ? 1
-        : 0;
-  const groceryWorkflowSteps = [
-    "Native cart",
-    "Ordering app",
-    "Address & transfer",
-    `${selectedProvider.label} cart review`,
-    "Payment & order"
-  ];
-
   const plannedWeekDays = useMemo(() => (
     WEEK_DAYS.filter(day => MEAL_SLOTS.some(slot => hasMealTitle(weeklyPlan[day]?.[slot])))
   ), [weeklyPlan]);
@@ -2730,50 +2718,51 @@ export default function Home() {
                 </div>
               </div>
 
-              <ol className="grocery-workflow-stepper" aria-label="Grocery ordering progress">
-                {groceryWorkflowSteps.map((label, index) => {
-                  const state = index < workflowCurrentStep
-                    ? "complete"
-                    : index === workflowCurrentStep
-                      ? "current"
-                      : "locked";
-                  return (
-                    <li
-                      key={label}
-                      className={state}
-                      aria-current={state === "current" ? "step" : undefined}
-                      aria-disabled={state === "locked" ? "true" : undefined}
-                    >
-                      <span>{state === "complete" ? "✓" : index + 1}</span>
-                      <strong>{label}</strong>
-                    </li>
-                  );
-                })}
-              </ol>
-
               <div className="grocery-checkout-layout">
                 <div className="grocery-workflow-main">
-                  <section className="checkout-stage native-cart-panel">
-                    <div className="checkout-stage-heading">
-                      <span className="checkout-step-label">Step 1</span>
+                  <section className="checkout-stage checkout-timeline-stage native-cart-panel">
+                    <span className={`checkout-stage-number ${nativeCartStageComplete ? "completed" : "pending"}`} aria-hidden="true">1</span>
+                    <div className="native-cart-summary-header">
                       <div>
-                        <h2>Native cart review</h2>
-                        <p>Update quantities and select the exact household items you want to send to an ordering app.</p>
+                        <h2>Native cart</h2>
+                        <p>Review quantities and choose which household items to send to the ordering app.</p>
                       </div>
+                      <div className="native-cart-summary-facts">
+                        <strong>{totalCount} items</strong>
+                        <span>{groceryCategoryCount} categories</span>
+                        <span>{providerSelectedCount} selected for {selectedProvider.label}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`native-cart-toggle ${isNativeCartExpanded ? "expanded" : ""}`}
+                        aria-expanded={isNativeCartExpanded}
+                        aria-controls="native-cart-details"
+                        onClick={() => setIsNativeCartExpanded(current => !current)}
+                      >
+                        {isNativeCartExpanded ? "Collapse cart" : "Review cart"}
+                        <span className="native-cart-toggle-icon" aria-hidden="true">↓</span>
+                      </button>
                     </div>
 
-                    <div className="cart-tabs-row">
-                      <button type="button" className="active">My List <span>{totalCount}</span></button>
-                      <button type="button">Pantry <span>{pantryStock.length}</span></button>
-                      <button type="button" disabled>Buy Again</button>
-                      <button type="button" disabled>Past Orders</button>
-                    </div>
+                    <div
+                      id="native-cart-details"
+                      className={`native-cart-details ${isNativeCartExpanded ? "expanded" : ""}`}
+                      aria-hidden={!isNativeCartExpanded}
+                      inert={isNativeCartExpanded ? undefined : ""}
+                    >
+                      <div className="native-cart-details-inner">
+                        <div className="cart-tabs-row">
+                          <button type="button" className="active">My List <span>{totalCount}</span></button>
+                          <button type="button">Pantry <span>{pantryStock.length}</span></button>
+                          <button type="button" disabled>Buy Again</button>
+                          <button type="button" disabled>Past Orders</button>
+                        </div>
 
-                    <div className="native-cart-meta">
-                      <strong>{totalCount} items</strong>
-                      <span>{groceryCategoryCount} categories</span>
-                      <span>{providerSelectedCount} selected for {selectedProvider.label}</span>
-                    </div>
+                      <div className="native-cart-meta">
+                        <strong>{totalCount} items</strong>
+                        <span>{groceryCategoryCount} categories</span>
+                        <span>{providerSelectedCount} selected for {selectedProvider.label}</span>
+                      </div>
 
                     {totalCount === 0 ? (
                       <div className="native-cart-empty">
@@ -2857,130 +2846,139 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="cart-add-row">
-                      <input type="text" disabled={isProviderSyncing} placeholder="Add custom item..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
-                      <input type="number" disabled={isProviderSyncing} min="0.1" step="0.1" value={groceryCustomAmount} onChange={(e) => setGroceryCustomAmount(parseFloat(e.target.value) || 1)} />
-                      <input type="text" disabled={isProviderSyncing} value={groceryCustomUnit} onChange={(e) => setGroceryCustomUnit(e.target.value)} />
-                      <select disabled={isProviderSyncing} value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
-                        <option value="Fresh Produce">Fresh Produce</option>
-                        <option value="Proteins & Dairy">Proteins & Dairy</option>
-                        <option value="Grains & Bakery">Grains & Bakery</option>
-                        <option value="Pantry & Spices">Pantry & Spices</option>
-                        <option value="General">General</option>
-                      </select>
-                      <button type="button" disabled={isProviderSyncing} onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
+                        <div className="cart-add-row">
+                          <input type="text" disabled={isProviderSyncing} placeholder="Add custom item..." value={groceryCustomName} onChange={(e) => setGroceryCustomName(e.target.value)} />
+                          <input type="number" disabled={isProviderSyncing} min="0.1" step="0.1" value={groceryCustomAmount} onChange={(e) => setGroceryCustomAmount(parseFloat(e.target.value) || 1)} />
+                          <input type="text" disabled={isProviderSyncing} value={groceryCustomUnit} onChange={(e) => setGroceryCustomUnit(e.target.value)} />
+                          <select disabled={isProviderSyncing} value={groceryCustomCat} onChange={(e) => setGroceryCustomCat(e.target.value)}>
+                            <option value="Fresh Produce">Fresh Produce</option>
+                            <option value="Proteins & Dairy">Proteins & Dairy</option>
+                            <option value="Grains & Bakery">Grains & Bakery</option>
+                            <option value="Pantry & Spices">Pantry & Spices</option>
+                            <option value="General">General</option>
+                          </select>
+                          <button type="button" disabled={isProviderSyncing} onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
+                        </div>
+                      </div>
                     </div>
                   </section>
 
-                  <section className="checkout-stage ordering-setup-panel">
-                    <div className="workflow-substage">
-                      <div className="checkout-stage-heading compact">
-                        <span className="checkout-step-label">Step 2</span>
-                        <div>
-                          <h2>Select ordering app</h2>
-                          <p>Your native cart stays provider-independent. Choose where to prepare the external cart.</p>
-                        </div>
-                      </div>
-                      <div className="ordering-provider-grid" role="radiogroup" aria-label="Ordering app">
-                        {ORDERING_PROVIDERS.map(provider => {
-                          const isSelected = provider.id === selectedOrderingProvider;
-                          return (
-                            <button
-                              key={provider.id}
-                              type="button"
-                              role="radio"
-                              aria-checked={isSelected}
-                              className={`ordering-provider-option provider-${provider.id} ${isSelected ? "selected" : ""}`}
-                              disabled={!provider.enabled || isProviderSyncing}
-                              onClick={() => selectOrderingProvider(provider)}
-                            >
-                              <span className="provider-brand">{provider.brandLabel}</span>
-                              <span className="provider-option-copy">
-                                <strong>{provider.label}</strong>
-                                <small>{provider.description}</small>
-                              </span>
-                              <em>{provider.enabled ? (isSelected ? "Selected" : "Available") : provider.badge}</em>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className={`workflow-substage address-transfer-stage ${checkoutItems.length === 0 ? "locked" : ""}`}>
-                      <div className="checkout-stage-heading compact">
-                        <span className="checkout-step-label">Step 3</span>
-                        <div>
-                          <h2>Delivery address and transfer</h2>
-                          <p>Select the provider store context, then move the reviewed native selection.</p>
-                        </div>
-                      </div>
-                      {checkoutItems.length === 0 ? (
-                        <div className="checkout-locked-state">
-                          <span aria-hidden="true">⌑</span>
-                          <div>
-                            <strong>Select at least one native-cart item</strong>
-                            <p>The delivery and transfer controls unlock after Step 1 has an eligible selection.</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="ordering-transfer-grid">
-                          <div className={`provider-connection-state ${providerConnectionState}`}>
-                            <span className="provider-brand small">{selectedProvider.brandLabel}</span>
-                            <div>
-                              <strong>{providerStatusLabel}</strong>
-                              <p>{providerStatusDescription}</p>
-                            </div>
-                          </div>
-                          <label className="provider-sync-address">
-                            <span>Delivery address</span>
-                            <select
-                              aria-label={`${selectedProvider.label} delivery address for cart sync`}
-                              value={selectedProviderAddress}
-                              disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
-                              onChange={(e) => selectProviderSyncAddress(e.target.value)}
-                            >
-                              <option value="">
-                                {isProviderAddressLoading ? `Loading ${selectedProvider.label} addresses...` : "Select delivery address"}
-                              </option>
-                              {providerSavedAddressOptions.map((option, idx) => {
-                                const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                                const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
-                                return (
-                                  <option key={`${value}-${idx}`} value={value}>
-                                    {address.detail ? `${address.title} — ${address.detail}` : address.title}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            {providerAddressLoadError && (
-                              <small className="provider-address-error">{providerAddressLoadError}</small>
-                            )}
-                          </label>
-                          <div className="ordering-transfer-action">
-                            <span>{checkoutItems.length} selected {checkoutItems.length === 1 ? "item" : "items"}</span>
-                            <button
-                              type="button"
-                              onClick={syncNativeCartToProvider}
-                              disabled={isProviderSyncing || groceryMutationCount > 0 || checkoutItems.length === 0 || !selectedProviderAddress}
-                            >
-                              {groceryMutationCount > 0
-                                ? "Saving native cart…"
-                                : isProviderSyncing
-                                  ? `Moving to ${selectedProvider.label}…`
-                                  : `Move to ${selectedProvider.label} cart`}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  <section className={`checkout-stage provider-cart-review-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
+                  <section className="checkout-stage checkout-timeline-stage ordering-provider-stage">
+                    <span className={`checkout-stage-number ${providerStageComplete ? "completed" : "pending"}`} aria-hidden="true">2</span>
                     <div className="checkout-stage-heading">
-                      <span className="checkout-step-label">Step 4</span>
+                      <div>
+                        <h2>Select ordering app</h2>
+                        <p>Your native cart stays provider-independent. Choose where to prepare the external cart.</p>
+                      </div>
+                    </div>
+                    <div className="ordering-provider-grid" role="radiogroup" aria-label="Ordering app">
+                      {ORDERING_PROVIDERS.map(provider => {
+                        const isSelected = provider.id === selectedOrderingProvider;
+                        return (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            className={`ordering-provider-option provider-${provider.id} ${isSelected ? "selected" : ""}`}
+                            disabled={!provider.enabled || isProviderSyncing}
+                            onClick={() => selectOrderingProvider(provider)}
+                          >
+                            <span className="provider-brand">{provider.brandLabel}</span>
+                            <span className="provider-option-copy">
+                              <strong>{provider.label}</strong>
+                              <small>{provider.description}</small>
+                            </span>
+                            <em>{provider.enabled ? (isSelected ? "Selected" : "Available") : provider.badge}</em>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className={`checkout-stage checkout-timeline-stage address-transfer-stage ${checkoutItems.length === 0 ? "locked" : ""}`}>
+                    <span className={`checkout-stage-number ${addressStageComplete ? "completed" : "pending"}`} aria-hidden="true">3</span>
+                    <div className="checkout-stage-heading">
+                      <div>
+                        <h2>Select delivery address</h2>
+                        <p>Choose the saved address that Zepto should use to establish the serviceable store.</p>
+                      </div>
+                    </div>
+                    {checkoutItems.length === 0 ? (
+                      <div className="checkout-locked-state">
+                        <span aria-hidden="true">⌑</span>
+                        <div>
+                          <strong>Select at least one native-cart item</strong>
+                          <p>Address selection unlocks after the native cart has an eligible selection.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="provider-address-stage-body">
+                        <div className={`provider-connection-state ${providerConnectionState}`}>
+                          <span className="provider-brand small">{selectedProvider.brandLabel}</span>
+                          <div>
+                            <strong>{providerStatusLabel}</strong>
+                            <p>{providerStatusDescription}</p>
+                          </div>
+                        </div>
+                        <label className="provider-sync-address">
+                          <span>Delivery address</span>
+                          <select
+                            aria-label={`${selectedProvider.label} delivery address for cart sync`}
+                            value={selectedProviderAddress}
+                            disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
+                            onChange={(e) => selectProviderSyncAddress(e.target.value)}
+                          >
+                            <option value="">
+                              {isProviderAddressLoading ? `Loading ${selectedProvider.label} addresses...` : "Select delivery address"}
+                            </option>
+                            {providerSavedAddressOptions.map((option, idx) => {
+                              const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                              const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
+                              return (
+                                <option key={`${value}-${idx}`} value={value}>
+                                  {address.detail ? `${address.title} — ${address.detail}` : address.title}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          {providerAddressLoadError && (
+                            <small className="provider-address-error">{providerAddressLoadError}</small>
+                          )}
+                        </label>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className={`checkout-stage checkout-timeline-stage ordering-transfer-stage ${!selectedProviderAddress ? "locked" : ""}`}>
+                    <span className={`checkout-stage-number ${transferStageComplete ? "completed" : "pending"}`} aria-hidden="true">4</span>
+                    <div className="ordering-transfer-compact">
+                      <div>
+                        <h2>Move cart items to ordering app</h2>
+                        <p>Send the selected native-cart items to {selectedProvider.label}, then review the exact result.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={syncNativeCartToProvider}
+                        disabled={isProviderSyncing || groceryMutationCount > 0 || checkoutItems.length === 0 || !selectedProviderAddress}
+                      >
+                        {groceryMutationCount > 0
+                          ? "Saving native cart…"
+                          : isProviderSyncing
+                            ? `Moving to ${selectedProvider.label}…`
+                            : !selectedProviderAddress
+                              ? "Select an address first"
+                              : `Move to ${selectedProvider.label} cart`}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className={`checkout-stage checkout-timeline-stage provider-cart-review-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
+                    <span className={`checkout-stage-number ${reviewStageComplete ? "completed" : "pending"}`} aria-hidden="true">5</span>
+                    <div className="checkout-stage-heading">
                       <div>
                         <h2>{selectedProvider.label} cart review</h2>
-                        <p>Review the exact provider products, quantities, availability, and provider-returned totals.</p>
+                        <p>Review the exact provider products, quantities, and availability. The financial summary stays visible in the sidebar.</p>
                       </div>
                     </div>
                     {!providerCartReview ? (
@@ -2988,77 +2986,78 @@ export default function Home() {
                         <span aria-hidden="true">⌑</span>
                         <div>
                           <strong>No {selectedProvider.label} cart review yet</strong>
-                          <p>Select an address and complete the transfer in Step 3 to unlock this review.</p>
+                          <p>Select an address and complete the transfer in stage 4 to unlock this review.</p>
                         </div>
                       </div>
                     ) : (
-                      <>
-                        <div className={`provider-review-status ${providerReviewStatus === "success" ? "success" : "error"}`}>
-                          <div>
-                            <span className="eyebrow">{selectedProvider.label} cart</span>
-                            <h3>{providerReviewStatus === "success" ? "Cart ready for review" : "Sync needs attention"}</h3>
-                            <p>{providerCartReview.message || `Review the latest ${selectedProvider.label} cart result.`}</p>
-                          </div>
-                          <div className="provider-review-stats">
-                            <div><strong>{providerMatchedItems.length}</strong><span>In cart</span></div>
-                            <div><strong>{providerUnavailableItems.length}</strong><span>Unavailable</span></div>
-                          </div>
-                        </div>
-
-                        <div className="provider-cart-review-grid">
-                          <article className="provider-cart-list">
+                      <div className="provider-cart-review-grid">
+                        <article className="provider-cart-list">
+                          <header className="provider-cart-list-header">
                             <h3>{selectedProvider.label} cart items</h3>
-                            {providerMatchedItems.length === 0 ? (
-                              <p>No {selectedProvider.label} cart items were added.</p>
-                            ) : providerMatchedItems.map((match, idx) => {
-                              const product = match.matched_product || {};
-                              const native = match.native_item || {};
-                              const productMeta = getProviderProductMeta(match);
-                              return (
-                                <div key={`${native.id || native.name || idx}-provider-match`} className="provider-product-row">
-                                  <div className="provider-product-main">
-                                    <strong>{product.name || product.title || product.product_name || match.cart_item?.name || `${selectedProvider.label} cart item`}</strong>
-                                    <span>{native.name ? `From Kitch item: ${native.name}` : `Added to ${selectedProvider.label} cart`}</span>
-                                  </div>
-                                  {productMeta.length > 0 && (
-                                    <dl className="provider-product-meta">
-                                      {productMeta.map(([label, value]) => (
-                                        <div key={`${native.id || native.name || idx}-${label}`}>
-                                          <dt>{label}</dt>
-                                          <dd>{value}</dd>
-                                        </div>
-                                      ))}
-                                    </dl>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </article>
-
-                          <article className="provider-order-total">
-                            <span className="eyebrow">Provider total</span>
-                            <h3>Order summary</h3>
-                            <div className="provider-total-lines">
-                              <div><span>Subtotal</span><strong>{providerSubtotal || `Unavailable from ${selectedProvider.label}`}</strong></div>
-                              {providerFees.map(fee => (
-                                <div key={`${fee.label}-${fee.value}`}><span>{fee.label}</span><strong>{fee.value}</strong></div>
-                              ))}
-                              {providerDiscount && <div><span>Discount</span><strong>−{providerDiscount}</strong></div>}
-                              <div className="provider-grand-total">
-                                <span>Total</span>
-                                <strong>{providerTotal || `Unavailable from ${selectedProvider.label}`}</strong>
-                              </div>
+                            <div>
+                              <span aria-hidden="true">🛒</span>
+                              <strong>{providerMatchedItems.length} {providerMatchedItems.length === 1 ? "item" : "items"}</strong>
+                              <b>{providerTotal || providerSubtotal || "Total unavailable"}</b>
                             </div>
-                            <small>Only amounts returned by {selectedProvider.label} are shown. Kitch never estimates checkout totals.</small>
-                          </article>
-                        </div>
-                      </>
+                          </header>
+
+                          <div className={`provider-cart-notice ${providerReviewStatus === "success" ? "success" : "error"}`}>
+                            <span aria-hidden="true">{providerReviewStatus === "success" ? "✓" : "!"}</span>
+                            <p>
+                              {providerReviewStatus === "success"
+                                ? `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
+                                : providerCartReview.message || `${selectedProvider.label} cart synchronization needs attention.`}
+                              {providerUnavailableItems.length > 0 && ` ${providerUnavailableItems.length} selected ${providerUnavailableItems.length === 1 ? "item was" : "items were"} unavailable.`}
+                            </p>
+                          </div>
+
+                          {providerCartRows.length === 0 ? (
+                            <p className="provider-cart-empty">No {selectedProvider.label} cart items were added.</p>
+                          ) : (
+                            <div className="provider-cart-table" role="table" aria-label={`${selectedProvider.label} cart items sorted by subtotal`}>
+                              <div className="provider-cart-table-head" role="row">
+                                <span role="columnheader">Item</span>
+                                <span role="columnheader">Price</span>
+                                <span role="columnheader">Qty</span>
+                                <span role="columnheader">Unit</span>
+                                <span role="columnheader">Subtotal</span>
+                              </div>
+                              {providerCartRows.map(({ match, index, imageUrl, priceMinor, quantity, packSize, subtotalMinor }) => {
+                                const product = match.matched_product || {};
+                                const native = match.native_item || {};
+                                const productName = product.name || product.title || product.product_name || match.cart_item?.name || `${selectedProvider.label} cart item`;
+                                return (
+                                  <div key={`${native.id || native.name || index}-provider-match`} className="provider-product-row" role="row">
+                                    <div className="provider-product-item" role="cell">
+                                      <div className="provider-product-image">
+                                        {imageUrl ? (
+                                          <Image src={imageUrl} alt="" width={72} height={72} unoptimized />
+                                        ) : (
+                                          <span aria-hidden="true">{String(productName).slice(0, 1).toUpperCase()}</span>
+                                        )}
+                                      </div>
+                                      <div className="provider-product-main">
+                                        <strong>{productName}</strong>
+                                        <span>{native.name ? `From Kitch item: ${native.name}` : `Added to ${selectedProvider.label} cart`}</span>
+                                      </div>
+                                    </div>
+                                    <strong className="provider-line-price" role="cell">{formatMinorCurrency(priceMinor, providerCurrency) || "Unavailable"}</strong>
+                                    <span className="provider-line-quantity" role="cell">{quantity}</span>
+                                    <span className="provider-line-unit" role="cell">{packSize || "Not returned"}</span>
+                                    <strong className="provider-line-subtotal" role="cell">{formatMinorCurrency(subtotalMinor, providerCurrency) || "Unavailable"}</strong>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </article>
+                      </div>
                     )}
                   </section>
 
-                  <section className={`checkout-stage provider-payment-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
+                  <section className={`checkout-stage checkout-timeline-stage provider-payment-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
+                    <span className={`checkout-stage-number ${isProviderOrderComplete ? "completed" : "pending"}`} aria-hidden="true">6</span>
                     <div className="checkout-stage-heading">
-                      <span className="checkout-step-label">Step 5</span>
                       <div>
                         <h2>Payment and order</h2>
                         <p>Approve the exact reviewed cart before Kitch can place an external order.</p>
@@ -3069,7 +3068,7 @@ export default function Home() {
                         <span aria-hidden="true">⌑</span>
                         <div>
                           <strong>Provider cart review required</strong>
-                          <p>Payment and order placement unlock only after Step 4 contains a valid reviewed cart.</p>
+                          <p>Payment and order placement unlock only after stage 5 contains a valid reviewed cart.</p>
                         </div>
                       </div>
                     ) : (
@@ -3153,14 +3152,30 @@ export default function Home() {
                 </div>
 
                 <aside className="grocery-information-sidebar">
-                  <article className="grocery-side-card list-summary-card">
-                    <h3>List summary</h3>
+                  <article className="grocery-side-card provider-order-summary-card">
+                    <span className="eyebrow">Checkout summary</span>
+                    <h3>Order summary</h3>
                     <p><strong>{totalCount}</strong> native items</p>
-                    <div className="summary-total-row">
-                      <span>{selectedProvider.label} total</span>
-                      <strong>{providerTotal || (providerCartReview ? "Not returned" : "Not synced")}</strong>
+                    <div className="provider-total-lines">
+                      <div>
+                        <span>Subtotal</span>
+                        <strong>{providerSubtotal || (providerCartReview ? "Not returned" : "Not synced")}</strong>
+                      </div>
+                      {providerFees.map(fee => (
+                        <div key={`${fee.label}-${fee.value}`}><span>{fee.label}</span><strong>{fee.value}</strong></div>
+                      ))}
+                      {providerDiscount && <div><span>Discount</span><strong>−{providerDiscount}</strong></div>}
+                      <div className="provider-grand-total">
+                        <span>{selectedProvider.label} total</span>
+                        <strong>{providerTotal || (providerCartReview ? "Unavailable" : "Not synced")}</strong>
+                      </div>
                     </div>
-                    <small>Prices, fees, and availability appear only after the ordering app responds.</small>
+                    {providerCartReview && (
+                      <span className={`provider-total-source source-${providerTotalSource}`}>
+                        {providerTotalSource === "provider" ? "Provider total" : providerTotalSource === "line_items" ? "Exact line-item total" : "Total unavailable"}
+                      </span>
+                    )}
+                    <small>{providerCartReview ? providerTotalNotice : `Prices and totals appear after ${selectedProvider.label} responds.`}</small>
                   </article>
 
                   <article className="grocery-side-card missing-card">

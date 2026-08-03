@@ -120,6 +120,7 @@ class FakeSession:
                             "name": f"Matched {args['query']}",
                             "productVariantId": "variant-1",
                             "storeProductId": "store-product-1",
+                            "price": 9900,
                         }
                     ]
                 },
@@ -271,10 +272,12 @@ class ZeptoAddressFirstTests(unittest.TestCase):
                     {"label": "Handling fee", "amount_minor": 900},
                 ],
                 "total_minor": 45300,
+                "total_source": "provider",
+                "total_notice": "Final total returned by Zepto.",
             },
         )
 
-    def test_cart_summary_keeps_missing_provider_values_null(self):
+    def test_cart_summary_does_not_calculate_when_provider_returns_fees_without_total(self):
         adapter = ZeptoProviderAdapter()
 
         summary = adapter.normalize_cart_summary(
@@ -285,13 +288,83 @@ class ZeptoAddressFirstTests(unittest.TestCase):
                         "fees": [{"label": "Rain fee", "amount": "₹12"}],
                     }
                 }
-            }
+            },
+            [
+                {
+                    "cart_item": {"price": 42950, "quantity": 1},
+                    "matched_product": {"name": "Milk"},
+                }
+            ],
         )
 
         self.assertEqual(summary["subtotal_minor"], 42950)
         self.assertEqual(summary["fees"], [{"label": "Rain fee", "amount_minor": 1200}])
         self.assertIsNone(summary["discount_minor"])
         self.assertIsNone(summary["total_minor"])
+        self.assertEqual(summary["total_source"], "unavailable")
+        self.assertIn("additional charge", summary["total_notice"])
+
+    def test_cart_summary_calculates_exact_line_total_when_there_are_no_adjustments(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {"structuredContent": {"items": [{"name": "Milk"}, {"name": "Bread"}]}},
+            [
+                {"cart_item": {"price": 9900, "quantity": 2}},
+                {"cart_item": {"price": "₹45", "quantity": 1}},
+            ],
+        )
+
+        self.assertEqual(summary["subtotal_minor"], 24300)
+        self.assertEqual(summary["total_minor"], 24300)
+        self.assertEqual(summary["total_source"], "line_items")
+        self.assertIn("no additional charges", summary["total_notice"])
+
+    def test_cart_summary_can_sum_zepto_view_cart_items_directly(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {
+                "items": [
+                    {"name": "Chia seeds", "price": 14900, "quantity": 1},
+                    {"name": "Almond milk", "price": 49200, "quantity": 2},
+                ],
+                "totalItems": 3,
+            }
+        )
+
+        self.assertEqual(summary["subtotal_minor"], 113300)
+        self.assertEqual(summary["total_minor"], 113300)
+        self.assertEqual(summary["total_source"], "line_items")
+
+    def test_provider_total_takes_precedence_over_line_item_sum(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {
+                "structuredContent": {
+                    "cart": {
+                        "deliveryFee": 1900,
+                        "grandTotal": 11800,
+                    }
+                }
+            },
+            [{"cart_item": {"price": 9900, "quantity": 1}}],
+        )
+
+        self.assertEqual(summary["total_minor"], 11800)
+        self.assertEqual(summary["total_source"], "provider")
+
+    def test_tax_without_provider_total_blocks_line_item_calculation(self):
+        adapter = ZeptoProviderAdapter()
+
+        summary = adapter.normalize_cart_summary(
+            {"structuredContent": {"cart": {"tax": 500}}},
+            [{"cart_item": {"price": 9900, "quantity": 1}}],
+        )
+
+        self.assertIsNone(summary["total_minor"])
+        self.assertEqual(summary["total_source"], "unavailable")
 
     def test_malformed_cart_summary_does_not_invent_totals(self):
         adapter = ZeptoProviderAdapter()
@@ -313,6 +386,8 @@ class ZeptoAddressFirstTests(unittest.TestCase):
                 "discount_minor": None,
                 "fees": [],
                 "total_minor": None,
+                "total_source": "unavailable",
+                "total_notice": "Zepto did not return a final cart total.",
             },
         )
 

@@ -419,10 +419,17 @@ placement.
 - Prerequisite: The native grocery cart contains at least two eligible,
   selected items, saved Zepto addresses load successfully, and the Zepto
   connection reports configured.
-- Workflow check: Open **Groceries** and confirm the main column shows the five
-  chronological stages: native cart, ordering app, address and transfer, Zepto
-  cart review, and payment and order. Later stages must remain visible but
-  locked until their prerequisites are satisfied.
+- Workflow check: Open **Groceries** and confirm the main column shows six
+  chronological stages with round numbered markers: native cart, ordering app,
+  delivery address, transfer, Zepto cart review, and payment and order. Later
+  stages must remain visible but locked until their prerequisites are
+  satisfied.
+- Progress-state check: Pending stage markers must be light green and completed
+  stages dark green. After a successful transfer, edit any native-cart row and
+  confirm the transfer, review, and order markers return to pending until the
+  cart is synchronized and reviewed again.
+- Native-cart check: Confirm the native cart can be expanded for row-level
+  review and collapsed back to its item/category/selection summary.
 - Provider check: Confirm Zepto is selected by default. Blinkit must show
   **Coming soon**, remain disabled, and issue no provider requests.
 - Prompt/action: Review the selected items, choose a saved delivery address,
@@ -433,9 +440,21 @@ placement.
   availability.
 - Review check: Compare the native selection with the Zepto review. Every
   successfully resolved item should correspond to a selected native row;
-  unavailable or substituted items should be clearly identified. Review the
-  returned subtotal, discounts, fee lines, and total. Missing provider amounts
-  must say they are unavailable rather than showing an estimate or zero.
+  unavailable or substituted items should be clearly identified. Confirm the
+  cart-item list uses the main-column width and the order summary appears in
+  the right sidebar. Review the subtotal, discounts, fee lines, total, and
+  total-source label.
+- Cart-row check: Confirm each resolved row shows the Zepto product image when
+  returned, mapped Kitch item, unit price, read-only quantity, pack size, and
+  line subtotal. Rows must be ordered by `price × quantity` descending. No
+  match-quality badges or direct `+`/`−` quantity controls should appear.
+- Transfer-stage check: Confirm stage 4 is one compact row containing its title,
+  explanation, and single transfer button without an extra inner section.
+- Total check: If Zepto returns a final cart total, it must be shown unchanged.
+  If Zepto omits it and returns exact line prices/quantities with no adjustment,
+  their exact sum may be shown and labelled **Exact line-item total**. If any
+  fee, tax, discount, or other adjustment exists without a Zepto final total,
+  the total must be **Unavailable**; Kitch must not calculate it.
 - Native-state check: Syncing to Zepto must not delete, check off, or otherwise
   mutate the durable native grocery cart.
 - Concurrency and loading check: Start the sync and, while it is running,
@@ -444,7 +463,8 @@ placement.
   controls are disabled. If a native-cart save is already in progress, the
   Zepto sync must wait rather than snapshotting stale values.
 - Pass criteria: The sync completes, the prominent **Zepto cart review**
-  accurately represents the selected native items and provider-returned total,
+  accurately represents the selected native items and the sidebar accurately
+  represents either the authoritative provider total or safe line-item total,
   the cart stays locked only for the duration of the request, payment/order
   controls unlock only after review, and no order is placed.
 - Fail criteria: Nothing reaches the Zepto review, unrelated items are added,

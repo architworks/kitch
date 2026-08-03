@@ -312,8 +312,10 @@ Current backend-owned provider behavior:
 - `ZeptoProviderAdapter` can sync selected, non-stocked native cart rows to Zepto through backend HTTP routes.
 - The provider-neutral Groceries workflow selects Zepto by default and keeps
   Blinkit disabled until its adapter exists.
-- Zepto sync creates a review snapshot with provider-returned cart totals when
-  available; native-cart or delivery-context changes invalidate that snapshot.
+- Zepto sync creates a review snapshot with an authoritative provider total
+  when available. An exact line-item sum is allowed only when the response has
+  no additional adjustment; native-cart or delivery-context changes invalidate
+  that snapshot.
 - Real order placement requires a separate frontend approval button.
 
 Why provider behavior is outside the agent topology:

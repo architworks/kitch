@@ -236,6 +236,17 @@ class ZeptoProviderAdapter:
                 matched_items.append({
                     "native_item": item,
                     "matched_product": product,
+                    "cart_item": {
+                        "price": product.get("price"),
+                        "quantity": next(
+                            (
+                                add_args[key]
+                                for key in ("quantity", "qty", "count", "amount")
+                                if add_args.get(key) is not None
+                            ),
+                            None,
+                        ),
+                    },
                     "add_result": add_result,
                 })
 
@@ -249,7 +260,7 @@ class ZeptoProviderAdapter:
                 "items": matched_items,
                 "unavailable_items": unavailable_items,
                 "zepto_cart": zepto_cart,
-                "cart_summary": self.normalize_cart_summary(zepto_cart),
+                "cart_summary": self.normalize_cart_summary(zepto_cart, matched_items),
                 "checkout_context": checkout_context,
                 "store_context": store_context,
                 "available_tools": list(tools.keys()),
@@ -327,7 +338,7 @@ class ZeptoProviderAdapter:
             "items": matched_items,
             "unavailable_items": unavailable_items,
             "zepto_cart": zepto_cart,
-            "cart_summary": self.normalize_cart_summary(zepto_cart),
+            "cart_summary": self.normalize_cart_summary(zepto_cart, matched_items),
             "checkout_context": checkout_context,
             "store_context": store_context,
             "available_tools": list(tools.keys()),
@@ -370,14 +381,20 @@ class ZeptoProviderAdapter:
     def _error(self, code: str, message: str, **extra: Any) -> Dict[str, Any]:
         return {"status": "error", "provider": "zepto", "code": code, "message": message, **extra}
 
-    def normalize_cart_summary(self, payload: Any) -> Dict[str, Any]:
-        """Extract provider-returned totals without estimating missing values."""
+    def normalize_cart_summary(
+        self,
+        payload: Any,
+        matched_items: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Prefer Zepto totals, with a guarded exact line-item fallback."""
         summary: Dict[str, Any] = {
             "currency": "INR",
             "subtotal_minor": None,
             "discount_minor": None,
             "fees": [],
             "total_minor": None,
+            "total_source": "unavailable",
+            "total_notice": "Zepto did not return a final cart total.",
         }
         objects: List[Dict[str, Any]] = []
         self._collect_payload_objects(payload, objects)
@@ -449,7 +466,136 @@ class ZeptoProviderAdapter:
         if not fees:
             fees = self._first_fee_list(objects)
         summary["fees"] = fees
+
+        if summary["total_minor"] is not None:
+            summary["total_source"] = "provider"
+            summary["total_notice"] = "Final total returned by Zepto."
+            return summary
+
+        has_adjustments = bool(fees) or bool(summary["discount_minor"]) or self._has_additional_adjustments(objects)
+        if has_adjustments:
+            summary["total_notice"] = (
+                "Zepto returned an additional charge or discount without a final total, "
+                "so Kitch did not calculate one."
+            )
+            return summary
+
+        line_total = self._sum_matched_line_items(matched_items or [])
+        if line_total is None:
+            line_total = self._first_payload_line_total(objects)
+        if line_total is not None:
+            if summary["subtotal_minor"] is None:
+                summary["subtotal_minor"] = line_total
+            summary["total_minor"] = line_total
+            summary["total_source"] = "line_items"
+            summary["total_notice"] = (
+                "Calculated from Zepto-returned selling prices and cart quantities; "
+                "the response contained no additional charges."
+            )
         return summary
+
+    def _has_additional_adjustments(self, objects: List[Dict[str, Any]]) -> bool:
+        adjustment_keys = {
+            "tax",
+            "taxes",
+            "taxbreakdown",
+            "gst",
+            "cess",
+            "tip",
+            "fee",
+            "fees",
+            "feebreakdown",
+            "charge",
+            "charges",
+            "chargebreakdown",
+            "additionalcharges",
+            "checkoutcharges",
+            "othercharges",
+            "deliveryfee",
+            "deliverycharge",
+            "handlingfee",
+            "handlingcharge",
+            "platformfee",
+            "servicefee",
+            "conveniencefee",
+            "packagingfee",
+            "smallcartfee",
+            "surgefee",
+            "surgecharge",
+        }
+        for item in objects:
+            for key, value in item.items():
+                normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if normalized_key not in adjustment_keys:
+                    continue
+                if isinstance(value, list):
+                    if value:
+                        return True
+                    continue
+                if isinstance(value, dict):
+                    if value:
+                        return True
+                    continue
+                amount = self._to_minor_units(value)
+                if amount is None:
+                    if value not in (None, "", False):
+                        return True
+                elif amount != 0:
+                    return True
+        return False
+
+    def _first_payload_line_total(self, objects: List[Dict[str, Any]]) -> int | None:
+        for item in objects:
+            for key in ("items", "cart_items", "cartItems"):
+                raw_items = item.get(key)
+                if not isinstance(raw_items, list) or not raw_items:
+                    continue
+                normalized_matches = [
+                    {"cart_item": raw_item}
+                    for raw_item in raw_items
+                    if isinstance(raw_item, dict)
+                ]
+                if len(normalized_matches) != len(raw_items):
+                    continue
+                line_total = self._sum_matched_line_items(normalized_matches)
+                if line_total is not None:
+                    return line_total
+        return None
+
+    def _sum_matched_line_items(self, matched_items: List[Dict[str, Any]]) -> int | None:
+        if not matched_items:
+            return None
+
+        total = 0
+        for match in matched_items:
+            if not isinstance(match, dict):
+                return None
+            cart_item = match.get("cart_item")
+            product = match.get("matched_product")
+            cart_item = cart_item if isinstance(cart_item, dict) else {}
+            product = product if isinstance(product, dict) else {}
+
+            raw_price = None
+            for source in (cart_item, product):
+                for key in ("price", "sellingPrice", "selling_price", "discountedPrice"):
+                    if source.get(key) is not None:
+                        raw_price = source[key]
+                        break
+                if raw_price is not None:
+                    break
+            price_minor = self._to_minor_units(raw_price)
+            raw_quantity = cart_item.get("quantity")
+            if price_minor is None or isinstance(raw_quantity, bool):
+                return None
+            try:
+                quantity = Decimal(str(raw_quantity))
+            except (InvalidOperation, ValueError, TypeError):
+                return None
+            if quantity <= 0:
+                return None
+            total += int((Decimal(price_minor) * quantity).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+        return total
 
     def _collect_payload_objects(self, value: Any, objects: List[Dict[str, Any]]) -> None:
         if isinstance(value, dict):

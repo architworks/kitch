@@ -124,6 +124,8 @@ def _build_zepto_order_review(
             "discount_minor": None,
             "fees": [],
             "total_minor": None,
+            "total_source": "unavailable",
+            "total_notice": "Zepto did not return a final cart total.",
         },
         "checkout_context": checkout_context,
         "store_context": result.get("store_context") or {},

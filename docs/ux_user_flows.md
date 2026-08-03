@@ -292,10 +292,10 @@ Example prompts:
 
 The native grocery cart is structured backend state. The Groceries page presents
 one visible, prerequisite-locked workflow: native cart review, ordering-app
-selection, delivery address and transfer, provider cart review, then payment
-and order. Zepto is the live default; Blinkit is a disabled `Coming soon`
-placeholder. Provider substitution review should continue to improve as live
-integrations mature.
+selection, delivery address, provider transfer, provider cart review, then
+payment and order. Zepto is the live default; Blinkit is a disabled
+`Coming soon` placeholder. Provider substitution review should continue to
+improve as live integrations mature.
 
 ---
 
@@ -317,22 +317,31 @@ Example prompts:
 1. The user reviews the native cart and selects eligible rows.
 2. The user chooses an ordering app; Zepto is available and Blinkit is locked
    as `Coming soon`.
-3. The user selects a saved delivery address, then transfers the native
-   selection.
-4. Kitch uses the native cart as the source of truth, excluding unselected and
+3. The user selects a saved delivery address.
+4. The user starts the transfer in a separate, clearly numbered stage.
+5. Kitch uses the native cart as the source of truth, excluding unselected and
    pantry-covered rows and applying known brand preferences.
-5. Kitch clears/replaces the Zepto cart, selects matching products, and reads
+6. Kitch clears/replaces the Zepto cart, selects matching products, and reads
    the resulting provider cart.
-6. The app shows the actual Zepto cart, unavailable items, address/payment
-   state, and only provider-returned subtotal, fees, discounts, and total.
-7. The user must acknowledge the exact review before any order is placed.
+7. The main column shows the actual Zepto cart and unavailable items. The
+   read-only rows show product images, mapped native items, unit prices,
+   quantities, pack sizes, and line subtotals ordered from highest to lowest
+   value. The right sidebar shows the financial summary without narrowing the
+   cart list.
+8. The sidebar uses Zepto's total when returned. If no adjustment exists, it
+   may show the exact sum of returned line prices and quantities, clearly
+   labelled as a line-item total.
+9. The user must acknowledge the exact review before any order is placed.
 
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
 - The experience may indicate that the Zepto cart changed only after sync succeeds.
 - The user should see enough information to trust the actual Zepto cart
-  contents and total. Kitch must never estimate a missing provider amount.
+  contents and total. Kitch must never derive a final total when Zepto reports
+  a fee, tax, discount, or other adjustment without its own final total.
+- The native cart starts as a compact summary and can be expanded for row-level
+  editing without breaking the checkout chronology.
 - Brand substitutions should be visible.
 - Order placement must require explicit user approval.
 - Auth, payment, address, and OTP issues should surface as recoverable states.

@@ -416,9 +416,10 @@ Current behavior:
 - Kitch syncs selected native cart rows into Zepto only through backend provider endpoints.
 - The Groceries UI uses provider-neutral state and metadata. Zepto is the live
   default provider; Blinkit is a disabled `Coming soon` placeholder.
-- Checkout actions appear in one main-column sequence: native review, provider
-  choice, delivery address and transfer, provider cart review, then payment and
-  order. Sidebar cards contain summaries and cart-maintenance shortcuts.
+- Checkout actions appear in one six-stage main-column sequence: collapsible
+  native review, provider choice, delivery address, transfer, provider cart
+  review, then payment and order. Sidebar cards contain the financial summary
+  and cart-maintenance shortcuts.
 - The frontend loads saved Zepto addresses and requires the user to choose one before sync.
 - The frontend waits for pending native-cart writes before sync, then locks cart
   editing behind a modal, focus-retaining transfer animation until the provider
@@ -435,7 +436,12 @@ Current behavior:
 - Existing Zepto cart is replaced before sync.
 - Unavailable/unresolved items are returned in the review.
 - The adapter normalizes provider-returned subtotal, discount, fee, and total
-  values into `cart_summary`; absent values stay null and are not estimated.
+  values into `cart_summary`. Zepto's final total always wins. When it is
+  absent, the adapter can sum exact returned selling prices and cart quantities
+  only if no fee, tax, discount, or other adjustment is present; otherwise the
+  total stays null.
+- `cart_summary.total_source` distinguishes `provider`, `line_items`, and
+  `unavailable`, while `total_notice` explains the decision to the UI.
 - `cart_summary` is covered by the review snapshot hash.
 - Provider cart details are presented as a cart review, not internal matching
   terminology.
