@@ -74,7 +74,7 @@ Before running the scenarios, prepare a consistent household test context.
 - If a provider cart or grocery preview is used, treat it as a preview unless
   the product explicitly completes an approved cart sync.
 
-## Historical Regression Context: Meal Plan Upsert Conflict
+## Meal-Plan Persistence Regression Context
 
 The original production result document included a resolved database conflict
 bug. Keep this as a regression concern during meal plan generation and edit
@@ -82,17 +82,17 @@ testing.
 
 Functional risk to test:
 
-- Creating a new weekly meal plan should replace or update the existing week
-  without duplicate-day errors.
-- Editing one meal should not create a duplicate day.
-- Replanning the whole week should leave exactly one plan entry per day.
+- Creating a plan should replace only the requested calendar dates without
+  duplicate-date errors.
+- Editing one meal should not create a duplicate `(profile_id, plan_date)` row.
+- Replanning a date range should leave exactly one plan entry per date.
 - Repeated edits should preserve unrelated meals.
 
 Functional pass criteria:
 
 - The user sees a successful assistant response.
-- The planner still shows one complete weekly plan.
-- No duplicate days appear.
+- The planner shows the requested real calendar dates.
+- No duplicate dates appear.
 - The edited or regenerated meal is visible after refresh or later query.
 
 ## Overall Functional Outcome Template
@@ -124,9 +124,9 @@ Major caveats:
 
 ## Section 1: Meal Plan Generation
 
-These scenarios verify that the assistant can generate complete weekly meal
-plans and replace an existing weekly plan when the user changes dietary or
-cuisine preference.
+These scenarios verify that the assistant can generate plans for exact dates
+and ranges, while preserving complete Monday-Sunday planning when the user
+explicitly requests next week.
 
 ### Scenario 1.1 - Balanced Weekly Meal Plan
 
@@ -143,7 +143,7 @@ cuisine preference.
 
 ### Scenario 1.2 - Indian Weekly Meal Plan Replacement
 
-- Prompt/action: "Actually, I'm feeling like eating Indian food this week. Plan
+- Prompt/action: "Actually, I'm feeling like eating Indian food next week. Plan
   a completely new weekly meal plan focusing on delicious Indian dishes."
 - Expected behavior: The assistant replaces the prior plan with a new Indian
   meal plan.
@@ -159,7 +159,7 @@ cuisine preference.
 ### Scenario 1.3 - Keto Weekly Meal Plan and Preference Change
 
 - Prompt/action: "Change my preference to keto and make a full weekly keto meal
-  plan."
+  plan for next week."
 - Expected behavior: The assistant acknowledges or applies keto preference and
   creates a complete keto-oriented weekly plan.
 - Observe: Meals should be plausibly keto: eggs, avocado, paneer, chicken,
@@ -172,6 +172,57 @@ cuisine preference.
 - Fail criteria: Incomplete plan, non-keto plan, preference not remembered, or
   old cuisine plan remains.
 
+### Scenario 1.4 - Plan Tomorrow Only
+
+- Record before testing: Household timezone, today's ISO date, and tomorrow's
+  ISO date.
+- Prompt/action: "Plan breakfast, lunch, and dinner for tomorrow."
+- Expected behavior: Exactly tomorrow's household-calendar date is planned.
+  The assistant confirmation must name that date, and dates outside tomorrow
+  must remain unchanged.
+- UI check: After success, the planner opens the week containing tomorrow and
+  selects tomorrow. The hero and selected day show the same next meal/date.
+- Persistence check: Confirm one durable row exists for tomorrow with all three
+  slots and no meal was projected onto the same weekday in another week.
+- Pass criteria: Chat, database, planner, and hero agree on the exact date.
+- Fail criteria: The meal appears next week, another weekday-equivalent date is
+  changed, or the UI stays on an unrelated week.
+
+### Scenario 1.5 - Plan the Remainder of This Week
+
+- Prompt/action: Run midweek: "Plan meals for this week."
+- Expected behavior: Kitch replaces today through the coming Sunday only.
+- Persistence check: Confirm each requested date has breakfast, lunch, and
+  dinner. Earlier dates in the week are unchanged, as are dates after Sunday.
+- Pass criteria: The persisted range begins today and ends Sunday.
+- Fail criteria: Past dates are rewritten, next week is used, or any requested
+  date is missing.
+
+### Scenario 1.6 - Plan an Exact Future Date
+
+- Prompt/action: Choose a future ISO date and ask: "Plan my meals for
+  <human-readable exact date>."
+- Expected behavior: Only that date is created or replaced, and the response
+  confirms the exact date.
+- UI check: The planner navigates to that date's week and selects it.
+- Pass criteria: Exactly one requested date changes and unrelated dates remain
+  byte-for-byte equivalent in persisted meal names.
+- Fail criteria: Kitch plans a full week, uses the wrong date, or edits a past
+  date.
+
+### Scenario 1.7 - Plan a Rolling Date Range
+
+- Prompt/action: "Plan the next 3 days," then separately test "Plan the next 3
+  days starting tomorrow."
+- Expected behavior: The first request covers today plus two dates; the second
+  covers tomorrow plus two dates. Each replacement is atomic.
+- Persistence check: Confirm exact range boundaries and complete meal slots.
+- Transaction check: Force one invalid row in a test environment and confirm no
+  date in that operation is partially replaced.
+- Pass criteria: Both phrases resolve to the documented exact ranges and
+  failures roll back the complete range.
+- Fail criteria: Off-by-one dates, week projection, or partial persistence.
+
 ## Section 2: Plan Modification
 
 These scenarios verify that targeted edits affect only the requested meals and
@@ -179,6 +230,8 @@ preserve the rest of the weekly schedule.
 
 ### Scenario 2.1 - Swap Thursday Dinner to Vegan
 
+- Prerequisite: Open a planner week whose Thursday is not in the past and has a
+  dinner. Record the exact selected Thursday date.
 - Prompt/action: "Actually, swap Thursday dinner with something vegan."
 - Expected behavior: Only Thursday dinner changes to a vegan meal.
 - Observe: The assistant should identify or update Thursday dinner and not
@@ -192,6 +245,8 @@ preserve the rest of the weekly schedule.
 
 ### Scenario 2.2 - Change Monday Breakfast to Chia Pudding
 
+- Prerequisite: Open a planner week whose Monday is not in the past and has a
+  breakfast. Record the exact selected Monday date.
 - Prompt/action: "Change Monday breakfast to chia pudding"
 - Expected behavior: Only Monday breakfast changes to chia pudding.
 - Observe: The assistant should perform a narrow edit rather than suggesting a
@@ -219,6 +274,29 @@ preserve the rest of the weekly schedule.
   test begins.
 - Fail criteria: Salmon remains, unrelated meals change, or the plan becomes
   incomplete.
+
+### Scenario 2.4 - Same Weekday in Different Weeks Remains Independent
+
+- Prerequisite: Store meals for two different Thursdays in adjacent weeks.
+- Prompt/action: While the first Thursday's week is visible, select that date
+  and ask to change its dinner.
+- Expected behavior: The bare weekday is resolved from the visible planner
+  context and only that exact Thursday changes.
+- Persistence check: Compare both dated rows before and after.
+- Pass criteria: The selected week's Thursday changes; the other Thursday and
+  every unrelated slot remain unchanged.
+- Fail criteria: Both Thursdays change or the wrong week is selected.
+
+### Scenario 2.5 - Atomic Multi-Date Meal Edit
+
+- Prompt/action: Ask for two specific future dated meal-slot changes in one
+  message.
+- Expected behavior: Both edits are applied together while every unrelated
+  meal and date remains unchanged.
+- Transaction check: Force one edit to fail in a test environment and confirm
+  neither edit persists.
+- Pass criteria: All requested edits succeed together or all roll back.
+- Fail criteria: Partial persistence or unrelated changes.
 
 ## Section 2A: Recipe Management
 
@@ -370,6 +448,19 @@ usable grocery list.
 - Pass criteria: A coherent shopping list is generated and persisted.
 - Fail criteria: No list, no persistence, or the list ignores the active meal
   plan.
+
+### Scenario 5.3 - Groceries for an Exact Date Range
+
+- Prerequisite: Persist distinct meals in the current and following week.
+- Prompt/action: Ask for groceries for one exact date, then for a bounded date
+  range.
+- Expected behavior: Ingredients are derived only from meals within the named
+  dates, with pantry stock subtracted as usual.
+- Persistence check: Confirm the recipe-grocery artifact records the intended
+  dated meal context and the native cart does not include ingredients unique
+  to dates outside the request.
+- Pass criteria: The grocery result respects exact range boundaries.
+- Fail criteria: Kitch silently uses the visible or next full week instead.
 
 ## Section 6: Pantry-Aware Grocery Subtraction
 
@@ -583,8 +674,8 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 
 ## Section 9: Datetime Awareness
 
-These scenarios verify that relative dates are resolved correctly and used to
-query meal or diary state.
+These scenarios verify that relative and explicit dates are resolved using the
+household timezone and used to query the exact dated meal or diary state.
 
 Record the actual date and timezone in the artifact before running this
 section. The expected weekday depends on the run date.
@@ -596,7 +687,8 @@ section. The expected weekday depends on the run date.
   day and returns that day's dinner from the saved plan.
 - Observe: The response should state or imply the correct weekday and name the
   scheduled dinner.
-- Persistence check: Compare the answer with the current saved weekly plan.
+- Persistence check: Compare the answer with the row whose `plan_date` is
+  today's household-calendar date.
 - Pass criteria: Correct date resolution and correct dinner.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
@@ -606,8 +698,7 @@ section. The expected weekday depends on the run date.
 - Expected behavior: The assistant resolves "tomorrow morning" to tomorrow's
   breakfast and returns the saved meal.
 - Observe: The response should state or imply tomorrow's correct weekday.
-- Persistence check: Compare the answer with tomorrow's breakfast in the saved
-  weekly plan.
+- Persistence check: Compare the answer with tomorrow's exact dated row.
 - Pass criteria: Correct date resolution and correct breakfast.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
@@ -622,6 +713,33 @@ section. The expected weekday depends on the run date.
 - Pass criteria: Total matches the persisted diary for today.
 - Fail criteria: Wrong date, old entries included, logged entries omitted, or
   no total when diary entries exist.
+
+### Scenario 9.4 - Current-Week Navigation and Empty Dates
+
+- Action: Open the planner, navigate previous week, next week, and back with
+  **Today**.
+- Expected behavior: Every view contains Monday through Sunday with exact date
+  labels, including empty dates. Today, past, planned, selected, and empty
+  states are visually distinct.
+- Empty-current-week check: When the current week has no meals but a future
+  plan exists, keep the current week visible and show a direct link to the next
+  planned date.
+- Pass criteria: Navigation fetches the correct seven dates and Today restores
+  the household current week without projecting another week's meals.
+- Fail criteria: Weekday-only reuse, browser-timezone drift, missing empty days,
+  or automatic navigation away from an empty current week.
+
+### Scenario 9.5 - Household Timezone Overrides Browser Timezone
+
+- Setup: Keep the household timezone at `Asia/Kolkata` and run the browser in a
+  substantially different local timezone.
+- Prompt/action: Around a date boundary, ask about today and tomorrow, reload,
+  and inspect the planner and hero.
+- Expected behavior: Chat, API, planner, hero, and persisted `plan_date` values
+  all use the household date, not browser or naive server time.
+- Pass criteria: The same dates and next chronological meal remain visible
+  before and after reload and backend restart.
+- Fail criteria: Any surface changes date because of browser timezone.
 
 ## Final Run Summary Template
 
@@ -659,8 +777,8 @@ Close every artifact with a functional summary.
 The original production verification established these broad product goals.
 Future runs should continue to report against them.
 
-- Weekly plans can be generated, replaced, and narrowly edited without
-  duplicate days or lost meals.
+- Calendar-date plans can coexist across weeks, be replaced by exact range, and
+  be narrowly edited without duplicate dates or lost meals.
 - Text and image food logging create persisted diary entries with plausible
   nutrition.
 - Fridge scans and pantry updates persist stocked items.

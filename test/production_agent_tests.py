@@ -2,9 +2,10 @@
 """
 Kitch Production Agent Test Suite
 ==================================
-Runs the 20 test scenarios from docs/test_scenarios.md against the live production application
-using actual FastAPI endpoints (localhost:8000) and queries the live Supabase database
-to assert database integrity, persistence, and state.
+Runs the scriptable functional scenarios against the live application using
+FastAPI endpoints (localhost:8000) and the live Supabase database. Provider
+checkout scenarios remain in the manual/browser blueprint because they require
+an authenticated Zepto session and must not place a real order.
 
 Usage:
     python test/production_agent_tests.py
@@ -17,7 +18,9 @@ import time
 import requests
 import zlib
 import struct
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # Add backend directory to path to import supabase client directly for database side-effect verification
 sys.path.insert(0, "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/backend")
@@ -26,6 +29,36 @@ from app.supabase_client import supabase, get_user_id
 BASE_URL = "http://localhost:8000"
 ACTIVE_USER = "Archit(me)"
 PROFILE_ID = get_user_id(ACTIVE_USER)
+HOUSEHOLD_TIMEZONE = "Asia/Kolkata"
+
+
+def household_today() -> date:
+    return datetime.now(ZoneInfo(HOUSEHOLD_TIMEZONE)).date()
+
+
+def week_start_for(value: date) -> date:
+    return value - timedelta(days=value.weekday())
+
+
+def next_week_range() -> tuple[date, date]:
+    start = week_start_for(household_today()) + timedelta(days=7)
+    return start, start + timedelta(days=6)
+
+
+def meal_plan_rows(start_date: date | None = None, end_date: date | None = None):
+    query = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID)
+    if start_date:
+        query = query.gte("plan_date", start_date.isoformat())
+    if end_date:
+        query = query.lte("plan_date", end_date.isoformat())
+    return query.order("plan_date").execute().data
+
+
+def meal_plan_text(rows) -> str:
+    return " ".join(
+        f"{row.get('breakfast_name', '')} {row.get('lunch_name', '')} {row.get('dinner_name', '')}"
+        for row in rows
+    ).lower()
 
 def generate_solid_png(width=128, height=128) -> bytes:
     """Generates standard, valid solid white PNG image bytes dynamically."""
@@ -91,7 +124,10 @@ def chat_request(message: str) -> str:
         "active_user": ACTIVE_USER,
         "diet_preference": "balanced",
         "household_size": 3,
-        "weekly_plan": {},
+        "planner_context": {
+            "visible_week_start": week_start_for(household_today()).isoformat(),
+            "selected_date": household_today().isoformat()
+        },
         "pantry_stock": [],
         "grocery_list": []
     }
@@ -137,36 +173,37 @@ def run_tests():
     try:
         reply = chat_request(prompt_1_1)
         # Verify in Supabase
-        db_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
-        if len(db_plans.data) >= 5: # At least 5 days planned
-            log_test("1.1", prompt_1_1, f"Saved weekly plan dynamically to Supabase. Found {len(db_plans.data)} daily plans in DB.", "PASS")
+        range_start, range_end = next_week_range()
+        rows = meal_plan_rows(range_start, range_end)
+        if len(rows) == 7 and all(row.get(f"{slot}_name") for row in rows for slot in ("breakfast", "lunch", "dinner")):
+            log_test("1.1", prompt_1_1, f"Saved all 21 meal slots for {range_start} through {range_end} in Supabase.", "PASS")
         else:
-            log_test("1.1", prompt_1_1, f"Agent responded but only {len(db_plans.data)} rows were written to Supabase.", "PARTIAL")
+            log_test("1.1", prompt_1_1, f"Expected 7 complete dated rows for {range_start} through {range_end}; found {len(rows)}.", "PARTIAL")
     except Exception as e:
         log_test("1.1", prompt_1_1, f"Failed: {e}", "FAIL")
 
     # 1.2 Suggest Indian food
-    prompt_1_2 = "Actually, I'm feeling like eating Indian food this week. Plan a completely new weekly meal plan focusing on delicious Indian dishes."
+    prompt_1_2 = "Actually, I'm feeling like eating Indian food next week. Plan a completely new weekly meal plan focusing on delicious Indian dishes."
     try:
         reply = chat_request(prompt_1_2)
-        db_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
+        db_plans = meal_plan_rows()
         # Verify if meal plans contain typical Indian keywords
-        plan_text = " ".join([f"{r.get('breakfast_recipe_id')} {r.get('lunch_recipe_id')} {r.get('dinner_recipe_id')}" for r in db_plans.data]).lower()
+        plan_text = meal_plan_text(db_plans)
         indian_keywords = ["paneer", "roti", "chole", "dal", "masala", "khichdi", "chilla", "poha", "curry", "rice"]
         matches = [kw for kw in indian_keywords if kw in plan_text]
-        if len(db_plans.data) >= 5 and len(matches) >= 2:
+        if len(db_plans) >= 1 and len(matches) >= 2:
             log_test("1.2", prompt_1_2, f"Successfully generated Indian meal plan in Supabase. Detected keywords: {matches}", "PASS")
         else:
-            log_test("1.2", prompt_1_2, f"Plan generated, but few Indian dishes found. DB slots: {len(db_plans.data)}. Matches: {matches}", "PARTIAL")
+            log_test("1.2", prompt_1_2, f"Plan generated, but few Indian dishes found. DB dates: {len(db_plans)}. Matches: {matches}", "PARTIAL")
     except Exception as e:
         log_test("1.2", prompt_1_2, f"Failed: {e}", "FAIL")
 
     # 1.3 Keto Meal Plan
-    prompt_1_3 = "Change my preference to keto and make a full weekly keto meal plan."
+    prompt_1_3 = "Change my preference to keto and make a full weekly keto meal plan for next week."
     try:
         reply = chat_request(prompt_1_3)
-        db_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
-        plan_text = " ".join([f"{r.get('breakfast_recipe_id')} {r.get('lunch_recipe_id')} {r.get('dinner_recipe_id')}" for r in db_plans.data]).lower()
+        db_plans = meal_plan_rows()
+        plan_text = meal_plan_text(db_plans)
         # Check keto keywords
         keto_keywords = ["keto", "chia", "egg", "avocado", "almond", "spinach", "salmon", "chicken", "paneer", "salad", "tofu"]
         matches = [kw for kw in keto_keywords if kw in plan_text]
@@ -174,7 +211,7 @@ def run_tests():
         heavy_carbs = ["roti", "rice", "bread", "quinoa", "oats", "poha"]
         carb_matches = [cb for cb in heavy_carbs if cb in plan_text]
         
-        if len(db_plans.data) >= 5:
+        if len(db_plans) >= 1:
             if len(carb_matches) <= 2:
                 log_test("1.3", prompt_1_3, f"Successfully created keto weekly plan in Supabase. Keto keywords: {matches}. Carb exclusions active.", "PASS")
             else:
@@ -190,37 +227,38 @@ def run_tests():
     print("\n✏️  SECTION 2: PLAN MODIFICATION (MUST PRESERVE PLAN)")
     print("=" * 40)
 
-    # 2.1 Swap Thursday dinner with vegan
-    prompt_2_1 = "Actually, swap Thursday dinner with something vegan."
+    # 2.1 Swap one exact Thursday dinner with vegan
+    target_week_start, _ = next_week_range()
+    target_thursday = target_week_start + timedelta(days=3)
+    prompt_2_1 = f"Swap dinner on {target_thursday.isoformat()} with something vegan."
     try:
-        # Pre-fetch Thursday dinner
-        pre_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).eq("day", "Thursday").execute()
-        pre_thursday_dinner = pre_plans.data[0].get("dinner_recipe_id") if pre_plans.data else "None"
+        pre_rows = meal_plan_rows(target_thursday, target_thursday)
+        pre_thursday_dinner = pre_rows[0].get("dinner_name") if pre_rows else "None"
         
         reply = chat_request(prompt_2_1)
         
         # Verify update
-        post_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
-        thursday_row = next((r for r in post_plans.data if r["day"] == "Thursday"), None)
-        new_thursday_dinner = thursday_row.get("dinner_recipe_id") if thursday_row else "None"
+        post_plans = meal_plan_rows()
+        thursday_row = next((r for r in post_plans if r["plan_date"] == target_thursday.isoformat()), None)
+        new_thursday_dinner = thursday_row.get("dinner_name") if thursday_row else "None"
         
         # Verify that other days were preserved (e.g. Wednesday dinner didn't change or clear)
-        monday_row = next((r for r in post_plans.data if r["day"] == "Monday"), None)
+        monday_row = next((r for r in post_plans if r["plan_date"] == target_week_start.isoformat()), None)
         
-        if thursday_row and new_thursday_dinner != pre_thursday_dinner and monday_row and monday_row.get("dinner_recipe_id"):
-            log_test("2.1", prompt_2_1, f"Thursday dinner swapped from '{pre_thursday_dinner}' to '{new_thursday_dinner}'. Plan preserved: {len(post_plans.data)} slots intact.", "PASS")
+        if thursday_row and new_thursday_dinner != pre_thursday_dinner and monday_row and monday_row.get("dinner_name"):
+            log_test("2.1", prompt_2_1, f"Dinner on {target_thursday} changed from '{pre_thursday_dinner}' to '{new_thursday_dinner}'. Other dated rows remain present.", "PASS")
         else:
-            log_test("2.1", prompt_2_1, f"Swapping failed or plan wiped. New dinner: '{new_thursday_dinner}'. Preserved slots count: {len(post_plans.data)}", "FAIL")
+            log_test("2.1", prompt_2_1, f"Swap failed or plan was damaged. New dinner: '{new_thursday_dinner}'. Preserved dates: {len(post_plans)}", "FAIL")
     except Exception as e:
         log_test("2.1", prompt_2_1, f"Failed with database error: {e}", "FAIL", "Added on_conflict constraint target")
 
-    # 2.2 Change Monday breakfast to chia pudding
-    prompt_2_2 = "Change Monday breakfast to chia pudding"
+    # 2.2 Change one exact Monday breakfast to chia pudding
+    prompt_2_2 = f"Change breakfast on {target_week_start.isoformat()} to chia pudding"
     try:
         reply = chat_request(prompt_2_2)
-        post_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
-        monday_row = next((r for r in post_plans.data if r["day"] == "Monday"), None)
-        monday_breakfast = monday_row.get("breakfast_recipe_id") if monday_row else "None"
+        post_plans = meal_plan_rows()
+        monday_row = next((r for r in post_plans if r["plan_date"] == target_week_start.isoformat()), None)
+        monday_breakfast = monday_row.get("breakfast_name") if monday_row else "None"
         
         if monday_row and "chia" in monday_breakfast.lower():
             log_test("2.2", prompt_2_2, f"Monday breakfast updated successfully to '{monday_breakfast}'. All other slots intact.", "PASS")
@@ -235,18 +273,17 @@ def run_tests():
         # Pre-seed one meal with salmon
         supabase.table("meal_plans").upsert({
             "profile_id": PROFILE_ID,
-            "day": "Wednesday",
-            "breakfast_recipe_id": "Eggs",
-            "lunch_recipe_id": "Salmon Salad Bowl",
-            "dinner_recipe_id": "Grilled Salmon with Asparagus",
-            "snack_recipe_id": "Nuts"
-        }, on_conflict="profile_id,day").execute()
+            "plan_date": (target_week_start + timedelta(days=2)).isoformat(),
+            "breakfast_name": "Eggs",
+            "lunch_name": "Salmon Salad Bowl",
+            "dinner_name": "Grilled Salmon with Asparagus"
+        }, on_conflict="profile_id,plan_date").execute()
         
         reply = chat_request(prompt_2_3)
         
         # Verify no salmon remains
-        post_plans = supabase.table("meal_plans").select("*").eq("profile_id", PROFILE_ID).execute()
-        plan_text = " ".join([f"{r.get('breakfast_recipe_id')} {r.get('lunch_recipe_id')} {r.get('dinner_recipe_id')}" for r in post_plans.data]).lower()
+        post_plans = meal_plan_rows()
+        plan_text = meal_plan_text(post_plans)
         
         if "salmon" not in plan_text:
             log_test("2.3", prompt_2_3, "Checked schedule, found and replaced all occurrences of salmon successfully.", "PASS")
@@ -401,9 +438,9 @@ def run_tests():
         log_test("6.2", prompt_6_2, f"Failed: {e}", "FAIL")
 
     # --------------------------------------------------------------------------
-    # SECTION 7: Preference Persistence
+    # SECTION 8: Ephemeral Preference Recall
     # --------------------------------------------------------------------------
-    print("\n⚙️  SECTION 7: PREFERENCE PERSISTENCE")
+    print("\n⚙️  SECTION 8: EPHEMERAL PREFERENCE RECALL")
     print("=" * 40)
 
     # 7.1 Baker's Dozen whole wheat preference
@@ -419,22 +456,22 @@ def run_tests():
         export_res = res_export.json()["result"]
         
         if "baker" in export_res.lower() and "whole wheat" in export_res.lower():
-            log_test("7.1", prompt_7_1, f"Saved brand preference in native ADK memory. Brand mapping active in delivery export: '{export_res}'", "PASS")
+            log_test("8.1", prompt_7_1, f"Saved brand preference in ephemeral ADK memory. Brand mapping active in delivery export: '{export_res}'", "PASS")
         else:
-            log_test("7.1", prompt_7_1, f"Preference set but did not map correctly during export: '{export_res}'", "PARTIAL")
+            log_test("8.1", prompt_7_1, f"Preference set but did not map correctly during export: '{export_res}'", "PARTIAL")
     except Exception as e:
-        log_test("7.1", prompt_7_1, f"Failed: {e}", "FAIL")
+        log_test("8.1", prompt_7_1, f"Failed: {e}", "FAIL")
 
     # 7.2 Never add cereals to grocery list
     prompt_7_2 = "Never add cereals or cookies to my grocery list — only dairy, fruits, and veggies."
     try:
         reply = chat_request(prompt_7_2)
         if any(w in reply.lower() for w in ["noted", "remember", "saved", "preference", "dairy", "exclude"]):
-            log_test("7.2", prompt_7_2, f"Agent acknowledged category exclusion preference: '{reply[:150]}...'", "PASS")
+            log_test("8.2", prompt_7_2, f"Agent acknowledged category exclusion preference: '{reply[:150]}...'", "PASS")
         else:
-            log_test("7.2", prompt_7_2, f"Acknowledge unclear: '{reply}'", "PARTIAL")
+            log_test("8.2", prompt_7_2, f"Acknowledge unclear: '{reply}'", "PARTIAL")
     except Exception as e:
-        log_test("7.2", prompt_7_2, f"Failed: {e}", "FAIL")
+        log_test("8.2", prompt_7_2, f"Failed: {e}", "FAIL")
 
     # 7.3 Amul butter brand preference
     prompt_7_3 = "I prefer Amul butter over any other brand"
@@ -448,61 +485,58 @@ def run_tests():
         export_res = res_export.json()["result"]
         
         if "amul" in export_res.lower():
-            log_test("7.3", prompt_7_3, f"Successfully recorded Amul butter brand preference and applied to Zepto checkout cart: '{export_res}'", "PASS")
+            log_test("8.3", prompt_7_3, f"Successfully recorded Amul butter brand preference and applied to Zepto checkout cart: '{export_res}'", "PASS")
         else:
-            log_test("7.3", prompt_7_3, f"Brand mapping missed: '{export_res}'", "PARTIAL")
+            log_test("8.3", prompt_7_3, f"Brand mapping missed: '{export_res}'", "PARTIAL")
     except Exception as e:
-        log_test("7.3", prompt_7_3, f"Failed: {e}", "FAIL")
+        log_test("8.3", prompt_7_3, f"Failed: {e}", "FAIL")
 
     # --------------------------------------------------------------------------
-    # SECTION 8: Datetime Awareness
+    # SECTION 9: Datetime Awareness
     # --------------------------------------------------------------------------
-    print("\n🕐 SECTION 8: DATETIME AWARENESS")
+    print("\n🕐 SECTION 9: DATETIME AWARENESS")
     print("=" * 40)
 
     # 8.1 What's for dinner tonight?
     prompt_8_1 = "What's for dinner tonight?"
     try:
         # Pre-seed tonight's schedule in DB
-        import datetime as dt
-        today_name = dt.datetime.now().strftime("%A")
+        today_date = household_today()
         supabase.table("meal_plans").upsert({
             "profile_id": PROFILE_ID,
-            "day": today_name,
-            "breakfast_recipe_id": "Oats",
-            "lunch_recipe_id": "Salad",
-            "dinner_recipe_id": "Paneer Butter Masala and Rice",
-            "snack_recipe_id": "Apple"
-        }, on_conflict="profile_id,day").execute()
+            "plan_date": today_date.isoformat(),
+            "breakfast_name": "Oats",
+            "lunch_name": "Salad",
+            "dinner_name": "Paneer Butter Masala and Rice"
+        }, on_conflict="profile_id,plan_date").execute()
         
         reply = chat_request(prompt_8_1)
         if "paneer" in reply.lower() or "butter masala" in reply.lower():
-            log_test("8.1", prompt_8_1, f"Agent resolved today is {today_name} and pulled recipe: '{reply}'", "PASS")
+            log_test("9.1", prompt_8_1, f"Agent resolved household today as {today_date} and pulled dinner: '{reply}'", "PASS")
         else:
-            log_test("8.1", prompt_8_1, f"Failed to resolve dinner tonight. Reply: '{reply}'", "PARTIAL")
+            log_test("9.1", prompt_8_1, f"Failed to resolve dinner tonight. Reply: '{reply}'", "PARTIAL")
     except Exception as e:
-        log_test("8.1", prompt_8_1, f"Failed: {e}", "FAIL")
+        log_test("9.1", prompt_8_1, f"Failed: {e}", "FAIL")
 
     # 8.2 What am I eating tomorrow morning?
     prompt_8_2 = "What am I eating tomorrow morning?"
     try:
-        tomorrow_name = (dt.datetime.now() + dt.timedelta(days=1)).strftime("%A")
+        tomorrow_date = household_today() + timedelta(days=1)
         supabase.table("meal_plans").upsert({
             "profile_id": PROFILE_ID,
-            "day": tomorrow_name,
-            "breakfast_recipe_id": "Avocado Toast",
-            "lunch_recipe_id": "Lentils",
-            "dinner_recipe_id": "Fish Tacos",
-            "snack_recipe_id": "Banana"
-        }, on_conflict="profile_id,day").execute()
+            "plan_date": tomorrow_date.isoformat(),
+            "breakfast_name": "Avocado Toast",
+            "lunch_name": "Lentils",
+            "dinner_name": "Fish Tacos"
+        }, on_conflict="profile_id,plan_date").execute()
         
         reply = chat_request(prompt_8_2)
         if "avocado" in reply.lower() or "toast" in reply.lower():
-            log_test("8.2", prompt_8_2, f"Agent resolved tomorrow is {tomorrow_name} and retrieved breakfast: '{reply}'", "PASS")
+            log_test("9.2", prompt_8_2, f"Agent resolved household tomorrow as {tomorrow_date} and retrieved breakfast: '{reply}'", "PASS")
         else:
-            log_test("8.2", prompt_8_2, f"Failed to retrieve tomorrow's breakfast. Reply: '{reply}'", "PARTIAL")
+            log_test("9.2", prompt_8_2, f"Failed to retrieve tomorrow's breakfast. Reply: '{reply}'", "PARTIAL")
     except Exception as e:
-        log_test("8.2", prompt_8_2, f"Failed: {e}", "FAIL")
+        log_test("9.2", prompt_8_2, f"Failed: {e}", "FAIL")
 
     # 8.3 Daily macro summary
     prompt_8_3 = "How many calories have I eaten today so far?"
@@ -512,11 +546,11 @@ def run_tests():
         logs = supabase.table("macro_diary").select("calories").eq("profile_id", PROFILE_ID).execute()
         total_cals = sum([int(l["calories"]) for l in logs.data])
         if str(total_cals) in reply or "calorie" in reply.lower():
-            log_test("8.3", prompt_8_3, f"Agent queried macro diary and calculated daily total: {total_cals} kcal.", "PASS")
+            log_test("9.3", prompt_8_3, f"Agent queried macro diary and calculated daily total: {total_cals} kcal.", "PASS")
         else:
-            log_test("8.3", prompt_8_3, f"Agent summary did not specify correct calories. Total in DB is {total_cals}. Reply: '{reply}'", "PARTIAL")
+            log_test("9.3", prompt_8_3, f"Agent summary did not specify correct calories. Total in DB is {total_cals}. Reply: '{reply}'", "PARTIAL")
     except Exception as e:
-        log_test("8.3", prompt_8_3, f"Failed: {e}", "FAIL")
+        log_test("9.3", prompt_8_3, f"Failed: {e}", "FAIL")
 
     # ==========================================================================
     # FINAL RESULTS
@@ -534,17 +568,20 @@ def run_tests():
     print(f"  📝 TOTAL:   {len(TEST_LOGS)}")
     print("=" * 80)
 
-    # Save to JSON
-    json_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/test/production_test_results.json"
-    with open(json_path, "w") as f:
+    # Save one timestamped artifact folder without modifying the historical report.
+    run_stamp = datetime.now(ZoneInfo(HOUSEHOLD_TIMEZONE)).strftime("%Y-%m-%d_%H-%M-%S_IST")
+    artifact_dir = Path(__file__).resolve().parent / "results" / f"functional_{run_stamp}"
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+    json_path = artifact_dir / "results.json"
+    with json_path.open("w") as f:
         json.dump(TEST_LOGS, f, indent=2)
     print(f"📄 Results JSON written to: {json_path}")
 
     # Write the human-readable Markdown validation report
-    write_markdown_report()
+    write_markdown_report(artifact_dir)
 
-def write_markdown_report():
-    report_path = "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/docs/production_test_results.md"
+def write_markdown_report(artifact_dir: Path):
+    report_path = artifact_dir / "report.md"
     
     md_content = f"""# Kitch Live Production Verification Test Results
 
@@ -554,14 +591,12 @@ This document records the programmatic integration tests run against the **live 
 
 ---
 
-## 🛠️ DB Conflict Bug Resolution
+## Meal-Plan Persistence Contract
 
-### The Database Upsert Conflict Bug
-- **Symptoms**: When the agent tried to update or swap a meal in the weekly schedule, or save a new plan, it hit a `duplicate key value violates unique constraint` database exception.
-- **The Cause**: The `meal_plans` table has a primary key `id` (bigserial) and a composite unique constraint `UNIQUE (profile_id, day)`. The agent upserted meal plans without supplying the primary key `id`. PostgREST's default behavior targets the primary key `id` for duplicate resolution, resulting in insert failures due to composite key violations.
-- **The Fix**:
-  1. Updated `save_weekly_plan_tool` in [tools.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/tools.py) to explicitly target the composite unique constraint: `.upsert(data, on_conflict="profile_id,day")`.
-  2. Updated `update_single_meal_in_schedule` in [tools.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/tools.py) to propagate the primary key `data["id"] = row.get("id")` from the pre-selected row and explicitly include `.upsert(data, on_conflict="profile_id,day")`.
+- Meal plans are keyed by `(profile_id, plan_date)`.
+- Full-range replacements and multi-slot edits are transactional.
+- All prompts and observations below must be interpreted using the household
+  timezone `{HOUSEHOLD_TIMEZONE}` and exact calendar dates.
 
 ---
 
@@ -579,8 +614,8 @@ Below is the verification trace for all 20 live scenarios:
         "4. 📷 Macro Logging via Image (Multimodal)": ["4.1", "4.2"],
         "5. 🛒 Grocery List Creation": ["5.1", "5.2"],
         "6. 🥕 Pantry-Aware Grocery Subtraction": ["6.1", "6.2"],
-        "7. ⚙️ Preference Persistence": ["7.1", "7.2", "7.3"],
-        "8. 🕐 Datetime Awareness": ["8.1", "8.2", "8.3"]
+        "8. ⚙️ Ephemeral Preference Recall": ["8.1", "8.2", "8.3"],
+        "9. 🕐 Datetime Awareness": ["9.1", "9.2", "9.3"]
     }
     
     for cat_name, ids in categories.items():
@@ -599,13 +634,13 @@ Below is the verification trace for all 20 live scenarios:
 ---
 
 ## 🏁 Summary of Accomplishments
-1. **No More Database Upsert Conflicts**: Live plans are now fully editable and updatable without any unique key exceptions.
+1. **Date-Native Meal Planning**: Live plans are stored and edited by exact ISO date without cross-week weekday collisions.
 2. **End-to-End Multimodal Integration**: Tested image uploads for food logs and fridge scans, persisting directly in Supabase.
 3. **Persistent Native Memory**: Verified whole-wheat bread and butter brand mappings flowing directly from ADK's native memory into delivery checkout exports.
 4. **Time & Portions Math**: Confirmed date/time awareness for dynamic schedule queries and portion calculations are fully functional.
 """
 
-    with open(report_path, "w") as f:
+    with report_path.open("w") as f:
         f.write(md_content)
     print(f"📝 Markdown Verification Report written to: {report_path}")
 

@@ -1,6 +1,7 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
 import time
+from datetime import timedelta
 from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -11,7 +12,8 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
-from app.agent.tools import get_weekly_schedule_dict, export_to_delivery, apply_brand_memory_to_cart_items
+from app.agent.tools import export_to_delivery, apply_brand_memory_to_cart_items
+from app.planning_calendar import dates_between, parse_iso_date
 from app.providers.zepto import ZeptoProviderAdapter
 from app.checkout_drafts import (
     draft_row_to_review,
@@ -41,6 +43,8 @@ from app.supabase_client import (
     list_recipe_grocery_plans,
     get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
+    build_meal_plan_week,
+    get_meal_plan_snapshot,
     update_household_profile,
     validate_persistence_readiness,
     claim_provider_checkout_operation,
@@ -78,19 +82,50 @@ def looks_like_grocery_request(text: str) -> bool:
     return any(term in text_lower for term in grocery_terms)
 
 # Helper: Ensure the ADK session exists and the user: and app: states are fully synchronized
-async def get_or_create_session(user_name: str, session_id: str, diet_preference: str, household_size: int):
+async def get_or_create_session(
+    user_name: str,
+    session_id: str,
+    diet_preference: str,
+    household_size: int,
+    planner_week_start: str = "",
+    planner_selected_date: str = "",
+):
     """
     Looks up the ADK session thread. Syncs user profile parameters 
     into persistent user: and app: prefixed session states before executing.
     """
     active_user = canonical_user_name(user_name)
     user_id = active_user.replace(" ", "_")
+
+    planner_week_dates = ""
+    if planner_week_start:
+        try:
+            visible_start = parse_iso_date(planner_week_start)
+            if visible_start.weekday() == 0:
+                visible_end = visible_start + timedelta(days=6)
+                planner_week_dates = "; ".join(
+                    item.strftime("%A %Y-%m-%d")
+                    for item in dates_between(visible_start, visible_end)
+                )
+                if planner_selected_date:
+                    selected_date = parse_iso_date(planner_selected_date)
+                    if not visible_start <= selected_date <= visible_end:
+                        planner_selected_date = ""
+            else:
+                planner_week_start = ""
+                planner_selected_date = ""
+        except ValueError:
+            planner_week_start = ""
+            planner_selected_date = ""
     
     state_updates = {
         "user:profile_name": active_user,
         "user:dietary_profile": diet_preference,
         "app:household_size": household_size,
-        "app:household_members": household_members_text()
+        "app:household_members": household_members_text(),
+        "app:planner_week_start": planner_week_start,
+        "app:planner_week_dates": planner_week_dates,
+        "app:planner_selected_date": planner_selected_date,
     }
     
     session = await session_service.get_session(app_name="kitch", user_id=user_id, session_id=session_id)
@@ -196,10 +231,12 @@ async def chat_endpoint(payload: ChatRequest):
             user_name=active_user,
             session_id=session_id,
             diet_preference=payload.diet_preference,
-            household_size=payload.household_size
+            household_size=payload.household_size,
+            planner_week_start=payload.planner_context.visible_week_start,
+            planner_selected_date=payload.planner_context.selected_date,
         )
 
-        weekly_plan_before = get_weekly_schedule_dict()
+        meal_plan_before = get_meal_plan_snapshot()
         pantry_before = get_pantry_stock()
         grocery_cart_before = get_grocery_cart()
         latest_recipe_plan_before = get_latest_recipe_grocery_plan_metadata()
@@ -220,7 +257,7 @@ async def chat_endpoint(payload: ChatRequest):
             if event.is_final_response() and event.content and event.content.parts:
                 text_reply = event.content.parts[0].text
                 
-        weekly_plan_after = get_weekly_schedule_dict()
+        meal_plan_after = get_meal_plan_snapshot()
         pantry_after = get_pantry_stock()
         grocery_cart_after = get_grocery_cart()
         latest_recipe_plan_after = get_latest_recipe_grocery_plan_metadata()
@@ -228,8 +265,17 @@ async def chat_endpoint(payload: ChatRequest):
         # Only confirmed persisted state changes can produce mutation actions.
         action = None
         
-        if weekly_plan_after and weekly_plan_after != weekly_plan_before:
-            action = {"type": "UPDATE_PLANNER"}
+        changed_plan_dates = sorted(
+            plan_date
+            for plan_date in set(meal_plan_before) | set(meal_plan_after)
+            if meal_plan_before.get(plan_date) != meal_plan_after.get(plan_date)
+        )
+        if changed_plan_dates:
+            action = {
+                "type": "UPDATE_PLANNER",
+                "affected_dates": changed_plan_dates,
+                "focus_date": changed_plan_dates[0],
+            }
         elif pantry_after != pantry_before:
             action = {"type": "UPDATE_PANTRY"}
         elif grocery_cart_after != grocery_cart_before:
@@ -370,7 +416,7 @@ async def get_state_endpoint(user_name: str):
         profile = get_household_profile()
         pantry = get_pantry_stock()
         diary = get_macro_diary(active_user)
-        weekly_plan = get_weekly_schedule_dict()
+        meal_plan = build_meal_plan_week()
         grocery_cart = get_grocery_cart()
         latest_recipe_grocery_plan = get_latest_recipe_grocery_plan_metadata()
         
@@ -378,12 +424,21 @@ async def get_state_endpoint(user_name: str):
             "profile": profile,
             "pantry_stock": pantry,
             "macro_diary": diary,
-            "weekly_plan": weekly_plan,
+            "meal_plan": meal_plan,
             "grocery_cart": grocery_cart,
             "latest_recipe_grocery_plan": latest_recipe_grocery_plan
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meal-plan")
+async def get_meal_plan_endpoint(week_start: str):
+    """Return one authoritative Monday-Sunday household planning window."""
+    try:
+        return build_meal_plan_week(week_start)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 @app.post("/api/pantry/add")
 async def add_pantry_endpoint(payload: Dict[str, Any]):

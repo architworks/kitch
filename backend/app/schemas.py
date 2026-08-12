@@ -19,12 +19,16 @@ class MacroLog(BaseModel):
 class FridgeScanResult(BaseModel):
     detected_items: List[PantryItem] = Field(description="List of items segment detected in the fridge")
 
+class PlannerContext(BaseModel):
+    visible_week_start: str
+    selected_date: str
+
 class ChatRequest(BaseModel):
     message: str
     active_user: str
     diet_preference: str
     household_size: int
-    weekly_plan: Dict[str, Dict[str, str]]
+    planner_context: PlannerContext
     pantry_stock: List[Dict[str, Any]]
     grocery_list: List[Dict[str, Any]]
 

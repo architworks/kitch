@@ -245,6 +245,10 @@ class MigrationContractTests(unittest.TestCase):
         )
         self.assertIn("provider_checkout_drafts", schema)
         self.assertIn("claim_provider_checkout_operation", schema)
+        self.assertIn("plan_date DATE NOT NULL", schema)
+        self.assertIn("replace_meal_plan_range", schema)
+        self.assertIn("apply_meal_plan_edits", schema)
+        self.assertNotIn("breakfast_recipe_id", schema)
 
     def test_provider_checkout_migration_is_durable_and_backend_only(self):
         migration = (

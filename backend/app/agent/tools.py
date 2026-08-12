@@ -4,10 +4,12 @@ import json as _json
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
 from app.household_config import DEFAULT_ACTIVE_USER
+from app.planning_calendar import calendar_context, parse_iso_date
 from app.supabase_client import (
-    get_weekly_schedule as db_get_weekly_schedule,
-    save_weekly_plan as db_save_weekly_plan,
-    update_single_meal as db_update_single_meal,
+    apply_meal_plan_edits as db_apply_meal_plan_edits,
+    get_household_timezone,
+    get_meal_schedule as db_get_meal_schedule,
+    replace_meal_plan_range as db_replace_meal_plan_range,
     get_pantry_stock as db_get_pantry_stock,
     add_to_pantry as db_add_to_pantry,
     log_macros as db_log_macros,
@@ -38,74 +40,90 @@ def get_current_datetime() -> str:
   Returns the current date, time, and day of the week.
   Use this to answer questions like "what day is today", "what's for dinner tonight", etc.
   """
-  from datetime import datetime, timedelta
-  now = datetime.now()
-  days_until_next_monday = ((7 - now.weekday()) % 7) or 7
-  planning_start = now + timedelta(days=days_until_next_monday)
-  planning_end = planning_start + timedelta(days=6)
+  context = calendar_context(get_household_timezone())
+  now = context["now"]
   return (
-    now.strftime("Today is %A, %B %d, %Y. The current time is %I:%M %p. ")
-    + f"The upcoming planning week runs from {planning_start.strftime('%A, %B %d, %Y')} "
-    + f"through {planning_end.strftime('%A, %B %d, %Y')}."
+    now.strftime("Today is %A, %B %d, %Y (%Y-%m-%d). The current time is %I:%M %p. ")
+    + f"Household timezone: {context['timezone']}. "
+    + f"Tomorrow is {context['tomorrow'].strftime('%A, %B %d, %Y (%Y-%m-%d)')}. "
+    + f"The current week ends {context['current_week_end'].strftime('%A, %B %d, %Y (%Y-%m-%d)')}. "
+    + f"The next calendar week runs from {context['next_week_start'].strftime('%A, %B %d, %Y (%Y-%m-%d)')} "
+    + f"through {context['next_week_end'].strftime('%A, %B %d, %Y (%Y-%m-%d)')}."
   )
 
-def get_weekly_schedule_dict(user_name: str = "") -> Dict[str, Dict[str, str]]:
+def get_meal_schedule_dict(
+  start_date: str,
+  end_date: str,
+  user_name: str = "",
+) -> Dict[str, Dict[str, str]]:
   """
-  Queries Supabase to fetch the household's current planned meal schedule.
-  Transforms persisted DB rows into a dictionary mapping weekdays to meal categories and recipe names.
-  Only weekdays with at least one planned meal are returned; missing weekdays are unplanned.
+  Fetch the shared household schedule for an explicit inclusive ISO date range.
   """
-  return db_get_weekly_schedule(user_name)
-
-def get_weekly_schedule_tool(user_name: str = "") -> Dict[str, Dict[str, str]]:
-  """
-  Fetch the current week's planned meal schedule for the household.
-  Returns a dictionary mapping day of week to meal slots and their recipe names.
-  Only weekdays with at least one persisted planned meal are returned.
-  An empty dictionary means no meal plan has been created yet; a missing weekday means that day is unplanned.
-  """
-  return get_weekly_schedule_dict(user_name)
-
-def save_weekly_plan_tool(weekly_plan: Dict[str, Dict[str, str]], user_name: str = "") -> Dict[str, Any]:
-  """
-  Saves the entire structured 7-day weekly meal plan to the database.
-  Each day's meals map directly to the recipe name string (e.g. "Avocado Toast", "Spaghetti Carbonara").
-  Do NOT use this to modify a single meal — use update_single_meal_in_schedule instead.
-  
-  Args:
-      weekly_plan: Dict mapping day names to meal category -> recipe name mappings.
-                   Example: {"Monday": {"breakfast": "Scrambled Eggs", "lunch": "Salad", "dinner": "Tofu Stir-fry"}, ...}
-      user_name: Ignored for now. Meal plans are shared by the configured household.
-  """
-  weekly_plan = _ensure_dict(weekly_plan)
-  if not isinstance(weekly_plan, dict):
-    return {"status": "error", "message": f"Expected a dict for weekly_plan, got {type(weekly_plan).__name__}"}
-  saved = db_save_weekly_plan(weekly_plan)
   return {
-    "status": "success",
-    "message": f"Successfully synchronized {len(saved)} meal-plan days to durable storage."
+    row["plan_date"]: {
+      "weekday": row["weekday"],
+      "breakfast": row["breakfast"],
+      "lunch": row["lunch"],
+      "dinner": row["dinner"],
+    }
+    for row in db_get_meal_schedule(start_date, end_date)
   }
 
-def update_single_meal_in_schedule(day: str, meal_category: str, new_recipe_name: str, user_name: str = "") -> Dict[str, Any]:
+def get_meal_schedule_tool(
+  start_date: str,
+  end_date: str,
+  user_name: str = "",
+) -> Dict[str, Dict[str, str]]:
   """
-  Swaps, replaces, or modifies a single meal slot in the weekly schedule in the database.
-  Always call this whenever a user requests to swap or change a scheduled meal slot.
-  This preserves all other meal slots — only the specified day+meal_category is changed.
-  
-  Args:
-      day: Weekday of the slot (e.g. 'Thursday', 'Monday')
-      meal_category: Meal slot to replace (e.g. 'breakfast', 'dinner')
-      new_recipe_name: The name of the new recipe (e.g. 'Garlic Salmon', 'Keto Chia Pudding')
-      user_name: Ignored for now. Meal plans are shared by the configured household.
+  Fetch planned meal names for an explicit inclusive ISO date range. Missing
+  dates are unplanned; never substitute a same-named weekday from another week.
   """
-  day_clean = day.strip().capitalize()
-  meal_category = meal_category.lower().strip()
-  if meal_category not in {"breakfast", "lunch", "dinner"}:
-    return {"status": "error", "message": f"Invalid meal category: {meal_category}"}
-  db_update_single_meal(day_clean, meal_category, new_recipe_name)
+  return get_meal_schedule_dict(start_date, end_date, user_name)
+
+def replace_meal_plan_range_tool(
+  start_date: str,
+  end_date: str,
+  meal_plan: List[Dict[str, Any]],
+  user_name: str = "",
+) -> Dict[str, Any]:
+  """
+  Atomically replace every date in an explicit range with breakfast, lunch,
+  and dinner meal-name strings. The list must contain exactly one object per
+  date with plan_date, breakfast, lunch, and dinner. Use targeted edits for
+  modifications instead.
+  """
+  meal_plan = _ensure_dict(meal_plan)
+  if not isinstance(meal_plan, list):
+    return {"status": "error", "message": "meal_plan must be a list of dated plan objects"}
+  context = calendar_context(get_household_timezone())
+  if parse_iso_date(start_date) < context["today"]:
+    return {"status": "error", "message": "Past meal-plan dates cannot be created or replaced."}
+  saved = db_replace_meal_plan_range(start_date, end_date, meal_plan)
   return {
     "status": "success",
-    "message": f"Successfully updated {day_clean} {meal_category} to '{new_recipe_name}' in durable storage."
+    "affected_dates": [row["plan_date"] for row in saved],
+    "message": f"Successfully replaced {len(saved)} dated meal-plan days in durable storage."
+  }
+
+def update_dated_meals_tool(
+  edits: List[Dict[str, Any]],
+  user_name: str = "",
+) -> Dict[str, Any]:
+  """
+  Atomically apply targeted dated meal edits while preserving every unrelated
+  date and meal slot. Each edit requires plan_date, meal_slot, and meal_name.
+  """
+  edits = _ensure_dict(edits)
+  if not isinstance(edits, list) or not edits:
+    return {"status": "error", "message": "edits must be a non-empty list"}
+  context = calendar_context(get_household_timezone())
+  if any(parse_iso_date(str(edit.get("plan_date") or "")) < context["today"] for edit in edits):
+    return {"status": "error", "message": "Past meal-plan dates cannot be modified."}
+  saved = db_apply_meal_plan_edits(edits)
+  return {
+    "status": "success",
+    "affected_dates": [row["plan_date"] for row in saved],
+    "message": f"Successfully updated {len(saved)} dated meal-plan days in durable storage."
   }
 
 # --- Section 2: Supabase Pantry Stock & Logs ---

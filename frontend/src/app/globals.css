@@ -2357,6 +2357,39 @@ button {
   text-align: right;
 }
 
+.planner-week-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.planner-week-controls button {
+  min-width: 38px;
+  min-height: 38px;
+  padding: 7px 11px;
+  color: var(--sage-deep);
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(74, 103, 65, 0.24);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.planner-week-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.planner-week-controls span {
+  min-width: 150px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .calendar-board {
   margin-top: 22px;
   display: grid;
@@ -2634,6 +2667,19 @@ button {
   box-shadow: 0 10px 22px rgba(52, 44, 36, 0.07);
 }
 
+.week-date-card.today > span {
+  color: #fff;
+  background: var(--sage-deep);
+}
+
+.week-date-card.past {
+  opacity: 0.58;
+}
+
+.week-date-card.empty:not(.active) {
+  border-style: dashed;
+}
+
 .week-date-card > span {
   width: 34px;
   height: 34px;
@@ -2697,10 +2743,52 @@ button {
   line-height: 1.12;
 }
 
+.selected-week-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .selected-meal-list {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+
+.selected-day-empty-state {
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  background: rgba(245, 247, 241, 0.72);
+  border: 1px dashed rgba(74, 103, 65, 0.28);
+  border-radius: 14px;
+}
+
+.selected-day-empty-state p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.selected-day-empty-state button,
+.next-planned-week-link {
+  padding: 9px 13px;
+  color: #fff;
+  background: var(--sage-deep);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.next-planned-week-link {
+  align-self: flex-start;
+  color: var(--sage-deep);
+  background: rgba(202, 236, 188, 0.48);
 }
 
 .selected-meal-row {
@@ -6507,6 +6595,19 @@ button {
   .weekly-plan-board {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .planner-week-controls {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .planner-week-controls span {
+    order: -1;
+    width: 100%;
+    min-width: 0;
+    text-align: left;
   }
 
   .planner-empty-state {

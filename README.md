@@ -16,7 +16,7 @@ Kitch helps a household answer the everyday kitchen questions that usually live 
 - What should be added to a delivery cart?
 - What did I personally eat today, and how many macros did that add?
 
-The app combines conversational control with structured, reviewable state. Users can ask for a weekly plan, swap a meal, scan a fridge photo, log a plate, generate groceries, or prepare a Zepto cart through natural language. The saved plan, pantry, recipe artifacts, native cart rows, and macro diary are persisted in Supabase so the UI can render what actually changed.
+The app combines conversational control with structured, reviewable state. Users can ask for tomorrow, an exact date range, or a full weekly plan; swap a dated meal; scan a fridge photo; log a plate; generate groceries; or prepare a Zepto cart through natural language. The saved plan, pantry, recipe artifacts, native cart rows, and macro diary are persisted in Supabase so the UI can render what actually changed.
 
 ## What Can Kitch Do
 
@@ -76,9 +76,9 @@ flowchart TD
     Coordinator --> RecipeGrocery
 
     subgraph ToolLayer[Python Tool Layer]
-        GetWeekly[get_weekly_schedule_tool]
-        SaveWeekly[save_weekly_plan_tool]
-        UpdateMeal[update_single_meal_in_schedule]
+        GetSchedule[get_meal_schedule_tool]
+        ReplaceRange[replace_meal_plan_range_tool]
+        UpdateMeals[update_dated_meals_tool]
         AddPantry[add_to_pantry_tool]
         LogMacros[log_macros_tool]
         GetPantry[get_pantry_stock_tool]
@@ -93,9 +93,9 @@ flowchart TD
         GetDatetime[get_current_datetime]
     end
 
-    Chef --> GetWeekly
-    Chef --> SaveWeekly
-    Chef --> UpdateMeal
+    Chef --> GetSchedule
+    Chef --> ReplaceRange
+    Chef --> UpdateMeals
     Chef --> GetDatetime
 
     Vision --> AddPantry
@@ -104,7 +104,7 @@ flowchart TD
     Vision --> GetMacro
     Vision --> GetDatetime
 
-    RecipeGrocery --> GetWeekly
+    RecipeGrocery --> GetSchedule
     RecipeGrocery --> GetCart
     RecipeGrocery --> ClearCart
     RecipeGrocery --> SaveRecipePlan
@@ -116,9 +116,9 @@ flowchart TD
     RecipeGrocery --> AddPantry
     RecipeGrocery --> GetDatetime
 
-    GetWeekly --> Supabase[(Supabase)]
-    SaveWeekly --> Supabase
-    UpdateMeal --> Supabase
+    GetSchedule --> Supabase[(Supabase)]
+    ReplaceRange --> Supabase
+    UpdateMeals --> Supabase
     AddPantry --> Supabase
     LogMacros --> Supabase
     GetPantry --> Supabase
@@ -215,6 +215,8 @@ pip install -r requirements.txt
    deployment, apply all unapplied files in `backend/database/migrations/` in
    filename order before starting FastAPI. Versioned migrations are the
    deployment source of truth.
+   `20260812_date_specific_meal_plans.sql` intentionally clears the old
+   weekday-only schedule and recreates `meal_plans` with exact calendar dates.
 4. Ensure the prototype household profile IDs exist, or update the configured IDs in `backend/app/household_config.py` and `frontend/src/app/householdConfig.js`.
 
 The default prototype IDs are:

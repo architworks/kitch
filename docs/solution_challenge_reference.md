@@ -827,7 +827,7 @@ The main principle: when something goes wrong, Kitch should preserve user trust 
 | :--- | :--- | :--- |
 | Wrong intent routing | User asks for a plan, log, pantry scan, or grocery list and the coordinator picks the wrong specialist. | Specialist tools are separated by responsibility; test scenarios use casual prompts to validate routing. Risk remains for ambiguous prompts. |
 | Wrong date resolution | "Next week" or "tomorrow" points to the wrong date. | Backend injects current date and upcoming planning week dates. Agent responses and UI should show exact dates. |
-| Meal edit rewrites too much | User asks to change one dinner but the whole plan changes. | `update_single_meal_in_schedule` targets one slot and preserves other slots. |
+| Meal edit rewrites too much | User asks to change one dated dinner but the surrounding plan changes. | `update_dated_meals_tool` applies exact ISO-date/slot edits transactionally and preserves unrelated dates and slots. |
 | Recipe-only request mutates cart | User asks "how do I cook paneer butter masala?" and cart rows appear unexpectedly. | Recipe-only flow saves an artifact but does not update native cart. Cart updates are limited to grocery/cart/buy/order intent. |
 | Grocery list drifts from recipe | User buys ingredients that do not match the recipe. | Recipe and grocery rows come from the same saved artifact. |
 | Pantry scan misses items | App recommends buying something already in the fridge. | Fridge photo flow updates pantry first, then grocery planning runs against updated pantry. Pantry-covered rows remain visible instead of silently disappearing. |

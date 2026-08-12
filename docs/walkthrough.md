@@ -61,26 +61,27 @@ flowchart TD
     SubCart -->|Artifact and Cart Tools| RecipeCart[recipe_grocery_plans and grocery_cart_items]
 ```
 
-### 1. Dynamic Database Weekly Planner Integration
+### 1. Date-Specific Database Planner Integration
 *   We completely removed the hardcoded `RECIPE_DATABASE` and its associated static lookups/scalers (`get_recipes`, `scale_ingredients`, `calculate_intermediary_grocery_list`) from [tools.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/agent/tools.py).
-*   The weekly meal planner Supabase table (`meal_plans`) now stores the **actual text names** of the custom recipes (e.g. `"Avocado & Poached Egg Toast"`, `"Spaghetti Carbonara"`) under day columns (`breakfast_recipe_id`, etc.) rather than rigid ID tags.
-*   **Dynamic Save Weekly Plan**: `save_weekly_plan_tool` parses dynamic recipe names and saves them only after Supabase confirms the upsert.
-*   **Dynamic Update Single Meal**: `update_single_meal_in_schedule` targets a single weekday slot, preserving other days and slots after a confirmed Supabase write.
+*   `meal_plans` stores meal names under an exact `plan_date`; weekday labels are derived and never identify a schedule row.
+*   **Transactional Range Planning**: `replace_meal_plan_range_tool` replaces exactly the requested date range after validating complete breakfast, lunch, and dinner entries.
+*   **Transactional Targeted Edits**: `update_dated_meals_tool` changes exact date/slot pairs while preserving every unrelated plan.
+*   The household profile stores `timezone_name`, which resolves today, tomorrow, and calendar-week boundaries consistently across devices.
 
 ### 2. LLM-Based Culinary Reasoning & Scaling
 *   **Dynamic Meal Schedules**: The `chef_planner` agent generates balanced weekly meal-name schedules dynamically from its own reasoning and saves those names to `meal_plans`.
 *   **Recipe+Grocery Planning**: The `recipe_grocery_planner` owns detailed recipes, ingredients, pantry-aware grocery planning, and native cart persistence:
     1. It calls `search_household_food_preferences_tool` before recipe or grocery generation.
-    2. It calls `get_weekly_schedule_tool` only for schedule-based scopes such as tonight, tomorrow, next two days, or the full week.
+    2. It calls `get_meal_schedule_tool` with exact ISO date ranges for schedule-based scopes such as tonight, tomorrow, next two days, or the full week.
     3. It calls `get_pantry_stock_tool` before grocery planning.
     4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
     5. For grocery requests it transactionally saves the artifact and replaces agent-generated `grocery_cart_items`, preserving manual rows. If either part fails, neither new change is committed.
 *   **Provider Boundary**: Zepto/Blinkit cart translation is no longer part of the recipe+grocery agent. The Groceries page uses a provider-neutral checkout workflow; Zepto is the live default and Blinkit remains a disabled future option until its backend adapter exists.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
-*   **State Sync**: We updated the FastAPI `/api/state/{user_name}` endpoint in [main.py](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/backend/app/main.py) to fetch the live database meal plan using a new `get_weekly_schedule_dict` helper and return it in the state payload.
-*   **React Integration**: We updated `syncLiveState` in Next.js's [page.js](file:///Users/dynamiterdx/Documents/Personal%20Projects/diet_planner/frontend/src/app/page.js) to hot-sync this `weekly_plan` React state. We also added reactive updates that trigger a state refresh whenever the agent modifies the planner or pantry.
-*   **Grid Rendering**: The weekly planner dashboard renders dynamic recipe name strings directly from Supabase. The old local static recipe picker/catalog is no longer the source of truth for planner rendering. The planner also shows the upcoming Monday-Sunday planning date window instead of highlighting a future weekday as "Today."
+*   **State Sync**: `/api/state/{user_name}` returns the authoritative current calendar week and next chronological meal, while `/api/meal-plan` loads navigated weeks.
+*   **React Integration**: Planner state is keyed by ISO date. Chat mutations return `affected_dates` and `focus_date`, so the UI opens the exact changed date.
+*   **Grid Rendering**: The planner defaults to the current Monday-Sunday week, renders empty and planned dates, supports week navigation, and never projects a weekday into another week.
 
 ### 4. Durable Storage and Credential Security
 

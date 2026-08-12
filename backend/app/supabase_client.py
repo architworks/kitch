@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List
 from uuid import uuid4
 
@@ -29,6 +29,12 @@ from app.persistence import (
     persistence_error_from_exception,
     resolve_supabase_credentials,
 )
+from app.planning_calendar import (
+    calendar_context,
+    dates_between,
+    monday_for,
+    parse_iso_date,
+)
 
 
 load_dotenv()
@@ -45,16 +51,17 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "diet_preference",
         "household_size",
         "daily_calorie_target",
+        "timezone_name",
         "created_at",
     ),
     "meal_plans": (
         "id",
         "profile_id",
-        "day",
-        "breakfast_recipe_id",
-        "lunch_recipe_id",
-        "dinner_recipe_id",
-        "snack_recipe_id",
+        "plan_date",
+        "breakfast_name",
+        "lunch_name",
+        "dinner_name",
+        "created_at",
         "updated_at",
     ),
     "pantry_stock": (
@@ -519,101 +526,196 @@ def update_household_profile(
     )
 
 
-# Meal plans
-def get_weekly_schedule(user_name: str | None = None) -> Dict[str, Dict[str, str]]:
-    rows = _read_rows(
-        "get_weekly_schedule",
-        "meal_plans",
-        lambda: supabase.table("meal_plans")
+# Date-specific meal plans
+def get_household_timezone() -> str:
+    return str(get_household_profile().get("timezone_name") or "Asia/Kolkata")
+
+
+def _meal_row_to_day(row: Dict[str, Any]) -> Dict[str, Any]:
+    plan_date = parse_iso_date(str(row.get("plan_date")))
+    return {
+        "plan_date": plan_date.isoformat(),
+        "weekday": plan_date.strftime("%A"),
+        "breakfast": str(row.get("breakfast_name") or "").strip(),
+        "lunch": str(row.get("lunch_name") or "").strip(),
+        "dinner": str(row.get("dinner_name") or "").strip(),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def get_meal_schedule(
+    start_date: str | date | None = None,
+    end_date: str | date | None = None,
+) -> List[Dict[str, Any]]:
+    query = (
+        supabase.table("meal_plans")
         .select("*")
         .eq("profile_id", get_household_profile_id())
-        .execute(),
     )
-    plan: dict[str, dict[str, str]] = {}
-    for row in rows:
-        day = str(row.get("day") or "").strip().capitalize()
-        meals = {
-            "breakfast": str(row.get("breakfast_recipe_id") or "").strip(),
-            "lunch": str(row.get("lunch_recipe_id") or "").strip(),
-            "dinner": str(row.get("dinner_recipe_id") or "").strip(),
+    if start_date is not None:
+        query = query.gte("plan_date", parse_iso_date(start_date).isoformat())
+    if end_date is not None:
+        query = query.lte("plan_date", parse_iso_date(end_date).isoformat())
+    rows = _read_rows(
+        "get_meal_schedule",
+        "meal_plans",
+        lambda: query.order("plan_date").execute(),
+    )
+    return [_meal_row_to_day(row) for row in rows]
+
+
+def get_meal_plan_snapshot() -> Dict[str, Dict[str, str]]:
+    return {
+        row["plan_date"]: {
+            "breakfast": row["breakfast"],
+            "lunch": row["lunch"],
+            "dinner": row["dinner"],
+            "created_at": str(row.get("created_at") or ""),
+            "updated_at": str(row.get("updated_at") or ""),
         }
-        if day and any(meals.values()):
-            plan[day] = meals
-    return plan
+        for row in get_meal_schedule()
+    }
 
 
-def save_weekly_plan(weekly_plan: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
-    profile_id = get_household_profile_id()
-    rows: list[dict[str, Any]] = []
-    for day, meals in weekly_plan.items():
-        if not isinstance(meals, dict):
-            continue
-        rows.append(
+def replace_meal_plan_range(
+    start_date: str | date,
+    end_date: str | date,
+    meal_plan: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    start = parse_iso_date(start_date)
+    end = parse_iso_date(end_date)
+    today = calendar_context(get_household_timezone())["today"]
+    if start < today:
+        raise ValueError("Past meal-plan dates cannot be created or replaced")
+    expected_dates = [item.isoformat() for item in dates_between(start, end)]
+    normalized: list[dict[str, str]] = []
+    for item in meal_plan:
+        if not isinstance(item, dict):
+            raise ValueError("Each meal-plan day must be an object")
+        normalized.append(
             {
-                "profile_id": profile_id,
-                "day": str(day).strip().capitalize(),
-                "breakfast_recipe_id": str(meals.get("breakfast") or "").strip(),
-                "lunch_recipe_id": str(meals.get("lunch") or "").strip(),
-                "dinner_recipe_id": str(meals.get("dinner") or "").strip(),
-                "snack_recipe_id": "",
+                "plan_date": parse_iso_date(str(item.get("plan_date") or "")).isoformat(),
+                "breakfast": str(item.get("breakfast") or "").strip(),
+                "lunch": str(item.get("lunch") or "").strip(),
+                "dinner": str(item.get("dinner") or "").strip(),
             }
         )
-    if not rows:
-        return []
-    saved = _read_rows(
-        "save_weekly_plan",
+    if sorted(item["plan_date"] for item in normalized) != expected_dates:
+        raise ValueError("Meal-plan dates must exactly cover the requested range")
+    if any(not item[slot] for item in normalized for slot in ("breakfast", "lunch", "dinner")):
+        raise ValueError("Every planned date requires breakfast, lunch, and dinner")
+
+    rows = _read_rows(
+        "replace_meal_plan_range",
         "meal_plans",
-        lambda: supabase.table("meal_plans")
-        .upsert(rows, on_conflict="profile_id,day")
-        .execute(),
+        lambda: supabase.rpc(
+            "replace_meal_plan_range",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_start_date": start.isoformat(),
+                "p_end_date": end.isoformat(),
+                "p_days": normalized,
+            },
+        ).execute(),
     )
-    if len(saved) != len(rows):
-        raise malformed_persistence_response("save_weekly_plan", "meal_plans")
-    return saved
+    if len(rows) != len(expected_dates):
+        raise malformed_persistence_response("replace_meal_plan_range", "meal_plans")
+    return [_meal_row_to_day(row) for row in rows]
 
 
-def update_single_meal(
-    day: str,
-    meal_category: str,
-    new_recipe_name: str,
-) -> Dict[str, Any]:
-    category = meal_category.lower().strip()
-    allowed = {
-        "breakfast": "breakfast_recipe_id",
-        "lunch": "lunch_recipe_id",
-        "dinner": "dinner_recipe_id",
-    }
-    if category not in allowed:
-        raise ValueError("meal_category must be breakfast, lunch, or dinner")
-    day_clean = day.strip().capitalize()
-    profile_id = get_household_profile_id()
-    existing = _read_rows(
-        "get_meal_plan_day",
+def apply_meal_plan_edits(edits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: list[dict[str, str]] = []
+    for edit in edits:
+        if not isinstance(edit, dict):
+            raise ValueError("Each meal-plan edit must be an object")
+        slot = str(edit.get("meal_slot") or "").strip().lower()
+        meal_name = str(edit.get("meal_name") or "").strip()
+        if slot not in {"breakfast", "lunch", "dinner"} or not meal_name:
+            raise ValueError("Each edit requires plan_date, meal_slot, and meal_name")
+        normalized.append(
+            {
+                "plan_date": parse_iso_date(str(edit.get("plan_date") or "")).isoformat(),
+                "meal_slot": slot,
+                "meal_name": meal_name,
+            }
+        )
+    if not normalized:
+        raise ValueError("At least one meal-plan edit is required")
+    today = calendar_context(get_household_timezone())["today"]
+    if any(parse_iso_date(edit["plan_date"]) < today for edit in normalized):
+        raise ValueError("Past meal-plan dates cannot be modified")
+    rows = _read_rows(
+        "apply_meal_plan_edits",
         "meal_plans",
-        lambda: supabase.table("meal_plans")
-        .select("*")
-        .eq("profile_id", profile_id)
-        .eq("day", day_clean)
-        .limit(1)
-        .execute(),
+        lambda: supabase.rpc(
+            "apply_meal_plan_edits",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_edits": normalized,
+            },
+        ).execute(),
     )
-    row = existing[0] if existing else {}
-    payload = {
-        "profile_id": profile_id,
-        "day": day_clean,
-        "breakfast_recipe_id": row.get("breakfast_recipe_id") or "",
-        "lunch_recipe_id": row.get("lunch_recipe_id") or "",
-        "dinner_recipe_id": row.get("dinner_recipe_id") or "",
-        "snack_recipe_id": row.get("snack_recipe_id") or "",
-        allowed[category]: new_recipe_name.strip(),
+    expected_dates = {edit["plan_date"] for edit in normalized}
+    if {str(row.get("plan_date")) for row in rows} != expected_dates:
+        raise malformed_persistence_response("apply_meal_plan_edits", "meal_plans")
+    return [_meal_row_to_day(row) for row in rows]
+
+
+def build_meal_plan_week(week_start: str | date | None = None) -> Dict[str, Any]:
+    timezone_name = get_household_timezone()
+    context = calendar_context(timezone_name)
+    start = monday_for(context["today"]) if week_start is None else parse_iso_date(week_start)
+    if start.weekday() != 0:
+        raise ValueError("week_start must be a Monday")
+    end = start + timedelta(days=6)
+    saved = {row["plan_date"]: row for row in get_meal_schedule(start, end)}
+    days = []
+    for planned_date in dates_between(start, end):
+        iso = planned_date.isoformat()
+        row = saved.get(iso, {})
+        days.append(
+            {
+                "plan_date": iso,
+                "weekday": planned_date.strftime("%A"),
+                "breakfast": row.get("breakfast", ""),
+                "lunch": row.get("lunch", ""),
+                "dinner": row.get("dinner", ""),
+                "is_today": planned_date == context["today"],
+                "is_past": planned_date < context["today"],
+            }
+        )
+
+    future_rows = get_meal_schedule(context["today"], None)
+    next_planned_date = future_rows[0]["plan_date"] if future_rows else None
+    current_slot_index = 0 if context["now"].hour < 11 else 1 if context["now"].hour < 16 else 2
+    slots = ("breakfast", "lunch", "dinner")
+    next_meal = None
+    for row in future_rows:
+        row_date = parse_iso_date(row["plan_date"])
+        first_slot = current_slot_index if row_date == context["today"] else 0
+        for index in range(first_slot, len(slots)):
+            slot = slots[index]
+            if row.get(slot):
+                next_meal = {
+                    "plan_date": row["plan_date"],
+                    "weekday": row["weekday"],
+                    "meal_slot": slot,
+                    "meal_name": row[slot],
+                }
+                break
+        if next_meal:
+            break
+
+    return {
+        "timezone": timezone_name,
+        "today": context["today"].isoformat(),
+        "week_start": start.isoformat(),
+        "week_end": end.isoformat(),
+        "days": days,
+        "next_planned_date": next_planned_date,
+        "next_meal": next_meal,
     }
-    return _confirmed_row(
-        "update_single_meal",
-        "meal_plans",
-        lambda: supabase.table("meal_plans")
-        .upsert(payload, on_conflict="profile_id,day")
-        .execute(),
-    )
 
 
 # Pantry

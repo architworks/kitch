@@ -7,60 +7,26 @@ export const HOUSEHOLD_MEMBERS = [
 export const DEFAULT_ACTIVE_USER = HOUSEHOLD_MEMBERS[0].value;
 export const DEFAULT_HOUSEHOLD_SIZE = HOUSEHOLD_MEMBERS.length;
 
-export const WEEK_DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday"
-];
-
 export const MEAL_SLOTS = ["breakfast", "lunch", "dinner"];
 
-export function createEmptyPlanningWeekDates() {
-  return WEEK_DAYS.reduce((dates, day) => {
-    dates[day] = { label: "", longLabel: "", iso: "" };
-    return dates;
-  }, {});
+export function shiftIsoDate(isoDate, days) {
+  const date = new Date(`${isoDate}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
-export function getUpcomingPlanningWeekDates(referenceDate = new Date()) {
-  const start = new Date(referenceDate);
-  start.setHours(0, 0, 0, 0);
-
-  const currentDay = start.getDay();
-  const daysUntilNextMonday = ((8 - currentDay) % 7) || 7;
-  start.setDate(start.getDate() + daysUntilNextMonday);
-
-  return WEEK_DAYS.reduce((dates, day, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-
-    dates[day] = {
-      iso: date.toISOString().slice(0, 10),
-      label: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      longLabel: date.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric"
-      })
-    };
-
-    return dates;
-  }, {});
+export function getWeekStartForDate(isoDate) {
+  const date = new Date(`${isoDate}T12:00:00Z`);
+  const mondayOffset = (date.getUTCDay() + 6) % 7;
+  return shiftIsoDate(isoDate, -mondayOffset);
 }
 
-export function createEmptyWeeklyPlan() {
-  return WEEK_DAYS.reduce((plan, day) => {
-    plan[day] = {
-      breakfast: "",
-      lunch: "",
-      dinner: ""
-    };
-    return plan;
-  }, {});
+export function formatPlanDate(isoDate, options) {
+  if (!isoDate) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    ...options
+  }).format(new Date(`${isoDate}T12:00:00Z`));
 }
 
 export function createUserProfiles() {

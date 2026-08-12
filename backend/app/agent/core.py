@@ -10,11 +10,13 @@ from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models.google_llm import Gemini
 from google.genai.types import Content, Part
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, household_members_text
+from app.planning_calendar import calendar_context
+from app.supabase_client import get_household_timezone
 
 from .tools import (
-    get_weekly_schedule_tool,
-    save_weekly_plan_tool,
-    update_single_meal_in_schedule,
+    get_meal_schedule_tool,
+    replace_meal_plan_range_tool,
+    update_dated_meals_tool,
     get_pantry_stock_tool,
     add_to_pantry_tool,
     log_macros_tool,
@@ -75,21 +77,19 @@ def inject_datetime_callback(callback_context: CallbackContext) -> Optional[Cont
     Before-agent callback that injects the current datetime into session state.
     This ensures the coordinator and all sub-agents know what day/time it is.
     """
-    from datetime import datetime, timedelta
-    now = datetime.now()
-    days_until_next_monday = ((7 - now.weekday()) % 7) or 7
-    planning_start = now + timedelta(days=days_until_next_monday)
-    planning_dates = []
-    for index in range(7):
-        date = planning_start + timedelta(days=index)
-        planning_dates.append(date.strftime("%A, %B %d, %Y"))
-
-    callback_context.state["current_datetime"] = now.strftime("%A, %B %d, %Y at %I:%M %p")
+    context = calendar_context(get_household_timezone())
+    now = context["now"]
+    callback_context.state["household_timezone"] = context["timezone"]
+    callback_context.state["current_datetime"] = now.strftime("%A, %B %d, %Y (%Y-%m-%d) at %I:%M %p")
     callback_context.state["current_day_of_week"] = now.strftime("%A").lower()
-    callback_context.state["current_date"] = now.strftime("%Y-%m-%d")
-    callback_context.state["planning_week_start"] = planning_start.strftime("%Y-%m-%d")
-    callback_context.state["planning_week_end"] = (planning_start + timedelta(days=6)).strftime("%Y-%m-%d")
-    callback_context.state["planning_week_dates"] = "; ".join(planning_dates)
+    callback_context.state["current_date"] = context["today"].isoformat()
+    callback_context.state["tomorrow_date"] = context["tomorrow"].isoformat()
+    callback_context.state["current_week_start"] = context["current_week_start"].isoformat()
+    callback_context.state["current_week_end"] = context["current_week_end"].isoformat()
+    callback_context.state["current_week_dates"] = context["current_week_dates"]
+    callback_context.state["planning_week_start"] = context["next_week_start"].isoformat()
+    callback_context.state["planning_week_end"] = context["next_week_end"].isoformat()
+    callback_context.state["planning_week_dates"] = context["next_week_dates"]
     return None  # Continue execution
 
 # 3. Assemble the 3-Spoke Specialized Spoke Sub-Agents
@@ -112,22 +112,29 @@ chef_planner = LlmAgent(
         "- Household members: " + HOUSEHOLD_MEMBERS_TEXT + " (" + HOUSEHOLD_SIZE_TEXT + " people)\n"
         "- Household size: {app:household_size?}\n"
         "- Dietary preference: {user:dietary_profile?}\n"
-        "- Upcoming planning week: {planning_week_dates?}\n\n"
+        "- Household timezone: {household_timezone?}\n"
+        "- Today: {current_date?}\n"
+        "- Tomorrow: {tomorrow_date?}\n"
+        "- Current week (ending {current_week_end?}): {current_week_dates?}\n"
+        "- Next calendar week: {planning_week_dates?}\n"
+        "- Planner week currently visible to the user: {app:planner_week_start?}\n"
+        "- Exact dates in the visible planner week: {app:planner_week_dates?}\n"
+        "- Planner date currently selected by the user: {app:planner_selected_date?}\n\n"
         "CRITICAL RULES:\n"
         "1. Meal plans store dynamically generated MEAL NAME STRINGS only. Do not pull from a static database, and do not use recipe IDs (like b1, d2).\n"
-        "2. When creating a NEW full weekly plan for 'next week' or 'the week', plan the upcoming Monday-Sunday window listed above. In your chat response, label each day with its exact date. Use 'save_weekly_plan_tool' to save the plan. The saved keys are still weekdays, and the values are breakfast, lunch, and dinner mapping directly to actual meal NAME strings (e.g., 'Avocado Toast with Poached Eggs' or 'Spaghetti Pomodoro'). Do not plan snacks.\n"
-        "3. When MODIFYING or replacing meals in an existing plan, you MUST use 'update_single_meal_in_schedule'. Set the 'new_recipe_name' argument to the actual text name of the recipe. This preserves the rest of the schedule.\n"
-        "4. Before modifying or replacing meals, ALWAYS call 'get_weekly_schedule_tool' first to see the current plan.\n"
-        "5. The schedule tool returns only weekdays with persisted meals. If a weekday is missing, treat that day as unplanned rather than inventing meals for it.\n"
-        "6. When the user asks 'what's for dinner tonight' or similar, check the current day and look up the schedule for that day.\n"
-        "7. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
-        "8. Structure schedules clearly in markdown, showing meal names and brief descriptions only.\n"
-        "9. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails or has no successful result, explicitly say nothing was saved."
+        "2. Resolve every scope to exact ISO dates before reading or writing: tomorrow is tomorrow_date; this week is current_date through current_week_end; next week/the next week/coming week is planning_week_start through planning_week_end; next N days starts current_date unless the user says starting tomorrow.\n"
+        "3. A bare weekday refers to that weekday in the visible planner week when supplied. Otherwise use the nearest non-past occurrence. State the resolved exact date in the response.\n"
+        "4. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
+        "5. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
+        "6. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
+        "7. Never create or modify a past plan date. Reading past dates is allowed.\n"
+        "8. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
+        "9. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
     ),
     tools=[
-        get_weekly_schedule_tool,
-        save_weekly_plan_tool,
-        update_single_meal_in_schedule,
+        get_meal_schedule_tool,
+        replace_meal_plan_range_tool,
+        update_dated_meals_tool,
         get_current_datetime
     ]
 )
@@ -186,7 +193,7 @@ recipe_grocery_planner = LlmAgent(
         "CRITICAL RULES:\n"
         "1. Before generating recipes or groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
         "2. If the user states a new household food preference or exclusion (for example 'we prefer not to use tofu', 'avoid mushrooms', or 'prefer high protein dinners'), call 'set_household_food_preference_tool' to store it in explicitly ephemeral process-local ADK memory. If the same message also asks for a recipe or groceries, store the preference first, then continue. Never describe this memory as durable.\n"
-        "3. Resolve only the user's requested scope. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_weekly_schedule_tool' and select only the requested meal slots or days. Do not process the whole weekly plan unless the user explicitly asks for the full week.\n"
+        "3. Resolve only the user's requested scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
         "4. For every recipe or grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
         "6. Grocery/cart/buy/order wording: call 'get_pantry_stock_tool', generate recipe cards for the requested scope, derive cart rows from the SAME ingredients, mark pantry-covered rows with alreadyStocked=true and a stockNote, then call 'save_recipe_grocery_plan_tool' with update_cart=true. This replaces previous source=agent cart rows and preserves manual rows.\n"
@@ -197,7 +204,7 @@ recipe_grocery_planner = LlmAgent(
         "11. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
-        get_weekly_schedule_tool,
+        get_meal_schedule_tool,
         get_grocery_cart_tool,
         clear_planned_grocery_cart_tool,
         save_recipe_grocery_plan_tool,

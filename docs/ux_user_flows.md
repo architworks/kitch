@@ -15,7 +15,7 @@ The app is designed for a shared household where multiple people eat from the sa
 Kitch should feel like a practical kitchen companion:
 
 - It helps the household decide what to eat.
-- It creates a weekly plan for the coming week.
+- It creates plans for exact calendar dates, from one day to full weeks.
 - It remembers preferences.
 - It tracks what food is already available at home.
 - It turns planned meals into a grocery list.
@@ -86,7 +86,7 @@ When a meal is logged, it should be logged for the active member unless the user
 
 The household context includes:
 
-- Shared weekly meal plan.
+- Shared date-specific meal plan.
 - Shared pantry and fridge stock.
 - Shared grocery preparation.
 - Shared brand and shopping preferences.
@@ -98,7 +98,7 @@ The household context includes:
 
 Users should be able to:
 
-1. Create a weekly meal plan for the household.
+1. Create a dated meal plan for one day, a range, this week, or next week.
 2. Understand what is planned for a specific day or meal.
 3. Modify one meal without damaging the rest of the plan.
 4. Update pantry stock manually, conversationally, or from a fridge photo.
@@ -111,11 +111,12 @@ Users should be able to:
 
 ---
 
-## 5. Flow: Create a Weekly Household Meal Plan
+## 5. Flow: Create a Dated Household Meal Plan
 
 ### User Intent
 
-The user wants Kitch to decide what the household should eat for the next week.
+The user wants Kitch to decide what the household should eat on one or more
+real calendar dates.
 
 Example prompts:
 
@@ -123,23 +124,31 @@ Example prompts:
 - "Plan balanced meals for the three of us."
 - "Make next week Indian and high protein."
 - "Give us a keto meal plan for the coming week."
+- "Plan tomorrow's meals."
+- "Plan the next three days starting tomorrow."
+- "Plan meals for August 20."
 
 ### Expected Experience
 
 1. The user expresses the planning request naturally.
-2. Kitch understands the current date and identifies the upcoming planning window.
-3. Kitch generates a Monday-Sunday plan for the coming week.
+2. Kitch resolves the requested dates using the household timezone.
+3. Kitch generates exactly the requested range. "Next week" remains the next
+   Monday through Sunday, while "tomorrow" affects only tomorrow.
 4. Kitch accounts for household size, diet preference, and known preferences.
 5. Kitch saves the plan as structured household state.
 6. Kitch replies with a readable summary including exact dates.
-7. The visible plan state updates to match what Kitch said.
+7. The planner navigates to the first affected date and selects it.
 
 ### Functional UX Requirements
 
 - The date range must be explicit.
 - Each planned day should be associated with a date.
 - The plan should be clearly household-wide, not personal to one member.
-- If the user asks for "next week" on a weekend, the plan should start on the upcoming Monday.
+- If the user asks for "next week," the plan starts on the next Monday even
+  when the current week still has future dates.
+- "This week" covers today through Sunday; it never rewrites past dates.
+- "Next N days" begins today unless the user explicitly says to start tomorrow.
+- Plans for other dates and weeks must coexist unchanged.
 - If the user gives vague constraints, Kitch should make reasonable choices rather than force a long setup.
 - If the user gives incompatible constraints, Kitch should ask a clarifying question.
 
@@ -149,7 +158,7 @@ Example prompts:
 - Plan generation is in progress.
 - Plan successfully saved.
 - Plan partially failed to save.
-- Existing plan is being replaced.
+- Requested dates are being replaced atomically.
 - Existing plan should be preserved and only changed in requested places.
 
 ---
@@ -177,7 +186,8 @@ Example prompts:
 ### Functional UX Requirements
 
 - "Tonight" should refer to the real current date.
-- "Next Monday" should refer to the upcoming planning week when the user is discussing the generated plan.
+- A bare weekday should refer to the week visible in the planner. Without that
+  UI context, it means the nearest non-past occurrence.
 - The experience should distinguish between the current real day and a future day in the meal plan.
 - If there is ambiguity, Kitch should clarify rather than confidently answering the wrong day.
 
@@ -208,7 +218,8 @@ Example prompts:
 ### Functional UX Requirements
 
 - Single-meal changes should not rewrite the entire week.
-- Multi-meal replacements should clearly list all affected days.
+- Multi-meal replacements should clearly list all affected exact dates.
+- Past plans can be viewed but cannot be created or changed.
 - If the requested meal does not exist, Kitch should explain that and offer alternatives.
 - If the replacement affects groceries, future grocery preparation should use the updated plan.
 - The user should be able to revise the plan through conversational follow-ups.
@@ -272,7 +283,7 @@ Example prompts:
 
 ### Expected Experience
 
-1. Kitch reads the current weekly meal plan.
+1. Kitch reads the dated meal range implied or specified by the request.
 2. Kitch reads the shared pantry stock.
 3. Kitch infers ingredients needed for the planned meals.
 4. Kitch scales quantities for household size.
@@ -520,8 +531,8 @@ Kitch should:
 
 These should be shared across all members:
 
-- Weekly meal plan.
-- Planning week date range.
+- Dated meal plan, shared across calendar weeks.
+- Household timezone and the currently visible Monday-Sunday range.
 - Pantry and fridge stock.
 - Grocery requirements.
 - Household brand preferences.
@@ -552,9 +563,11 @@ These are future product areas:
 
 The UI/UX designer should define interactions for:
 
-- Starting a new weekly plan.
-- Replacing an existing plan.
+- Starting a new dated plan or weekly plan.
+- Replacing an exact date range without affecting other weeks.
 - Understanding the plan's date range.
+- Navigating previous/next weeks and returning to Today.
+- Distinguishing today, past, planned, and empty dates.
 - Asking what is planned for a specific day or meal.
 - Changing one meal.
 - Replacing an ingredient or recipe across the plan.

@@ -8,10 +8,10 @@ import {
   DEFAULT_HOUSEHOLD_SIZE,
   HOUSEHOLD_MEMBERS,
   MEAL_SLOTS,
-  WEEK_DAYS,
-  createEmptyPlanningWeekDates,
   createUserProfiles,
-  getUpcomingPlanningWeekDates
+  formatPlanDate,
+  getWeekStartForDate,
+  shiftIsoDate
 } from "./householdConfig.js";
 
 const MEAL_SLOT_LABELS = {
@@ -690,15 +690,15 @@ const renderMarkdownContent = (text) => {
 export default function Home() {
   // Application core state variables
   const [activeTab, setActiveTab] = useState("planner");
-  const [selectedPlannerDay, setSelectedPlannerDay] = useState("Monday");
+  const [selectedPlanDate, setSelectedPlanDate] = useState("");
   const [currentMealSlot, setCurrentMealSlot] = useState(DEFAULT_MEAL_SLOT);
-  const [expandedMealKey, setExpandedMealKey] = useState(`Monday-${DEFAULT_MEAL_SLOT}`);
+  const [expandedMealKey, setExpandedMealKey] = useState("");
   const [dietPreference, setDietPreference] = useState("balanced");
   const [householdSize, setHouseholdSize] = useState(DEFAULT_HOUSEHOLD_SIZE);
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
   const [userProfiles, setUserProfiles] = useState(createUserProfiles);
   const [pantryStock, setPantryStock] = useState([]);
-  const [weeklyPlan, setWeeklyPlan] = useState({});
+  const [mealPlan, setMealPlan] = useState({ days: [] });
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
   const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
   const chatMessagesRef = useRef(null);
@@ -706,7 +706,6 @@ export default function Home() {
   const confirmedGroceryItemsRef = useRef([]);
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [liveStateUser, setLiveStateUser] = useState("");
-  const [planningWeekDates, setPlanningWeekDates] = useState(createEmptyPlanningWeekDates);
 
   // UI state variables
   const [chatInput, setChatInput] = useState("");
@@ -805,8 +804,17 @@ export default function Home() {
         setHouseholdSize(data.profile.household_size);
       }
     }
-    if (Object.prototype.hasOwnProperty.call(data, "weekly_plan")) {
-      setWeeklyPlan(data.weekly_plan || {});
+    if (data.meal_plan) {
+      const nextMealPlan = data.meal_plan;
+      const days = Array.isArray(nextMealPlan.days) ? nextMealPlan.days : [];
+      setMealPlan(nextMealPlan);
+      setSelectedPlanDate(current => {
+        return days.some(day => day.plan_date === current)
+          ? current
+          : days.some(day => day.plan_date === nextMealPlan.today)
+            ? nextMealPlan.today
+            : days[0]?.plan_date || "";
+      });
     }
     if (data.grocery_cart) {
       applyConfirmedGroceryCart(data.grocery_cart);
@@ -818,6 +826,22 @@ export default function Home() {
     await requireSuccessfulResponse(res);
     return res.json();
   };
+
+  const loadMealPlanWeek = useCallback(async (weekStart, focusDate = "") => {
+    const res = await fetch(apiUrl(`/api/meal-plan?week_start=${encodeURIComponent(weekStart)}`));
+    await requireSuccessfulResponse(res);
+    const data = await res.json();
+    const days = Array.isArray(data.days) ? data.days : [];
+    const nextDate = days.some(day => day.plan_date === focusDate)
+      ? focusDate
+      : days.some(day => day.plan_date === data.today)
+        ? data.today
+        : days[0]?.plan_date || "";
+    setMealPlan(data);
+    setSelectedPlanDate(nextDate);
+    setExpandedMealKey(`${nextDate}-${getTimeBasedMealSlot()}`);
+    return data;
+  }, []);
 
   const syncLatestRecipeGroceryPlan = useCallback(async () => {
     try {
@@ -956,21 +980,13 @@ export default function Home() {
   }, [isProviderSyncing]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setPlanningWeekDates(getUpcomingPlanningWeekDates());
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
     const syncMealFocus = () => {
       const nextMealSlot = getTimeBasedMealSlot();
       setCurrentMealSlot(previousMealSlot => {
         if (previousMealSlot !== nextMealSlot) {
           setExpandedMealKey(currentKey => (
-            currentKey === `${selectedPlannerDay}-${previousMealSlot}`
-              ? `${selectedPlannerDay}-${nextMealSlot}`
+            currentKey === `${selectedPlanDate}-${previousMealSlot}`
+              ? `${selectedPlanDate}-${nextMealSlot}`
               : currentKey
           ));
         }
@@ -982,7 +998,7 @@ export default function Home() {
     syncMealFocus();
     const interval = window.setInterval(syncMealFocus, 60 * 1000);
     return () => window.clearInterval(interval);
-  }, [selectedPlannerDay]);
+  }, [selectedPlanDate]);
 
   useEffect(() => {
     if (!smartDockExpanded || !chatMessagesRef.current) return undefined;
@@ -1511,7 +1527,10 @@ export default function Home() {
         active_user: activeUser,
         diet_preference: dietPreference,
         household_size: householdSize,
-        weekly_plan: weeklyPlan,
+        planner_context: {
+          visible_week_start: mealPlan.week_start || "",
+          selected_date: selectedPlanDate || mealPlan.today || ""
+        },
         pantry_stock: pantryStock,
         grocery_list: groceryList
       };
@@ -1553,6 +1572,10 @@ export default function Home() {
           setDietPreference(newDiet);
           triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
         } else if (act.type === "UPDATE_PLANNER") {
+          const focusDate = act.focus_date || act.affected_dates?.[0];
+          if (focusDate) {
+            await loadMealPlanWeek(getWeekStartForDate(focusDate), focusDate);
+          }
           triggerBannerAlert("Planner modified by Kitch Agent!");
         } else if (act.type === "UPDATE_PANTRY") {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
@@ -1701,11 +1724,11 @@ export default function Home() {
     }
   };
 
-  const draftMealSwapPrompt = (day, slot) => {
+  const draftMealSwapPrompt = (planDate, slot) => {
     setActiveTab("planner");
-    setSelectedPlannerDay(day);
-    setExpandedMealKey(`${day}-${slot}`);
-    setChatInput(`Change ${day} ${slot} to `);
+    setSelectedPlanDate(planDate);
+    setExpandedMealKey(`${planDate}-${slot}`);
+    setChatInput(`Change ${formatPlanDate(planDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} ${slot} to `);
   };
 
   // Daily target calorie values per person
@@ -1891,54 +1914,49 @@ export default function Home() {
     failed: `Reconnect ${selectedProvider.label} and try again.`,
     unknown: `Checking whether ${selectedProvider.label} is ready.`
   }[providerConnectionState] || "");
-  const plannedWeekDays = useMemo(() => (
-    WEEK_DAYS.filter(day => MEAL_SLOTS.some(slot => hasMealTitle(weeklyPlan[day]?.[slot])))
-  ), [weeklyPlan]);
-  const hasWeeklyPlan = plannedWeekDays.length > 0;
-  const activePlannerDay = hasWeeklyPlan && plannedWeekDays.includes(selectedPlannerDay)
-    ? selectedPlannerDay
-    : plannedWeekDays[0] || selectedPlannerDay;
-  const plannedDateLabels = plannedWeekDays
-    .map(day => planningWeekDates[day]?.label)
-    .filter(Boolean);
-  const plannerDateRangeLabel = !hasWeeklyPlan
-    ? "No saved plan yet"
-    : plannedDateLabels.length > 1
-      ? `${plannedDateLabels[0]} - ${plannedDateLabels[plannedDateLabels.length - 1]}`
-      : plannedDateLabels[0] || "Saved plan";
+  const planDays = useMemo(() => (
+    Array.isArray(mealPlan.days) ? mealPlan.days : []
+  ), [mealPlan.days]);
+  const hasWeeklyPlan = planDays.some(day => MEAL_SLOTS.some(slot => hasMealTitle(day?.[slot])));
+  const selectedPlanDay = planDays.find(day => day.plan_date === selectedPlanDate)
+    || planDays.find(day => day.plan_date === mealPlan.today)
+    || planDays[0]
+    || {};
+  const plannerDateRangeLabel = mealPlan.week_start && mealPlan.week_end
+    ? `${formatPlanDate(mealPlan.week_start, { month: "short", day: "numeric" })} - ${formatPlanDate(mealPlan.week_end, { month: "short", day: "numeric", year: "numeric" })}`
+    : "Loading calendar week";
 
   const currentMealLabel = MEAL_SLOT_LABELS[currentMealSlot];
-  const firstPlannedFocusMeal = plannedWeekDays.map(day => ({
-    day,
-    date: planningWeekDates[day] || {},
-    slot: currentMealSlot,
-    title: getMealTitle(weeklyPlan[day]?.[currentMealSlot], "")
-  })).find(item => item.title) || plannedWeekDays.flatMap(day => (
-    MEAL_SLOTS.map(slot => ({
-      day,
-      date: planningWeekDates[day] || {},
-      slot,
-      title: getMealTitle(weeklyPlan[day]?.[slot], "")
-    }))
-  )).find(item => item.title) || {
-    day: "",
-    date: {},
+  const firstPlannedFocusMeal = mealPlan.next_meal ? {
+    planDate: mealPlan.next_meal.plan_date,
+    weekday: mealPlan.next_meal.weekday,
+    slot: mealPlan.next_meal.meal_slot,
+    title: mealPlan.next_meal.meal_name
+  } : {
+    planDate: "",
+    weekday: "",
     slot: currentMealSlot,
     title: `Ask Kitch to plan the first household ${currentMealLabel.toLowerCase()}`
   };
 
   const pantryPreview = pantryStock.slice(0, 3);
-  const selectedDayDate = planningWeekDates[activePlannerDay] || {};
   const selectedDayMealList = MEAL_SLOTS.map(slot => ({
     slot,
-    key: `${activePlannerDay}-${slot}`,
-    title: getMealTitle(weeklyPlan[activePlannerDay]?.[slot], `${MEAL_SLOT_LABELS[slot]} not set`)
+    key: `${selectedPlanDay.plan_date || "unplanned"}-${slot}`,
+    title: getMealTitle(selectedPlanDay?.[slot], `${MEAL_SLOT_LABELS[slot]} not set`)
   }));
-  const focusMealDateText = firstPlannedFocusMeal.date.longLabel || firstPlannedFocusMeal.date.label || "Upcoming week";
+  const selectedDayHasMeals = MEAL_SLOTS.some(slot => hasMealTitle(selectedPlanDay?.[slot]));
+  const nextPlannedOutsideVisibleWeek = mealPlan.next_planned_date
+    && !planDays.some(day => day.plan_date === mealPlan.next_planned_date)
+    ? mealPlan.next_planned_date
+    : "";
+  const focusMealDateText = firstPlannedFocusMeal.planDate
+    ? formatPlanDate(firstPlannedFocusMeal.planDate, { weekday: "long", month: "long", day: "numeric" })
+    : "Upcoming dates";
   const focusMealTitle = firstPlannedFocusMeal.title;
   const focusMealSlotLabel = MEAL_SLOT_LABELS[firstPlannedFocusMeal.slot] || currentMealLabel;
   const heroGreeting = `${getTimeBasedGreeting()}, ${activeUser}!`;
-  const focusMealContext = hasWeeklyPlan
+  const focusMealContext = firstPlannedFocusMeal.planDate
     ? `${focusMealSlotLabel} for ${focusMealDateText}`
     : "No household meal plan yet";
   const nutritionSummary = loggedCal > 0
@@ -2387,22 +2405,22 @@ export default function Home() {
                     <h2>{heroGreeting}</h2>
                     <p>{"I'm here to help you plan meals, groceries, pantry, and kitchen needs."}</p>
                     <div className="hero-meal-card">
-                      <span className={`meal-time-icon ${currentMealSlot}`} aria-hidden="true"><span></span></span>
+                      <span className={`meal-time-icon ${firstPlannedFocusMeal.slot}`} aria-hidden="true"><span></span></span>
                       <div>
                         <small>{focusMealContext}</small>
                         <strong>{focusMealTitle}</strong>
                       </div>
                     </div>
                     <div className="hero-actions">
-                      {hasWeeklyPlan ? (
+                      {firstPlannedFocusMeal.planDate ? (
                         <>
-                          <button type="button" className="primary-action" onClick={() => setChatInput(`Show me the recipe for ${focusMealTitle}`)}>
+                          <button type="button" className="primary-action" onClick={() => setChatInput(`Show me the recipe for ${focusMealTitle} planned on ${firstPlannedFocusMeal.planDate}`)}>
                             View details →
                           </button>
-                          <button type="button" onClick={() => draftMealSwapPrompt(firstPlannedFocusMeal.day, firstPlannedFocusMeal.slot)}>
+                          <button type="button" onClick={() => draftMealSwapPrompt(firstPlannedFocusMeal.planDate, firstPlannedFocusMeal.slot)}>
                             Swap meal
                           </button>
-                          <button type="button" onClick={() => setChatInput(`Log ${focusMealTitle} for ${activeUser}`)}>
+                          <button type="button" onClick={() => setChatInput(`Log ${focusMealTitle} planned on ${firstPlannedFocusMeal.planDate} for ${activeUser}`)}>
                             Log meal
                           </button>
                         </>
@@ -2455,27 +2473,31 @@ export default function Home() {
                       <span className="eyebrow">Your household plan</span>
                       <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
                     </div>
-                    <p>{plannerDateRangeLabel}</p>
+                    <div className="planner-week-controls" aria-label="Calendar week navigation">
+                      <button type="button" aria-label="Previous week" disabled={!mealPlan.week_start} onClick={() => loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, -7))}>←</button>
+                      <button type="button" disabled={!mealPlan.today} onClick={() => loadMealPlanWeek(getWeekStartForDate(mealPlan.today), mealPlan.today)}>Today</button>
+                      <span>{plannerDateRangeLabel}</span>
+                      <button type="button" aria-label="Next week" disabled={!mealPlan.week_start} onClick={() => loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, 7))}>→</button>
+                    </div>
                   </div>
-                  {hasWeeklyPlan ? (
-                    <div id="weekly-plan-grid" className="weekly-plan-board">
+                  <div id="weekly-plan-grid" className="weekly-plan-board">
                       <div className="week-date-rail" aria-label="Select planning day">
-                        {plannedWeekDays.map(day => {
-                          const dateMeta = planningWeekDates[day] || {};
+                        {planDays.map(day => {
+                          const hasMeals = MEAL_SLOTS.some(slot => hasMealTitle(day?.[slot]));
                           return (
                             <button
-                              key={day}
+                              key={day.plan_date}
                               type="button"
-                              className={`week-date-card ${activePlannerDay === day ? "active" : ""}`}
+                              className={`week-date-card ${selectedPlanDate === day.plan_date ? "active" : ""} ${day.is_today ? "today" : ""} ${day.is_past ? "past" : ""} ${hasMeals ? "planned" : "empty"}`}
                               onClick={() => {
-                                setSelectedPlannerDay(day);
-                                setExpandedMealKey(`${day}-${currentMealSlot}`);
+                                setSelectedPlanDate(day.plan_date);
+                                setExpandedMealKey(`${day.plan_date}-${currentMealSlot}`);
                               }}
                             >
-                              <span>{day.slice(0, 3)}</span>
+                              <span>{day.weekday.slice(0, 3).toUpperCase()}</span>
                               <div>
-                                <strong>{dateMeta.label || day}</strong>
-                                <em>{activePlannerDay === day ? "Selected" : ""}</em>
+                                <strong>{formatPlanDate(day.plan_date, { month: "short", day: "numeric" })}</strong>
+                                <em>{day.is_today ? "Today" : selectedPlanDate === day.plan_date ? "Selected" : hasMeals ? "Planned" : "Open"}</em>
                               </div>
                             </button>
                           );
@@ -2485,7 +2507,8 @@ export default function Home() {
                       <article className="selected-week-meals">
                         <div className="selected-week-heading">
                           <div>
-                            <h3>{selectedDayDate.longLabel || activePlannerDay}</h3>
+                            <h3>{formatPlanDate(selectedPlanDay.plan_date, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) || "Select a planning date"}</h3>
+                            <p>{mealPlan.timezone ? `Household timezone: ${mealPlan.timezone}` : ""}</p>
                           </div>
                         </div>
 
@@ -2497,7 +2520,9 @@ export default function Home() {
                               className={`selected-meal-row ${slot} ${expandedMealKey === key ? "active" : ""}`}
                               onClick={() => {
                                 setExpandedMealKey(key);
-                                setChatInput(`Show details for ${title} on ${activePlannerDay}`);
+                                setChatInput(selectedDayHasMeals
+                                  ? `Show details for ${title} planned on ${selectedPlanDay.plan_date}`
+                                  : `Plan ${slot} for ${selectedPlanDay.plan_date}`);
                               }}
                             >
                               <span className={`meal-time-icon ${slot}`} aria-hidden="true"><span></span></span>
@@ -2507,35 +2532,26 @@ export default function Home() {
                             </button>
                           ))}
                         </div>
+                        {!selectedDayHasMeals && (
+                          <div className="selected-day-empty-state">
+                            <p>No meals are planned for this date.</p>
+                            <button type="button" onClick={() => {
+                              setChatInput(`Plan breakfast, lunch, and dinner for ${selectedPlanDay.plan_date}`);
+                              setSmartDockExpanded(true);
+                            }}>Plan this date</button>
+                          </div>
+                        )}
+                        {!hasWeeklyPlan && nextPlannedOutsideVisibleWeek && (
+                          <button
+                            type="button"
+                            className="next-planned-week-link"
+                            onClick={() => loadMealPlanWeek(getWeekStartForDate(nextPlannedOutsideVisibleWeek), nextPlannedOutsideVisibleWeek)}
+                          >
+                            View next planned date: {formatPlanDate(nextPlannedOutsideVisibleWeek, { weekday: "short", month: "short", day: "numeric" })}
+                          </button>
+                        )}
                       </article>
                     </div>
-                  ) : (
-                    <article id="weekly-plan-grid" className="planner-empty-state" aria-label="No saved household meal plan">
-                      <div className="planner-empty-copy">
-                        <span className="eyebrow">No plan yet</span>
-                        <h3>Start with a weekly household plan.</h3>
-                        <p>Planned days will appear here after Kitch creates meals for the household.</p>
-                        <button
-                          type="button"
-                          className="planner-empty-cta"
-                          onClick={() => {
-                            setChatInput("Plan next week for the whole household");
-                            setSmartDockExpanded(true);
-                          }}
-                        >
-                          Plan next week
-                        </button>
-                      </div>
-                      <div className="planner-empty-preview" aria-hidden="true">
-                        <AboutIconBadge name="calendar" tone="sage" />
-                        <div>
-                          <span>Breakfast</span>
-                          <span>Lunch</span>
-                          <span>Dinner</span>
-                        </div>
-                      </div>
-                    </article>
-                  )}
                 </section>
 
                 <aside className="weekly-side-rail" aria-label="Household planning status">

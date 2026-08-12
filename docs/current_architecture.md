@@ -94,7 +94,7 @@ Current duties:
 - Show Zepto as the current live ordering app and Blinkit as a disabled future
   provider without exposing unusable actions.
 - Render individual nutrition state.
-- Render shared weekly plan state.
+- Render shared calendar-date plan state with navigable Monday-Sunday views.
 - Render pantry/grocery state from backend APIs.
 - Send text chat turns to `POST /api/chat`.
 - Upload image-plus-text requests to `POST /api/upload-photo`.
@@ -132,7 +132,8 @@ Current routes:
 | :--- | :--- |
 | `POST /api/chat` | Runs a text chat turn through the ADK runner. |
 | `POST /api/upload-photo` | Sends image bytes and optional text to ADK; handles photo-plus-grocery two-step orchestration. |
-| `GET /api/state/{user_name}` | Returns dashboard state: profile, pantry, macro diary, weekly plan, native cart, and latest recipe+grocery metadata. |
+| `GET /api/state/{user_name}` | Returns dashboard state, including the authoritative current calendar-week meal plan and next chronological meal. |
+| `GET /api/meal-plan?week_start=YYYY-MM-DD` | Returns one Monday-Sunday planning window with all seven exact dates, including empty days. |
 | `POST /api/pantry/add` | Adds pantry stock manually. |
 | `PATCH /api/household/profile` | Persists shared diet and household-size settings. |
 | `DELETE /api/pantry/remove/{user_name}/{item_name}` | Removes pantry stock manually. |
@@ -212,7 +213,7 @@ Supabase tables:
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
 | `profiles` | Prototype user/shared profile | Stores configured users and profile defaults. |
-| `meal_plans` | Shared household | Stores weekly breakfast/lunch/dinner meal name strings. |
+| `meal_plans` | Shared household | Stores breakfast/lunch/dinner meal names keyed by exact calendar date. |
 | `recipe_grocery_plans` | Shared household | Stores recipe cards, ingredients, pantry notes, request scope, and cart update metadata. |
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
 | `grocery_cart_items` | Shared household | Stores native provider-agnostic cart rows. |
@@ -221,8 +222,11 @@ Supabase tables:
 
 Important modeling decisions:
 
-- `meal_plans` still has legacy `*_recipe_id` column names, but values are meal name strings.
-- `snack_recipe_id` may exist in schema for compatibility, but the product does not plan snacks.
+- `meal_plans` is uniquely keyed by `(profile_id, plan_date)`; weekdays are
+  derived display labels, so Thursday in one week cannot overwrite another.
+- The household profile stores the IANA timezone used to resolve relative dates.
+- New plan ranges and targeted multi-meal edits use transactional RPCs.
+- The product plans breakfast, lunch, and dinner only.
 - `recipe_grocery_plan_id` links agent-created cart rows back to the recipe+grocery artifact that produced them.
 - `source=manual` rows survive later agent grocery planning.
 - `already_stocked=true` rows remain visible but are excluded from provider sync.

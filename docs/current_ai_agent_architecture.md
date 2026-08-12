@@ -40,9 +40,9 @@ flowchart TD
     Coordinator --> RecipeGrocery
 
     subgraph ToolLayer[Python Tool Layer]
-        GetWeekly[get_weekly_schedule_tool]
-        SaveWeekly[save_weekly_plan_tool]
-        UpdateMeal[update_single_meal_in_schedule]
+        GetSchedule[get_meal_schedule_tool]
+        ReplaceRange[replace_meal_plan_range_tool]
+        UpdateMeals[update_dated_meals_tool]
         AddPantry[add_to_pantry_tool]
         LogMacros[log_macros_tool]
         GetPantry[get_pantry_stock_tool]
@@ -57,9 +57,9 @@ flowchart TD
         GetDatetime[get_current_datetime]
     end
 
-    Chef --> GetWeekly
-    Chef --> SaveWeekly
-    Chef --> UpdateMeal
+    Chef --> GetSchedule
+    Chef --> ReplaceRange
+    Chef --> UpdateMeals
     Chef --> GetDatetime
 
     Vision --> AddPantry
@@ -68,7 +68,7 @@ flowchart TD
     Vision --> GetMacro
     Vision --> GetDatetime
 
-    RecipeGrocery --> GetWeekly
+    RecipeGrocery --> GetSchedule
     RecipeGrocery --> GetCart
     RecipeGrocery --> ClearCart
     RecipeGrocery --> SaveRecipePlan
@@ -80,9 +80,9 @@ flowchart TD
     RecipeGrocery --> AddPantry
     RecipeGrocery --> GetDatetime
 
-    GetWeekly --> Supabase[(Supabase)]
-    SaveWeekly --> Supabase
-    UpdateMeal --> Supabase
+    GetSchedule --> Supabase[(Supabase)]
+    ReplaceRange --> Supabase
+    UpdateMeals --> Supabase
     AddPantry --> Supabase
     LogMacros --> Supabase
     GetPantry --> Supabase
@@ -128,7 +128,7 @@ Role:
 Responsibilities:
 
 - Interpret natural language intent.
-- Route weekly schedule creation, schedule lookup, and meal swaps to `chef_planner`.
+- Route dated schedule creation, exact-range lookup, and meal swaps to `chef_planner`.
 - Route food logging, macro diary, pantry scanning, and image-based intake/pantry requests to `vision_scanner`.
 - Route recipes, cooking steps, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
 - Answer simple greetings and general chat directly.
@@ -148,8 +148,9 @@ State available:
 - Dietary profile.
 - Household size.
 - Household members.
-- Current date/time.
-- Upcoming planning week dates.
+- Household timezone and exact current date/time.
+- Tomorrow, current-week dates, and next-week dates.
+- Visible planner week and selected ISO date supplied as UI context.
 
 ---
 
@@ -161,19 +162,20 @@ Role:
 
 Responsibilities:
 
-- Generate dynamic weekly meal schedules.
-- Treat "next week" as the upcoming Monday-Sunday planning window.
+- Generate dynamic meal schedules for exact requested calendar ranges.
+- Resolve tomorrow, this week, next week, exact dates, and rolling ranges using
+  the household timezone.
 - Include exact dates in meal-plan responses.
-- Save structured weekly plans.
-- Read existing weekly plans.
-- Change one meal slot without rewriting the week.
+- Atomically replace only a requested date range.
+- Read existing plans by exact inclusive date range.
+- Apply one or more dated slot changes without rewriting unrelated dates.
 - Answer schedule questions such as "what's for dinner tonight?"
 
 Tools:
 
-- `get_weekly_schedule_tool`
-- `save_weekly_plan_tool`
-- `update_single_meal_in_schedule`
+- `get_meal_schedule_tool`
+- `replace_meal_plan_range_tool`
+- `update_dated_meals_tool`
 - `get_current_datetime`
 
 Persistence:
@@ -252,7 +254,7 @@ Responsibilities:
 - Generate recipe cards and ingredients for recipe-only requests.
 - Generate recipe cards and ingredients for grocery requests.
 - Resolve only the requested scope: a dish, tonight's dinner, tomorrow, next N days, or the full week only if explicitly requested.
-- Read the weekly schedule only for schedule-based recipe/grocery requests.
+- Read exact date ranges only for schedule-based recipe/grocery requests.
 - Read pantry stock before grocery planning.
 - Save every recipe+ingredient output as a `recipe_grocery_plans` artifact.
 - Save native grocery cart rows only when the user asks for groceries/cart/buy/order.
@@ -262,7 +264,7 @@ Responsibilities:
 
 Tools:
 
-- `get_weekly_schedule_tool`
+- `get_meal_schedule_tool`
 - `get_pantry_stock_tool`
 - `add_to_pantry_tool`
 - `get_grocery_cart_tool`
@@ -473,7 +475,7 @@ Parent triage agent.
 Responsibilities:
 
 - Understand user intent.
-- Route weekly schedule creation, schedule lookup, and swaps to `chef_planner`.
+- Route dated schedule creation, schedule lookup, and swaps to `chef_planner`.
 - Route food logging, macro diary, pantry, and image tasks to `vision_scanner`.
 - Route recipes, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
 - Answer simple general chat directly.
@@ -488,10 +490,11 @@ Lightweight meal scheduling agent.
 
 Responsibilities:
 
-- Generate dynamic weekly meal schedules.
-- Treat "next week" as the upcoming Monday-Sunday planning window.
+- Generate dynamic schedules for exact requested calendar ranges.
+- Treat "next week" as the upcoming Monday-Sunday planning window while
+  resolving tomorrow and other scopes independently.
 - Include exact dates in meal-plan responses.
-- Save structured weekly meal plans to Supabase.
+- Save dated meal plans to Supabase transactionally.
 - Store actual meal names, not recipe IDs.
 - Update one meal slot without rewriting the rest of the plan.
 - Answer schedule questions such as "what's for dinner tonight?"
@@ -527,7 +530,7 @@ Responsibilities:
 - Generate recipe cards and structured ingredients for recipe-only requests.
 - Save recipe-only outputs as `recipe_grocery_plans` without touching the native grocery cart.
 - Generate recipe cards and structured ingredients for grocery requests.
-- Read only the requested meal/day scope from the weekly schedule.
+- Read only the requested exact date/meal scope from the dated schedule.
 - Read pantry stock before grocery planning.
 - Save pantry-aware native cart rows derived from the same recipe cards.
 - Link native cart rows to the source recipe+grocery artifact.
@@ -546,9 +549,9 @@ Why recipe+grocery together:
 
 Meal schedule tools:
 
-- `get_weekly_schedule_tool`
-- `save_weekly_plan_tool`
-- `update_single_meal_in_schedule`
+- `get_meal_schedule_tool`
+- `replace_meal_plan_range_tool`
+- `update_dated_meals_tool`
 - `get_current_datetime`
 
 Pantry and macro tools:
@@ -591,20 +594,28 @@ FastAPI syncs these values into ADK session state before each chat turn:
 - `user:dietary_profile`
 - `app:household_size`
 - `app:household_members`
+- `app:planner_week_start`
+- `app:planner_selected_date`
 
 The before-agent callback injects:
 
 - `current_datetime`
 - `current_day_of_week`
 - `current_date`
+- `tomorrow_date`
+- `household_timezone`
+- `current_week_start`
+- `current_week_end`
+- `current_week_dates`
 - `planning_week_start`
 - `planning_week_end`
 - `planning_week_dates`
 
 Why:
 
-- Agents need today's real date and the upcoming planning week as separate concepts.
-- This prevents the UI and agent from treating a future Saturday in the generated plan as "today."
+- Agents receive today, tomorrow, the current week, the next calendar week,
+  and the user's visible planner context as distinct concepts.
+- All reads and writes use ISO dates; weekday names are never schedule keys.
 
 ---
 

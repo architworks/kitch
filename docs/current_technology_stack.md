@@ -181,7 +181,8 @@ Current tables:
 State ownership:
 
 - `profiles`: configured prototype members and shared household profile settings.
-- `meal_plans`: shared household weekly meal schedule with meal names only.
+- `meal_plans`: shared household schedule keyed by exact `plan_date`, with
+  breakfast, lunch, and dinner meal names only.
 - `recipe_grocery_plans`: persisted recipe cards, structured ingredients, pantry considerations, and request scope.
 - `pantry_stock`: shared household pantry/fridge inventory.
 - `grocery_cart_items`: shared native grocery cart, optionally linked to a recipe+grocery artifact.
@@ -195,9 +196,14 @@ Why Supabase:
 - Agents need reliable state reads before planning.
 - Supabase gives fast prototype persistence without building a custom database layer.
 
-Important implementation note:
+Important implementation notes:
 
-- The `meal_plans` schema still uses legacy column names like `breakfast_recipe_id`, but these fields now store meal name strings. Do not reintroduce static recipe IDs.
+- `meal_plans` uses `plan_date`, `breakfast_name`, `lunch_name`, and
+  `dinner_name`. Weekday labels are derived and never persisted as identity.
+- `profiles.timezone_name` is the authoritative household timezone for today,
+  tomorrow, and calendar-week boundaries.
+- `replace_meal_plan_range` and `apply_meal_plan_edits` make range replacement
+  and multi-slot edits transactional.
 
 Persistence contract:
 
