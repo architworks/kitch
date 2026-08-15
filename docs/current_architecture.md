@@ -224,6 +224,9 @@ Important modeling decisions:
 
 - `meal_plans` is uniquely keyed by `(profile_id, plan_date)`; weekdays are
   derived display labels, so Thursday in one week cannot overwrite another.
+- FastAPI deletes `meal_plans` rows before the household's current date at
+  startup and after each `profiles.timezone_name` midnight. The planner is an
+  active/future schedule, not historical meal-plan storage.
 - The household profile stores the IANA timezone used to resolve relative dates.
 - New plan ranges and targeted multi-meal edits use transactional RPCs.
 - The product plans breakfast, lunch, and dinner only.

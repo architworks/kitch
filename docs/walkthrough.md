@@ -67,6 +67,7 @@ flowchart TD
 *   **Transactional Range Planning**: `replace_meal_plan_range_tool` replaces exactly the requested date range after validating complete breakfast, lunch, and dinner entries.
 *   **Transactional Targeted Edits**: `update_dated_meals_tool` changes exact date/slot pairs while preserving every unrelated plan.
 *   The household profile stores `timezone_name`, which resolves today, tomorrow, and calendar-week boundaries consistently across devices.
+*   **Active-plan retention**: FastAPI removes dated meal-plan rows before the household's current date at startup and after each household midnight.
 
 ### 2. LLM-Based Culinary Reasoning & Scaling
 *   **Dynamic Meal Schedules**: The `chef_planner` agent generates balanced weekly meal-name schedules dynamically from its own reasoning and saves those names to `meal_plans`.
@@ -81,7 +82,7 @@ flowchart TD
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: `/api/state/{user_name}` returns the authoritative current calendar week and next chronological meal, while `/api/meal-plan` loads navigated weeks.
 *   **React Integration**: Planner state is keyed by ISO date. Chat mutations return `affected_dates` and `focus_date`, so the UI opens the exact changed date.
-*   **Grid Rendering**: The planner defaults to the current Monday-Sunday week, renders empty and planned dates, supports week navigation, and never projects a weekday into another week.
+*   **Plan Rendering**: The planner defaults to the current Monday-Sunday context but renders only persisted dates and populated meal slots. A fully empty planner uses the onboarding placeholder; an empty visible week links to the next planned date without fabricating weekday rows.
 
 ### 4. Durable Storage and Credential Security
 

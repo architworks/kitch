@@ -238,6 +238,10 @@ all required tables and columns, and the configured household profile must be
 available. Database failures are returned as a safe HTTP 503; the UI retains
 the last confirmed state and does not present a successful save.
 
+Meal plans are active scheduling state rather than history. On startup and
+after every household midnight, FastAPI deletes `meal_plans` rows whose
+`plan_date` is earlier than the current date in `profiles.timezone_name`.
+
 ### 3. Create Backend Environment File
 
 Create `backend/.env`:

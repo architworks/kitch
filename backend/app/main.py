@@ -1,7 +1,8 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
+import asyncio
 import time
-from datetime import timedelta
+from datetime import datetime, time as datetime_time, timedelta
 from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -13,7 +14,7 @@ from contextlib import asynccontextmanager
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
 from app.agent.tools import export_to_delivery, apply_brand_memory_to_cart_items
-from app.planning_calendar import dates_between, parse_iso_date
+from app.planning_calendar import dates_between, household_zone, parse_iso_date
 from app.providers.zepto import ZeptoProviderAdapter
 from app.checkout_drafts import (
     draft_row_to_review,
@@ -44,6 +45,8 @@ from app.supabase_client import (
     get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
     build_meal_plan_week,
+    delete_past_meal_plans,
+    get_household_timezone,
     get_meal_plan_snapshot,
     update_household_profile,
     validate_persistence_readiness,
@@ -61,6 +64,30 @@ from app.persistence import (
 )
 
 load_dotenv()
+
+
+async def delete_past_meal_plans_at_household_midnight() -> None:
+    """Run retention cleanup after every household-calendar date boundary."""
+    while True:
+        try:
+            timezone_name = await asyncio.to_thread(get_household_timezone)
+            zone = household_zone(timezone_name)
+            now = datetime.now(zone)
+            next_midnight = datetime.combine(
+                now.date() + timedelta(days=1),
+                datetime_time.min,
+                tzinfo=zone,
+            )
+            await asyncio.sleep(max(1.0, (next_midnight - now).total_seconds() + 1.0))
+            deleted_count = await asyncio.to_thread(delete_past_meal_plans)
+            if deleted_count:
+                print(f"Meal-plan retention removed {deleted_count} past dated rows.")
+        except PersistenceError as error:
+            print(
+                "Meal-plan retention cleanup failed safely: "
+                f"operation={error.operation} table={error.table} retryable={error.retryable}"
+            )
+            await asyncio.sleep(300)
 
 def looks_like_grocery_request(text: str) -> bool:
     """Detects fridge-photo follow-ups that need grocery planning after pantry update."""
@@ -157,9 +184,20 @@ async def lifespan(app: FastAPI):
     Refuse startup unless durable storage is correctly configured and ready.
     """
     validate_persistence_readiness()
+    deleted_count = await asyncio.to_thread(delete_past_meal_plans)
+    if deleted_count:
+        print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
+    retention_task = asyncio.create_task(delete_past_meal_plans_at_household_midnight())
     print("🚀 Starting Kitch ADK 2.0 Backend Gateway Service...")
-    yield
-    print("💤 Stopped Kitch ADK 2.0 Backend Gateway Service.")
+    try:
+        yield
+    finally:
+        retention_task.cancel()
+        try:
+            await retention_task
+        except asyncio.CancelledError:
+            pass
+        print("💤 Stopped Kitch ADK 2.0 Backend Gateway Service.")
 
 app = FastAPI(
     title="Kitch Backend Gateway",

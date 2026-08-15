@@ -714,20 +714,22 @@ section. The expected weekday depends on the run date.
 - Fail criteria: Wrong date, old entries included, logged entries omitted, or
   no total when diary entries exist.
 
-### Scenario 9.4 - Current-Week Navigation and Empty Dates
+### Scenario 9.4 - Week Navigation and Planned-Date-Only Rendering
 
 - Action: Open the planner, navigate previous week, next week, and back with
   **Today**.
-- Expected behavior: Every view contains Monday through Sunday with exact date
-  labels, including empty dates. Today, past, planned, selected, and empty
-  states are visually distinct.
+- Expected behavior: The date range establishes the visible calendar week, but
+  only dates with persisted meals appear. Within a date, only populated meal
+  slots appear. Unplanned weekdays and "meal not set" rows are absent.
 - Empty-current-week check: When the current week has no meals but a future
-  plan exists, keep the current week visible and show a direct link to the next
-  planned date.
-- Pass criteria: Navigation fetches the correct seven dates and Today restores
-  the household current week without projecting another week's meals.
-- Fail criteria: Weekday-only reuse, browser-timezone drift, missing empty days,
-  or automatic navigation away from an empty current week.
+  plan exists, keep the current week context visible and show a compact message
+  with a direct link to the next planned date. When no plans exist anywhere,
+  show the designed onboarding placeholder.
+- Pass criteria: Today restores the household current week, only persisted
+  dates/slots render, and the appropriate empty state appears.
+- Fail criteria: Weekday-only reuse, browser-timezone drift, compulsory empty
+  weekday rows, "meal not set" rows, or automatic navigation away from an
+  empty current week.
 
 ### Scenario 9.5 - Household Timezone Overrides Browser Timezone
 
@@ -740,6 +742,23 @@ section. The expected weekday depends on the run date.
 - Pass criteria: The same dates and next chronological meal remain visible
   before and after reload and backend restart.
 - Fail criteria: Any surface changes date because of browser timezone.
+
+### Scenario 9.6 - Past Meal-Plan Retention Cleanup
+
+- Setup: In a controlled database fixture, store one row before the household
+  current date, one for today, and one future row.
+- Action: Restart FastAPI and verify startup cleanup. Then simulate or wait for
+  the next `Asia/Kolkata` date boundary while the backend remains running.
+- Expected behavior: Rows before the household current date are deleted.
+  Today's and future rows remain unchanged. Deleted dates are not displayed as
+  retained history.
+- Empty-state check: If cleanup removes the last plan, show the designed global
+  onboarding placeholder. If another week still has a future plan, an empty
+  visible week shows a compact message and link.
+- Pass criteria: Cleanup follows the household date at startup and midnight,
+  preserves current/future rows, and produces the correct planner empty state.
+- Fail criteria: Past rows remain, current/future rows are removed, cleanup uses
+  the browser timezone, or empty weekday placeholders return.
 
 ## Final Run Summary Template
 
@@ -777,8 +796,9 @@ Close every artifact with a functional summary.
 The original production verification established these broad product goals.
 Future runs should continue to report against them.
 
-- Calendar-date plans can coexist across weeks, be replaced by exact range, and
-  be narrowly edited without duplicate dates or lost meals.
+- Current and future calendar-date plans can coexist across weeks, be replaced
+  by exact range, and be narrowly edited without duplicate dates or lost meals.
+  Past dated rows are removed automatically as the household date advances.
 - Text and image food logging create persisted diary entries with plausible
   nutrition.
 - Fridge scans and pantry updates persist stocked items.

@@ -202,6 +202,8 @@ Important implementation notes:
   `dinner_name`. Weekday labels are derived and never persisted as identity.
 - `profiles.timezone_name` is the authoritative household timezone for today,
   tomorrow, and calendar-week boundaries.
+- Past `meal_plans` rows are removed at backend startup and at each household
+  midnight so the table retains only current and future planning state.
 - `replace_meal_plan_range` and `apply_meal_plan_edits` make range replacement
   and multi-slot edits transactional.
 

@@ -219,7 +219,8 @@ Example prompts:
 
 - Single-meal changes should not rewrite the entire week.
 - Multi-meal replacements should clearly list all affected exact dates.
-- Past plans can be viewed but cannot be created or changed.
+- Past meal-plan rows are automatically deleted when the household calendar
+  date advances. They cannot be created, changed, or used as retained history.
 - If the requested meal does not exist, Kitch should explain that and offer alternatives.
 - If the replacement affects groceries, future grocery preparation should use the updated plan.
 - The user should be able to revise the plan through conversational follow-ups.

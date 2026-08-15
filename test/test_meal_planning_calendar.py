@@ -7,7 +7,8 @@ import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 
@@ -124,6 +125,34 @@ class PlanningCalendarTests(unittest.TestCase):
                     {"plan_date": "2026-08-11", "meal_slot": "lunch", "meal_name": "Salad"},
                 ])
         read_rows.assert_not_called()
+
+    def test_retention_deletes_only_dates_before_household_today(self):
+        fixed_context = calendar_context(
+            "Asia/Kolkata",
+            datetime(2026, 8, 12, 0, 5, tzinfo=ZoneInfo("Asia/Kolkata")),
+        )
+        builder = MagicMock()
+        builder.delete.return_value = builder
+        builder.eq.return_value = builder
+        builder.lt.return_value = builder
+        builder.execute.return_value = SimpleNamespace(
+            data=[{"plan_date": "2026-08-11"}],
+        )
+        client = MagicMock()
+        client.table.return_value = builder
+
+        with (
+            patch.object(supabase_client, "supabase", client),
+            patch.object(supabase_client, "get_household_timezone", return_value="Asia/Kolkata"),
+            patch.object(supabase_client, "calendar_context", return_value=fixed_context),
+            patch.object(supabase_client, "get_household_profile_id", return_value="household-id"),
+        ):
+            deleted_count = supabase_client.delete_past_meal_plans()
+
+        self.assertEqual(deleted_count, 1)
+        client.table.assert_called_once_with("meal_plans")
+        builder.eq.assert_called_once_with("profile_id", "household-id")
+        builder.lt.assert_called_once_with("plan_date", "2026-08-12")
 
 
 class DatedMealPlanMigrationTests(unittest.TestCase):

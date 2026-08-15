@@ -578,6 +578,21 @@ def get_meal_plan_snapshot() -> Dict[str, Dict[str, str]]:
     }
 
 
+def delete_past_meal_plans() -> int:
+    """Delete dated plans before today in the authoritative household timezone."""
+    today = calendar_context(get_household_timezone())["today"].isoformat()
+    deleted = _read_rows(
+        "delete_past_meal_plans",
+        "meal_plans",
+        lambda: supabase.table("meal_plans")
+        .delete()
+        .eq("profile_id", get_household_profile_id())
+        .lt("plan_date", today)
+        .execute(),
+    )
+    return len(deleted)
+
+
 def replace_meal_plan_range(
     start_date: str | date,
     end_date: str | date,

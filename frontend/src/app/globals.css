@@ -2756,24 +2756,6 @@ button {
   gap: 9px;
 }
 
-.selected-day-empty-state {
-  padding: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--muted);
-  background: rgba(245, 247, 241, 0.72);
-  border: 1px dashed rgba(74, 103, 65, 0.28);
-  border-radius: 14px;
-}
-
-.selected-day-empty-state p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.selected-day-empty-state button,
 .next-planned-week-link {
   padding: 9px 13px;
   color: #fff;
@@ -2786,9 +2768,54 @@ button {
 }
 
 .next-planned-week-link {
-  align-self: flex-start;
   color: var(--sage-deep);
   background: rgba(202, 236, 188, 0.48);
+}
+
+.planner-empty-week-state {
+  margin-top: 14px;
+  min-height: 190px;
+  padding: clamp(22px, 3vw, 34px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(115, 121, 111, 0.18);
+  border-radius: 22px;
+}
+
+.planner-empty-week-state h3 {
+  margin: 7px 0 8px;
+  color: var(--ink);
+  font-family: var(--font-head);
+  font-size: clamp(22px, 2.4vw, 32px);
+  line-height: 1.1;
+}
+
+.planner-empty-week-state p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.planner-empty-week-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.planner-empty-week-plan {
+  padding: 9px 13px;
+  color: #fff;
+  background: var(--sage-deep);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .selected-meal-row {
@@ -6614,6 +6641,12 @@ button {
     grid-template-columns: 1fr;
     min-height: 0;
     padding: 12px 4px 6px;
+  }
+
+  .planner-empty-week-state {
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .planner-empty-preview {
