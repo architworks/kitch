@@ -78,7 +78,7 @@ Walk through the architecture:
 - Google ADK 2.0 multi-agent runtime.
 - Supabase for structured persistent state.
 - ADK memory for flexible preferences.
-- Zepto provider adapter for cart sync and guarded order placement.
+- Provider registry, checkout service, and Zepto/Instamart adapters for guarded commerce.
 
 Agent roles:
 
@@ -100,7 +100,7 @@ Core data flows:
 
 4. **Provider flow**
    User selects native cart rows -> backend syncs and reconciles selected
-   non-stocked rows to Zepto -> backend saves a durable checkout draft -> stale
+   non-stocked rows through the selected adapter -> backend saves an isolated durable checkout draft -> stale
    products are revalidated/repaired -> user must explicitly approve an
    unchanged final cart before order placement.
 
@@ -119,7 +119,7 @@ Suggested 90-second harness structure:
 2. **Context:** active user, household, diet profile, current date, and planning week injected before turns.
 3. **Memory:** Supabase for durable records, ADK memory for fuzzy household preferences.
 4. **Delegation:** coordinator routes to meal planning, vision, or recipe/grocery specialists.
-5. **Tools/MCP:** internal Python tools mutate app state; Zepto MCP is wrapped by a backend adapter.
+5. **Tools/MCP:** internal Python tools mutate app state; Zepto and Instamart MCP are wrapped by a shared backend contract.
 6. **Guardrails:** chat cannot place real orders; final ordering needs review snapshot and explicit UI approval.
 
 ### 5:45-8:00 - Tradeoffs
@@ -178,12 +178,12 @@ Use this table as the compact version during recording.
 | Harness Area | What To Say | Why It Matters |
 | :--- | :--- | :--- |
 | Harness/runtime | "Kitch uses Google ADK behind FastAPI. FastAPI receives browser requests, prepares context, and runs the ADK runner." | Shows this is a controlled runtime, not a loose prompt pasted into a UI. |
-| Execution environment | "The app is split into Next.js frontend, FastAPI backend, ADK agents, Supabase persistence, and Zepto MCP/provider adapter." | Explains why the system has multiple components and where each responsibility lives. |
+| Execution environment | "The app is split into Next.js frontend, FastAPI backend, ADK agents, Supabase persistence, and a multi-provider commerce layer." | Explains why the system has multiple components and where each responsibility lives. |
 | Context/session management | "ADK Runner uses session state via `InMemorySessionService`; FastAPI and callbacks inject active user, household, date, planning week, and compaction keeps long sessions bounded." | Prevents wrong-person/wrong-date behavior while keeping long conversations manageable. |
 | Memory management | "Supabase stores durable product state; ADK memory stores flexible household preferences." | Separates reliable UI records from fuzzy conversational memory. |
 | Delegation/routing | "A coordinator routes to specialist agents for meal planning, vision/macros/pantry, and recipe/grocery planning." | Keeps prompts and tool access scoped instead of giving every tool to one giant agent. |
 | Tools | "Agents call Python tools for deterministic reads/writes like saving meal plans, logging macros, and updating native cart rows." | Converts AI reasoning into auditable state changes. |
-| MCP/provider integration | "Zepto MCP is wrapped behind a backend provider adapter, not exposed directly to the grocery agent." | Keeps provider-specific auth/catalog/order behavior outside core planning. |
+| MCP/provider integration | "Zepto and Instamart implement one backend adapter contract and are not exposed directly to the grocery agent." | Keeps provider-specific auth/catalog/order behavior outside core planning. |
 | Guardrails | "Provider ordering is not an agent tool. The user must review a saved snapshot and explicitly approve." | Addresses real-world side effects: money, address, substitutions, delivery. |
 | Failure posture | "When AI is uncertain or provider matching fails, Kitch shows reviewable state instead of silently acting." | Centers trust and debuggability. |
 
@@ -193,7 +193,7 @@ Use this table as the compact version during recording.
 
 > The agent graph is a hub-and-spoke topology. The coordinator routes intent to specialists: `chef_planner` for schedules, `vision_scanner` for plate photos, pantry scans, and macro logs, and `recipe_grocery_planner` for recipes, ingredients, groceries, and preferences. That lets each agent have a focused prompt and a scoped tool list.
 
-> Memory is split deliberately. Supabase is the source of truth for meal plans, pantry, recipe artifacts, native cart rows, and macro logs. ADK memory is for flexible preferences like "avoid tofu" or "prefer Amul butter." Tools are the execution layer: agents call Python tools for deterministic state changes. Zepto MCP is integrated through a backend provider adapter, and the key guardrail is that real order placement is never an agent tool. Kitch can prepare the cart, but final ordering requires a saved review snapshot and explicit UI approval.
+> Memory is split deliberately. Supabase is the source of truth for meal plans, pantry, recipe artifacts, native cart rows, macro logs, provider connections, and checkout drafts. ADK memory is for flexible preferences like "avoid tofu" or "prefer Amul butter." Tools are the execution layer: agents call Python tools for deterministic state changes. Zepto and Swiggy Instamart are integrated through one backend commerce contract, and the key guardrail is that real order placement is never an agent tool. Kitch can prepare the cart, but final ordering requires a saved review snapshot and explicit UI approval.
 
 ### 1. Harness Overview
 
@@ -337,7 +337,7 @@ Mitigation:
 
 Talking point:
 
-> Tools are where model reasoning becomes system action. Kitch agents do not directly edit frontend state. They call Python tools that read and write Supabase or ADK memory. Provider integration is separate: Zepto MCP is wrapped by a backend provider adapter instead of being exposed directly to the recipe planner.
+> Tools are where model reasoning becomes system action. Kitch agents do not directly edit frontend state. They call Python tools that read and write Supabase or ADK memory. Provider integration is separate: Zepto and Instamart MCP are wrapped by deterministic backend adapters instead of being exposed directly to the recipe planner.
 
 Internal Python tools:
 
@@ -352,7 +352,9 @@ Internal Python tools:
 
 External/provider integration:
 
-- Zepto MCP is accessed through `ZeptoProviderAdapter`.
+- Zepto and Instamart are accessed through adapters implementing `GroceryProviderAdapter`.
+- Instamart is limited to Swiggy's `/im` MCP tools; Food and Dineout are inaccessible.
+- A constrained Gemini matcher can rank normalized candidates but cannot call MCP or mutate external state.
 - Native cart rows are mapped into provider search/cart operations.
 - Provider results return actual cart items and unavailable items.
 
@@ -369,7 +371,7 @@ Failure mode:
 Mitigation:
 
 - Show unresolved/unavailable items.
-- Keep native cart usable even if Zepto sync fails.
+- Keep native cart usable even if any provider sync fails.
 - Require user review before order placement.
 
 ---
@@ -413,7 +415,7 @@ Runtime pieces:
 - Agent runtime: Google ADK 2.0.
 - Persistence: Supabase Postgres.
 - Model runtime: native ADK Gemini, with AI Studio authentication locally and Vertex AI authentication in cloud deployments.
-- Provider adapter: Zepto MCP.
+- Provider platform: registry, checkout service, OAuth vault, Zepto adapter, and Instamart `/im` adapter.
 
 Why this matters:
 
@@ -436,7 +438,7 @@ Use this as a concise system-design narration:
 
 > Memory is split deliberately. Supabase is the source of truth for structured records like meal plans, pantry, recipe artifacts, cart rows, and macro logs. ADK memory is used for flexible household preferences like "avoid tofu" or "prefer Amul butter." That keeps the UI reliable while still letting preferences stay conversational.
 
-> Tools are the execution layer. Agents call Python tools for deterministic writes, and Zepto MCP is wrapped behind a backend provider adapter. The key guardrail is that provider ordering is not an agent tool. The agent can prepare a cart, but final order placement requires a saved review snapshot and explicit UI approval.
+> Tools are the execution layer. Agents call Python tools for deterministic writes, and provider MCP tools are wrapped behind backend adapters. A constrained matcher may select only allowlisted candidates, while cart mutation and ordering remain deterministic. The agent can prepare a native cart, but final order placement requires a saved review snapshot and explicit UI approval.
 
 ---
 
@@ -520,11 +522,11 @@ Use this section to show that the prototype is engineered as a system. Some trad
 
 ---
 
-### 4. Native Cart as Source of Truth vs Zepto Cart as Source of Truth
+### 4. Native Cart as Source of Truth vs Provider Carts as Source of Truth
 
-**Decision:** Kitch owns a provider-agnostic native cart. Zepto is only a provider translation target.
+**Decision:** Kitch owns a provider-agnostic native cart. Zepto and Instamart are time-sensitive provider projections.
 
-**Alternative considered:** Let Zepto/Blinkit cart state be the main cart state.
+**Alternative considered:** Let an external provider cart become the main cart state.
 
 **Why we chose this:**
 
@@ -540,7 +542,7 @@ Use this section to show that the prototype is engineered as a system. Some trad
 
 **What would change our mind:**
 
-- If the app became a single-provider Zepto-only client, provider cart state could become more central.
+- If the app became a single-provider client, that provider cart could become more central.
 - If provider APIs exposed stable normalized grocery semantics, the adapter layer could become thinner.
 
 ---
@@ -722,16 +724,16 @@ Use this section to show that the prototype is engineered as a system. Some trad
 
 ### 5. Backend Provider Adapter vs Agent-owned Provider Tools
 
-**Decision:** Zepto sync and order placement live behind backend provider endpoints and `ZeptoProviderAdapter`, not inside the recipe/grocery agent.
+**Decision:** Provider sync and order placement live behind provider-keyed FastAPI routes, `GroceryCheckoutService`, and contract-based adapters, not inside the recipe/grocery agent.
 
-**Alternative considered:** Give the grocery agent direct access to Zepto MCP tools.
+**Alternative considered:** Give the grocery agent direct access to provider MCP tools.
 
 **Why we chose this:**
 
 - Provider actions affect real external state.
 - Backend code can create review snapshots and confirmation tokens.
-- The provider adapter isolates Zepto-specific catalog/auth/tool details from Kitch's native cart.
-- Future providers can be added behind the same native-cart boundary.
+- Adapters isolate provider catalog, OAuth, tool-schema, payment, and order details.
+- Zepto and Instamart share the same native-cart and draft boundary.
 
 **Cost of the decision:**
 
@@ -742,13 +744,14 @@ Use this section to show that the prototype is engineered as a system. Some trad
 **What would change our mind:**
 
 - If provider operations were read-only, agent-owned tools would be lower risk.
-- If a future provider agent is added, order placement should still remain behind deterministic approval.
+- The current constrained catalog matcher already demonstrates the safe limit:
+  it can rank allowlisted candidates but cannot mutate carts or order.
 
 ---
 
 ### 6. Native Cart Review Snapshot vs Live Re-query at Order Time
 
-**Decision:** Zepto order placement uses a saved review snapshot and confirmation token.
+**Decision:** Every provider order uses an environment-scoped saved review snapshot, confirmation token, and mandatory final revalidation.
 
 **Alternative considered:** Re-run product matching and cart inspection when the user clicks place order.
 
@@ -834,10 +837,11 @@ The main principle: when something goes wrong, Kitch should preserve user trust 
 | Pantry quantity math is imperfect | App underbuys or overbuys when units are ambiguous. | Full arbitrary unit reconciliation is deferred. The app shows pantry-covered rows and keeps review/edit controls in the native cart. |
 | Macro estimate is wrong | User's calorie or macro diary is inaccurate. | Macros are estimates. Logs are scoped to active user and should support correction workflows. |
 | Food logs to wrong user | Archit's meal appears in Anubhav's diary. | Active member is explicit in UI. Macro logs are individual, not household-wide. |
-| Provider SKU match is wrong | Zepto cart contains wrong brand, pack size, or substitute. | User reviews actual Zepto cart items and unavailable/unresolved items before order. Brand preferences can guide search but not guarantee perfect catalog matching. |
+| Provider SKU match is wrong | External cart contains the wrong brand, pack size, or substitute. | Matcher output is allowlisted and deterministically validated; unresolved items remain visible and the user reviews the confirmed cart. |
 | Provider price/fees surprise user | Kitch shows an expected amount that differs from provider checkout. | Kitch does not show fake prices before provider sync. Prices/fees come from provider response. |
-| Zepto cart replacement surprises user | Existing Zepto cart is overwritten by Kitch sync. | Sync is an explicit UI action. The product should communicate that moving selected Kitch rows may replace the provider cart. |
-| Zepto MCP auth fails | Provider sync cannot complete. | Native cart remains usable. UI can surface Zepto readiness/auth state. |
+| Provider cart replacement surprises user | Existing external cart is overwritten by Kitch sync. | Sync is explicit and communicates that the selected provider cart is replaced by the reviewed native intent. |
+| Provider OAuth expires or MCP degrades | One provider cannot sync. | Native cart and core readiness remain available; the UI shows reconnect/degraded state for only that provider. |
+| Checkout response is ambiguous | Retrying could create a duplicate order. | Persist the attempt, inspect documented order history, and block resubmission while outcome is `unknown`. |
 | Real order placed accidentally | Highest-risk failure: wrong groceries or payment side effect. | Chat cannot place real orders. Order placement requires saved review snapshot, confirmation token, and explicit frontend approval. |
 | Backend restart loses chat memory | Preferences or session context disappear during prototype use. | Supabase persists critical records. Durable Vertex sessions/memory are planned for production. |
 | Supabase schema drift | Backend tools fail or fall back because expected tables/columns are missing. | Schema lives in `backend/database/supabase_schema.sql`. Production test docs record schema-dependent failures. |
@@ -880,7 +884,8 @@ Use a short demo that proves system behavior rather than just showing screens.
    - Log a food item and show it affects only that user's diary.
 
 5. **Show provider boundary**
-   - Show selected native cart rows for Zepto sync.
+   - Show backend-described Zepto and Instamart choices and selected native rows.
+   - Explain address-scoped cart reconciliation and provider switching isolation.
    - Emphasize that real order placement requires final approval.
 
 ---

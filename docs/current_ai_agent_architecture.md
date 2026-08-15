@@ -21,7 +21,8 @@ Kitch uses a Google ADK 2.0 hub-and-spoke topology:
 - Python tools for deterministic side effects.
 - Supabase for structured app state.
 - ADK memory for flexible household preferences.
-- Backend provider adapters for Zepto and future delivery providers.
+- A deterministic multi-provider commerce layer for Zepto and Swiggy Instamart.
+- One constrained Gemini catalog-matching specialist outside the chat graph.
 
 ```mermaid
 flowchart TD
@@ -96,8 +97,11 @@ flowchart TD
     SearchFoodPreferences --> Memory
     GetDatetime --> RuntimeContext[Runtime datetime context]
 
-    API --> ProviderAdapters[Backend Provider Adapters]
+    API --> Checkout[GroceryCheckoutService]
+    Checkout --> Matcher[provider_catalog_matcher]
+    Checkout --> ProviderAdapters[Backend Provider Adapters]
     ProviderAdapters --> Zepto[Zepto MCP]
+    ProviderAdapters --> Instamart[Swiggy Instamart /im MCP]
 ```
 
 Provider sync is intentionally outside the `recipe_grocery_planner`. The agent owns native recipe+grocery planning. The backend owns provider cart sync and order approval boundaries.
@@ -292,7 +296,7 @@ Why recipe and grocery are one agent:
 
 Why provider sync is excluded:
 
-- Zepto/Blinkit catalog matching, addresses, payments, and order state are provider concerns.
+- Provider catalog matching, addresses, payments, and order state are commerce-layer concerns.
 - The recipe+grocery agent should not be able to place real orders.
 - Provider actions require explicit UI controls and backend review snapshots.
 
@@ -302,7 +306,7 @@ Constraints:
 - Grocery requests save both the artifact and native cart rows.
 - Cart rows must be derived from the same recipe cards.
 - Pantry-covered rows remain in the cart with `alreadyStocked=true`.
-- The agent does not call Zepto, Blinkit, provider sync, export, or order-placement tools.
+- The agent does not call provider MCP, sync, payment, or order-placement tools.
 
 ---
 
@@ -311,17 +315,24 @@ Constraints:
 Current backend-owned provider behavior:
 
 - Native cart remains Kitch's source of truth.
-- `ZeptoProviderAdapter` can sync selected, non-stocked native cart rows to Zepto through backend HTTP routes.
-- The provider-neutral Groceries workflow selects Zepto by default and keeps
-  Blinkit disabled until its adapter exists.
-- Zepto sync creates a durable Supabase checkout draft only after reconciling
-  search matches against the confirmed provider cart. It includes an authoritative provider total
-  when available. An exact line-item sum is allowed only when the response has
-  no additional adjustment; native-cart or delivery-context changes invalidate
-  that draft.
-- Drafts older than five minutes are revalidated and repaired outside the
-  agent. Real order placement requires a separate frontend approval button and
-  one unchanged final provider check.
+- `ProviderRegistry` describes Zepto, Swiggy Instamart, and disabled Blinkit.
+- `GroceryCheckoutService` applies native-snapshot validation, synchronization,
+  revalidation, persisted leases, approval snapshots, and order safety.
+- Zepto and Instamart implement the same `GroceryProviderAdapter` contract.
+- A sync succeeds only after the resulting provider cart is read back and
+  reconciled against every selected native row.
+- Drafts older than five minutes are revalidated and repaired outside the chat
+  graph. Material changes reset payment and acknowledgement.
+- A real order requires a provider-returned payment method, explicit frontend
+  acknowledgement, and one unchanged final provider check.
+
+`provider_catalog_matcher` is a constrained internal Gemini specialist, not an
+ADK sub-agent with tools. Its input contains only one native item, household
+dietary constraints, and normalized orderable candidates. Its output is an
+allowlisted candidate ID, confidence, and substitution reasoning. Deterministic
+code rejects invented IDs, low confidence, insufficient quantities, unsafe
+pack substitutions, and ambiguous results. The matcher never sees credentials,
+calls MCP, mutates carts, selects payment, or orders.
 
 Why provider behavior is outside the agent topology:
 
@@ -329,10 +340,9 @@ Why provider behavior is outside the agent topology:
 - Product safety requires explicit approval boundaries.
 - Provider responses include operational details that should be reviewed by the user, not hidden inside an agent turn.
 
-Future direction:
-
-- Provider cart translation can move behind a separate provider agent if the product later needs agentic catalog/substitution reasoning.
-- Even then, order placement should remain guarded by frontend approval.
+The coordinator receives only read-only provider-registry and checkout-status
+tools. It may guide a user to the Groceries workflow, but cannot claim a sync or
+order succeeded without confirmed backend state.
 
 ---
 
@@ -575,9 +585,11 @@ Recipe+grocery tools:
 
 Provider tools/adapters:
 
-- Zepto sync, Zepto cart reads, and Zepto order placement exist behind backend routes and adapter code.
-- They are not part of the `recipe_grocery_planner` tool list.
-- `place_zepto_order_tool` is intentionally non-executing from chat.
+- `list_grocery_providers_tool` and `get_grocery_checkout_status_tool` are
+  read-only coordinator tools.
+- Provider address, search, cart, payment, and checkout mutations exist only in
+  backend services and adapters.
+- No agent tool can mutate a provider cart or place an order.
 
 Why:
 

@@ -15,9 +15,17 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import timedelta
 from typing import Any, Dict, List
 
+from app.providers.base import (
+    GroceryProviderAdapter,
+    ProviderCapabilities,
+    ProviderDescriptor,
+)
 
-class ZeptoProviderAdapter:
+
+class ZeptoProviderAdapter(GroceryProviderAdapter):
     """Best-effort MCP adapter for Zepto cart and order operations."""
+
+    provider_id = "zepto"
 
     def __init__(self) -> None:
         self.url = os.environ.get("ZEPTO_MCP_URL", "https://mcp.zepto.co.in/mcp")
@@ -32,6 +40,27 @@ class ZeptoProviderAdapter:
         self.transport = explicit_transport or ("http" if self.access_token or self.raw_headers else "stdio_remote")
         self.remote_command = os.environ.get("ZEPTO_MCP_REMOTE_COMMAND", "npx")
         self.remote_args = self._remote_args()
+
+    def descriptor(self) -> ProviderDescriptor:
+        status = self.status()
+        return ProviderDescriptor(
+            id=self.provider_id,
+            label="Zepto",
+            brand_label="zepto",
+            description="Live cart sync, availability review, and guarded order placement.",
+            enabled=bool(status["enabled"]),
+            state=str(status["state"]),
+            message=str(status["message"]),
+            environment="production",
+            requires_connection=False,
+            capabilities=ProviderCapabilities(
+                saved_addresses=True,
+                cart_sync=True,
+                cart_revalidation=True,
+                checkout=True,
+            ),
+            theme={"start": "#8c62d8", "end": "#573099"},
+        )
 
     def _headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}
@@ -84,6 +113,29 @@ class ZeptoProviderAdapter:
             "store_context_state": "not_selected",
             "setup_command": f"{self.remote_command} {' '.join(self.remote_args)}" if self.transport in {"stdio", "stdio_remote", "mcp_remote"} else None,
         }
+
+    async def readiness(self) -> Dict[str, Any]:
+        descriptor = self.descriptor()
+        if not descriptor.enabled or descriptor.state != "configured":
+            return await super().readiness()
+        try:
+            async with self._session() as session:
+                tools = await self._list_tools(session)
+            if not tools:
+                raise RuntimeError("Zepto returned no MCP tools")
+            return {
+                "provider": self.provider_id,
+                "environment": descriptor.environment,
+                "state": "ready",
+                "message": "Zepto authentication and MCP discovery are ready.",
+            }
+        except Exception:
+            return {
+                "provider": self.provider_id,
+                "environment": descriptor.environment,
+                "state": "degraded",
+                "message": "Zepto is configured, but MCP readiness could not be verified.",
+            }
 
     async def list_addresses(self) -> Dict[str, Any]:
         """Return saved Zepto delivery addresses without selecting one."""
@@ -277,7 +329,7 @@ class ZeptoProviderAdapter:
                 "provider": "zepto",
                 "items": matched_items,
                 "unavailable_items": unavailable_items,
-                "zepto_cart": zepto_cart,
+                "provider_cart": zepto_cart,
                 "cart_summary": self.normalize_cart_summary(zepto_cart, matched_items),
                 "checkout_context": checkout_context,
                 "store_context": store_context,
@@ -383,7 +435,7 @@ class ZeptoProviderAdapter:
             "provider": "zepto",
             "items": matched_items,
             "unavailable_items": unavailable_items,
-            "zepto_cart": zepto_cart,
+            "provider_cart": zepto_cart,
             "cart_summary": self.normalize_cart_summary(zepto_cart, matched_items),
             "checkout_context": checkout_context,
             "store_context": store_context,
@@ -605,7 +657,7 @@ class ZeptoProviderAdapter:
                 "replacements": replacements,
                 "changes": changes,
                 "changed": material_changed,
-                "zepto_cart": confirmed_cart,
+                "provider_cart": confirmed_cart,
                 "cart_summary": summary,
                 "checkout_context": checkout_context,
                 "store_context": store_context,
@@ -629,7 +681,7 @@ class ZeptoProviderAdapter:
                 return {
                     "status": "success",
                     "provider": "zepto",
-                    "zepto_cart": cart,
+                    "provider_cart": cart,
                     "cart_summary": self.normalize_cart_summary(cart),
                 }
         except Exception as exc:

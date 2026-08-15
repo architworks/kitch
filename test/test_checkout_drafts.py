@@ -24,6 +24,7 @@ def persisted_row(payload: dict) -> dict:
         "id": "draft-1",
         "profile_id": "profile-1",
         "provider": "zepto",
+        "provider_environment": "production",
         "created_at": "2026-08-03T00:00:00+00:00",
         "updated_at": "2026-08-03T00:00:00+00:00",
         **payload,
@@ -62,9 +63,10 @@ class CheckoutDraftTests(unittest.TestCase):
             "unavailable_items": [],
             "replacements": [],
             "changes": [],
-            "zepto_cart": {"items": [{**product, "quantity": 1}]},
+            "provider_cart": {"items": [{**product, "quantity": 1}]},
             "cart_summary": {"currency": "INR", "total_minor": 9900},
             "checkout_context": {"payment_methods": [{"id": "cod"}]},
+            "payment_options": [{"id": "cod", "kind": "cod"}],
             "store_context": {"status": "ready", "state": "store_context_ready"},
         }
 
@@ -72,13 +74,20 @@ class CheckoutDraftTests(unittest.TestCase):
         native_item = self.native_item()
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
-            side_effect=lambda payload: persisted_row(payload),
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
         ):
             review = save_initial_draft(
                 [native_item],
                 [native_item],
                 self.successful_result(),
                 "address-1",
+                "zepto",
+                "production",
+                "Zepto",
             )
 
         self.assertEqual(review["status"], "ready")
@@ -95,13 +104,20 @@ class CheckoutDraftTests(unittest.TestCase):
         }
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
-            side_effect=lambda payload: persisted_row(payload),
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
         ):
             review = save_initial_draft(
                 [native_item],
                 [native_item],
                 result,
                 "address-1",
+                "zepto",
+                "production",
+                "Zepto",
             )
 
         self.assertEqual(review["status"], "blocked")
@@ -120,9 +136,10 @@ class CheckoutDraftTests(unittest.TestCase):
                 "unavailable_items": [],
                 "replacements": [],
                 "changes": [],
-                "provider_cart": self.successful_result()["zepto_cart"],
+                "provider_cart": self.successful_result()["provider_cart"],
                 "cart_summary": self.successful_result()["cart_summary"],
                 "checkout_context": self.successful_result()["checkout_context"],
+                "payment_options": self.successful_result()["payment_options"],
                 "store_context": self.successful_result()["store_context"],
                 "selected_payment_method_id": "cod",
                 "order_review_acknowledged": True,
@@ -141,7 +158,7 @@ class CheckoutDraftTests(unittest.TestCase):
         }
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
-            side_effect=lambda payload: persisted_row({**initial, **payload}),
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
         ):
             review, changed = save_revalidated_draft(initial, changed_result)
 
@@ -196,6 +213,45 @@ class CheckoutDraftTests(unittest.TestCase):
             checkout_snapshot_hash(review),
             checkout_snapshot_hash(changed),
         )
+
+    def test_hash_covers_normalized_provider_price_and_pack(self):
+        review = {
+            "native_items": [self.native_item()],
+            "matched_items": [{
+                "native_item": self.native_item(),
+                "matched_product": {
+                    "spin_id": "spin-1",
+                    "sku_id": "sku-1",
+                    "price_minor": 9900,
+                    "pack_size": "1 L",
+                },
+                "cart_item": {"quantity": 1},
+            }],
+            "cart_summary": {"total_minor": 10400},
+            "selected_address_id": "address-1",
+        }
+        changed_price = {
+            **review,
+            "matched_items": [{
+                **review["matched_items"][0],
+                "matched_product": {
+                    **review["matched_items"][0]["matched_product"],
+                    "price_minor": 10900,
+                },
+            }],
+        }
+        changed_pack = {
+            **review,
+            "matched_items": [{
+                **review["matched_items"][0],
+                "matched_product": {
+                    **review["matched_items"][0]["matched_product"],
+                    "pack_size": "500 mL",
+                },
+            }],
+        }
+        self.assertNotEqual(checkout_snapshot_hash(review), checkout_snapshot_hash(changed_price))
+        self.assertNotEqual(checkout_snapshot_hash(review), checkout_snapshot_hash(changed_pack))
 
 
 if __name__ == "__main__":

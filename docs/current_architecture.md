@@ -39,8 +39,12 @@ flowchart LR
     RecipeGrocery --> Memory[ADK Memory]
     Runner --> Sessions[ADK Sessions]
 
-    API --> ZeptoAdapter[ZeptoProviderAdapter]
+    API --> Checkout[GroceryCheckoutService]
+    Checkout --> Matcher[Guarded Gemini catalog matcher]
+    Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
+    Checkout --> InstamartAdapter[InstamartProviderAdapter]
     ZeptoAdapter --> ZeptoMCP[Zepto MCP]
+    InstamartAdapter --> InstamartMCP[Swiggy Instamart /im MCP]
 ```
 
 ---
@@ -73,7 +77,7 @@ Household food and brand preferences are stored in ADK memory as flexible text.
 
 ### Provider sync is not agent-owned
 
-Zepto sync and order approval sit behind backend HTTP endpoints and `ZeptoProviderAdapter`.
+Provider sync and order approval sit behind provider-keyed backend HTTP endpoints, `GroceryCheckoutService`, and adapters implementing `GroceryProviderAdapter`.
 
 **Why:** provider operations modify real external state. Chat should not be able to place orders. The backend can create review snapshots and require explicit frontend approval before order placement.
 
@@ -91,25 +95,22 @@ Current duties:
 - Render the Recipes page for recipe+grocery artifacts.
 - Render the Groceries page as a provider-neutral, six-stage vertical checkout
   workflow with compact numbered markers and a collapsible native cart.
-- Show Zepto as the current live ordering app and Blinkit as a disabled future
-  provider without exposing unusable actions.
+- Fetch Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the
+  backend registry rather than maintaining a frontend route registry.
 - Render individual nutrition state.
 - Render shared calendar-date plan state with navigable Monday-Sunday views.
 - Render pantry/grocery state from backend APIs.
 - Send text chat turns to `POST /api/chat`.
 - Upload image-plus-text requests to `POST /api/upload-photo`.
-- Trigger Zepto cart sync through `POST /api/grocery/zepto/sync-cart`.
-- Restore and patch the durable checkout through
-  `GET/PATCH /api/grocery/zepto/checkout-draft`.
-- Trigger availability repair through `POST /api/grocery/zepto/revalidate-cart`.
-- Trigger final order placement through `POST /api/grocery/zepto/place-order`.
+- Use provider-keyed checkout, connection, address, revalidation, payment, and
+  order routes advertised by the backend.
 
 The frontend does not:
 
 - Own meal planning logic.
 - Generate recipes or groceries.
 - Call ADK directly.
-- Call Zepto MCP directly.
+- Call any provider MCP server directly.
 - Place orders from chat text.
 - Store the source of truth for meal plans or carts.
 
@@ -146,14 +147,16 @@ Current routes:
 | `GET /api/recipe-grocery/plans` | Lists recent recipe+grocery artifacts. |
 | `GET /api/recipe-grocery/plans/latest` | Returns the latest recipe+grocery artifact. |
 | `GET /api/recipe-grocery/plans/{id}` | Returns one recipe+grocery artifact. |
-| `POST /api/grocery/export` | Legacy provider payload preview. |
-| `GET /api/grocery/zepto/status` | Returns Zepto configuration state; it does not claim store readiness. |
-| `GET /api/grocery/zepto/addresses` | Reads saved Zepto delivery addresses before cart sync. |
-| `POST /api/grocery/zepto/sync-cart` | Establishes address/store context, accepts explicitly orderable matches, replaces the cart, reconciles the returned cart, and saves a durable checkout draft. |
-| `GET /api/grocery/zepto/checkout-draft` | Restores the current Supabase-backed checkout draft across browser and backend restarts. |
-| `PATCH /api/grocery/zepto/checkout-draft` | Updates payment selection and acknowledgement on the durable draft. |
-| `POST /api/grocery/zepto/revalidate-cart` | Rechecks current product availability, repairs stale products, reconciles the rebuilt cart, and resets approval after any material change. |
-| `POST /api/grocery/zepto/place-order` | Revalidates first, returns `409` when the approved cart changed, and orders only an unchanged explicitly approved snapshot. |
+| `GET /api/grocery/providers` | Returns backend-owned provider descriptors, capabilities, environment, routes, and connection state. |
+| `POST /api/grocery/providers/{provider}/connection/start` | Starts a supported delegated connection flow. |
+| `GET /api/grocery/providers/{provider}/oauth/callback` | Validates and consumes a one-time OAuth callback. |
+| `DELETE /api/grocery/providers/{provider}/connection` | Disconnects the household provider account and invalidates its draft. |
+| `GET /api/grocery/providers/{provider}/addresses` | Reads saved addresses through the selected provider adapter. |
+| `POST /api/grocery/providers/{provider}/checkout/sync` | Resolves the address context, replaces the provider cart, reconciles the read-back cart, and saves a durable draft. |
+| `GET/PATCH /api/grocery/providers/{provider}/checkout` | Restores or updates the selected provider/environment draft. |
+| `POST /api/grocery/providers/{provider}/checkout/revalidate` | Repairs and reconciles stale provider cart state. |
+| `POST /api/grocery/providers/{provider}/checkout/place-order` | Revalidates and places only the exact approved snapshot. |
+| `POST /api/grocery/providers/{provider}/checkout/payment-status` | Polls only when the discovered provider capability documents payment status. |
 | `GET /api/health` | Readiness check for elevated database access, required schema, and the configured household profile. |
 
 Why the backend owns durable checkout drafts:
@@ -212,13 +215,16 @@ Supabase tables:
 
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
-| `profiles` | Prototype user/shared profile | Stores configured users and profile defaults. |
+| `profiles` | Prototype user/shared profile | Stores configured users, timezone, profile defaults, and preferred grocery provider. |
 | `meal_plans` | Shared household | Stores breakfast/lunch/dinner meal names keyed by exact calendar date. |
 | `recipe_grocery_plans` | Shared household | Stores recipe cards, ingredients, pantry notes, request scope, and cart update metadata. |
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
 | `grocery_cart_items` | Shared household | Stores native provider-agnostic cart rows. |
 | `macro_diary` | Individual | Stores active-user nutrition logs. |
-| `provider_checkout_drafts` | Shared household | Stores durable provider cart projections, repair history, approval state, and serialized operation leases. |
+| `provider_checkout_drafts` | Shared household | Stores environment-scoped cart projections, mappings, approval snapshots, payment/order state, ambiguous outcomes, and operation leases. |
+| `provider_connections` | Shared household | Stores one encrypted household access token and connection status per provider/environment. |
+| `provider_oauth_clients` | Backend configuration | Stores one dynamic OAuth client registration per provider/environment. |
+| `provider_oauth_flows` | Backend transient state | Stores expiring, single-use hashed OAuth state and encrypted PKCE verifier records. |
 
 Important modeling decisions:
 
@@ -242,7 +248,7 @@ Why this model:
 
 ### Durable-storage contract
 
-- All seven tables have RLS enabled. Browser roles have no table or sequence
+- All structured tables have RLS enabled. Browser roles have no table or sequence
   privileges; the browser accesses state only through FastAPI.
 - FastAPI requires `SUPABASE_SECRET_KEY` (`sb_secret_...`) or the temporary
   legacy `SUPABASE_SERVICE_ROLE_KEY`. Publishable, anon, malformed, and
@@ -260,9 +266,9 @@ Why this model:
 
 ## Native Cart to Ordering Provider Flow
 
-The frontend flow is provider-neutral. Its current live adapter is
-`backend/app/providers/zepto.py`, and the existing Zepto-specific HTTP routes
-remain unchanged.
+The frontend and API are provider-neutral. Zepto and Swiggy Instamart implement
+the same adapter contract. Provider-specific MCP identifiers remain inside the
+adapter and normalized mappings stored in the draft.
 
 ```mermaid
 sequenceDiagram
@@ -270,29 +276,30 @@ sequenceDiagram
     participant UI as Groceries UI
     participant API as FastAPI
     participant DB as Supabase
-    participant Adapter as ZeptoProviderAdapter
-    participant MCP as Zepto MCP
+    participant Service as GroceryCheckoutService
+    participant Adapter as Selected provider adapter
+    participant MCP as Provider MCP
 
-    UI->>API: GET /api/grocery/zepto/addresses
+    UI->>API: GET /api/grocery/providers
+    API-->>UI: descriptors, capabilities, connection state, routes
+    UI->>API: GET /api/grocery/providers/{provider}/addresses
     API->>Adapter: list_addresses()
     Adapter->>MCP: List saved addresses
     MCP-->>UI: Saved address options
     UI->>UI: User selects delivery address
     UI->>UI: Wait for native saves; lock edits; show transfer dialog
-    UI->>API: POST /api/grocery/zepto/sync-cart + address id
-    API->>DB: Read native cart rows
-    API->>API: Exclude unselected and pantry-covered rows
-    API->>API: Apply household brand memory to search terms
-    API->>Adapter: sync_cart(mapped_items, address id)
-    Adapter->>MCP: Select saved address / establish store
-    Adapter->>MCP: Search products
-    Adapter->>MCP: Replace Zepto cart
-    Adapter->>MCP: View Zepto cart
+    UI->>API: POST .../{provider}/checkout/sync + address id
+    API->>Service: sync native snapshot
+    Service->>DB: Read cart; acquire provider/environment lease
+    Service->>Adapter: establish address and sync selected rows
+    Adapter->>MCP: Address-scoped search
+    Adapter->>MCP: Replace complete provider cart
+    Adapter->>MCP: Read provider cart
     Adapter-->>API: Cart result + unavailable rows + normalized totals
-    API->>DB: Save durable draft + totals + token
+    Service->>DB: Save durable draft + bill + mappings + token
     API-->>UI: Confirmed checkout draft
     UI->>UI: Close dialog; unlock edits; show review
-    UI->>API: PATCH checkout draft selections/acknowledgement
+    UI->>API: PATCH checkout payment/acknowledgement
     UI->>API: POST revalidate after five minutes or page focus
     API->>Adapter: Validate products; repair and reconcile if necessary
     UI->>API: POST place-order after final approval
@@ -302,7 +309,7 @@ sequenceDiagram
 
 Important rules:
 
-- User selection on the native cart means "include this row when moving to Zepto."
+- User selection means "include this native row in the chosen provider projection."
 - Pantry-covered rows are never included.
 - The main page chronology is native cart, ordering app, delivery address,
   transfer, provider cart review, then payment and order.
@@ -310,20 +317,22 @@ Important rules:
   when their underlying state is complete. Native-cart, selection, provider,
   or address changes invalidate the provider review and return transfer,
   review, and order markers to pending.
-- Zepto is selected by default. Blinkit is disabled and cannot issue API calls.
+- The household preference is restored. Without one, connected Zepto is chosen
+  first, then connected Instamart; otherwise provider selection stays active.
+  Blinkit is disabled and cannot issue API calls.
 - A saved delivery address is required before sync.
-- Zepto sync cannot start while a native-cart write is still in flight.
+- Provider sync cannot start while a native-cart write is still in flight.
 - Once sync starts, the frontend disables native-cart selection, quantity,
   unit, add, delete, clear, address, and quick-action controls. A modal progress
   dialog retains focus until the request succeeds or fails.
-- Product search cannot start until Zepto confirms store context for that address.
+- Product search cannot start until the selected provider confirms the address/store context.
 - Search results do not count as cart success. The adapter must confirm exact
-  product/store identifiers and quantities in the returned Zepto cart.
+  provider identifiers and quantities in the returned provider cart.
 - Missing or ambiguous availability is unverified and cannot unlock ordering.
 - A review is locked to the address/store context used during product resolution.
 - Changing the native cart, selection, provider, or address invalidates the
   current review and requires a new cart sync.
-- Zepto sync can replace the current Zepto cart.
+- Synchronization replaces the complete selected-provider cart.
 - The backend exposes normalized `cart_summary` values in minor currency units.
   A provider-returned final total is authoritative. If the provider omits a
   final total, Kitch may sum exact provider selling prices multiplied by exact
@@ -343,8 +352,16 @@ Important rules:
   until direct cart editing is implemented.
 - The transfer stage is a single compact action row; it does not introduce a
   second internal section for its one button.
-- Actual address labels should be shown with address details when exposed by Zepto.
-- The UI distinguishes "Zepto configured/connected" from "Zepto store ready."
+- Actual address labels are shown when the selected provider exposes them.
+- The UI distinguishes enabled, connected, reconnect-required, degraded,
+  production-gated, and address/store-ready states.
+- Instamart uses only `/im`, discovers tool schemas, and becomes degraded when
+  required capabilities are missing or incompatible.
+- Instamart calls `get_payment_options` for the fresh cart. UPI is exclusive
+  when returned; its opaque app ID is echoed unchanged, or the documented QR
+  flag is used. COD is offered only when UPI is absent and Cash is returned.
+- Checkout timeouts are not blindly retried. Order history is checked first;
+  unresolved duplicate risk is persisted as an ambiguous `unknown` outcome.
 
 Why:
 
@@ -395,8 +412,9 @@ Why the migration is deferred:
 - Local backend restarts clear ephemeral ADK sessions and preferences.
 - Apply versioned Supabase migrations before starting FastAPI in every
   environment. The bootstrap schema must remain synchronized with them.
-- Zepto MCP OAuth/auth is external to Kitch.
+- Provider OAuth and production approval remain externally controlled.
 - Blinkit live integration is not implemented.
+- Instamart production is gated until explicit approval and staging validation.
 - Multi-household registration is not implemented.
 - Provider order placement is live and must remain guarded.
 - The current household is configured in code until real registration exists.

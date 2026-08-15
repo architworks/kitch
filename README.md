@@ -16,11 +16,11 @@ Kitch helps a household answer the everyday kitchen questions that usually live 
 - What should be added to a delivery cart?
 - What did I personally eat today, and how many macros did that add?
 
-The app combines conversational control with structured, reviewable state. Users can ask for tomorrow, an exact date range, or a full weekly plan; swap a dated meal; scan a fridge photo; log a plate; generate groceries; or prepare a Zepto cart through natural language. The saved plan, pantry, recipe artifacts, native cart rows, and macro diary are persisted in Supabase so the UI can render what actually changed.
+The app combines conversational control with structured, reviewable state. Users can ask for tomorrow, an exact date range, or a full weekly plan; swap a dated meal; scan a fridge photo; log a plate; generate groceries; or prepare an external grocery-provider cart. The saved plan, pantry, recipe artifacts, native cart rows, macro diary, provider connections, and checkout drafts are persisted in Supabase so the UI can render what actually changed.
 
 ## What Can Kitch Do
 
-Kitch supports the full household food loop: plan meals, understand what is already stocked, turn recipes into groceries, prepare a Zepto cart for review, and keep personal macro logs separate.
+Kitch supports the full household food loop: plan meals, understand what is already stocked, turn recipes into groceries, prepare a Zepto or Swiggy Instamart cart for review, and keep personal macro logs separate.
 
 ```mermaid
 flowchart LR
@@ -51,9 +51,9 @@ Kitch is split into five main runtime layers:
 2. **FastAPI backend gateway** exposes browser-facing APIs, prepares ADK turns, handles image uploads, hydrates UI state, and guards provider/order workflows.
 3. **Google ADK 2.0 runtime** runs the multi-agent graph behind the backend.
 4. **Supabase PostgreSQL** stores deterministic product records such as meal plans, pantry stock, recipe artifacts, native cart rows, profiles, and macro diary logs.
-5. **Provider adapters** translate Kitch's native grocery cart into external provider carts. Zepto MCP is the current live provider integration.
+5. **Provider commerce layer** translates Kitch's native grocery cart through a shared checkout service into Zepto or Swiggy Instamart. Blinkit remains a disabled registry entry.
 
-The browser does not call the model, ADK, Supabase admin APIs, or Zepto MCP directly. It talks to FastAPI, and FastAPI owns secrets, context preparation, tool execution, durable provider checkout drafts, and order safety boundaries.
+The browser does not call the model, ADK, Supabase admin APIs, or provider MCP servers directly. It talks to FastAPI, and FastAPI owns secrets, OAuth, context preparation, tool execution, durable checkout drafts, and order safety boundaries.
 
 ### Agent Topology
 
@@ -132,61 +132,39 @@ flowchart TD
     SearchFoodPreferences --> Memory
     GetDatetime --> RuntimeContext[Runtime datetime context]
 
-    API --> ProviderAdapters[Backend Provider Adapters]
+    API --> CheckoutService[GroceryCheckoutService]
+    CheckoutService --> Matcher[Guarded Gemini catalog matcher]
+    CheckoutService --> ProviderAdapters[Provider adapters]
     ProviderAdapters --> Zepto[Zepto MCP]
+    ProviderAdapters --> Instamart[Swiggy Instamart /im MCP]
 ```
 
 Provider sync is intentionally outside the `recipe_grocery_planner`. The agent owns native recipe+grocery planning. The backend owns provider cart sync and order approval boundaries.
 
-### Zepto MCP Integration
+### Multi-Provider Grocery Integration
 
-Kitch owns a provider-agnostic native grocery cart. Zepto is a translation target, not the source of truth.
+Kitch owns a provider-agnostic native grocery cart. Zepto and Swiggy Instamart are replaceable projections of that intent, never competing sources of truth.
 
-The provider-neutral checkout UI currently routes its live operations to Zepto:
+`ProviderRegistry` publishes enabled providers, capabilities, connection state, environment, branding, and API metadata. `GroceryCheckoutService` applies the same synchronization, durable-review, revalidation, approval, lease, and ordering rules to every adapter. `ZeptoProviderAdapter` and `InstamartProviderAdapter` implement that contract; Blinkit is visible but cannot issue requests.
 
-1. The user reviews native Kitch grocery rows in the Groceries page.
-2. The user selects eligible rows and chooses an ordering app. Zepto is
-   available by default; Blinkit is shown as a disabled `Coming soon` option.
-3. The user selects a saved provider delivery address.
-4. The user starts the provider transfer as its own checkout stage.
-5. Kitch waits for pending native-cart saves, then locks cart editing and shows
-   a blocking transfer dialog for the duration of the sync.
-6. FastAPI excludes unselected and pantry-covered rows.
-7. Backend code applies household brand preferences to provider search terms where possible.
-8. `ZeptoProviderAdapter` calls `select_saved_address` to establish serviceable
-   store context before any catalog search.
-9. The adapter accepts only products with explicit sufficient availability,
-   replaces/updates the Zepto cart, and reconciles every product id, store id,
-   and quantity against the resulting `view_cart` response.
-10. The adapter prefers Zepto's final total. When Zepto returns exact
-    line-item selling prices and quantities with no tax, fee, discount, or
-    other adjustment, it may calculate their sum; if any adjustment exists,
-    only a Zepto-returned final total is accepted.
-11. FastAPI saves a durable Supabase checkout draft locked to the selected address, with
-    matched items, unavailable items, normalized cart summary, checkout
-    context, snapshot hash, and confirmation token.
-12. The frontend unlocks the native cart and displays the actual provider cart
-    in the main workflow and the financial summary in the right sidebar.
-13. Returning to Groceries restores the draft and revalidates it after five
-    minutes. Unavailable products are replaced with confirmed alternatives;
-    every material change resets payment and approval.
-14. A real order can only be placed after explicit frontend approval. FastAPI
-    performs one final Zepto revalidation and returns `409` instead of ordering
-    if the reviewed cart changed.
+The checkout flow is:
 
-Any native-cart, provider-selection, or address change invalidates the current
-provider review and requires another sync before order placement.
+1. Review and select eligible native Kitch cart rows.
+2. Choose a connected provider, or connect the household Swiggy account through OAuth 2.1 PKCE.
+3. Select a provider delivery address before any catalog search.
+4. Search only in that address context, match orderable SKUs, replace the complete provider cart, and confirm it with a read-after-write call.
+5. Persist the normalized provider cart, bill, mappings, blockers, environment, capability version, and immutable approval snapshot in Supabase.
+6. Revalidate stale drafts and repair unavailable products; every material change resets payment and approval.
+7. Offer only fresh provider-returned payment methods. Instamart calls
+   `get_payment_options`, echoes an opaque UPI app ID through `intentApp` or
+   uses the documented QR flag, and allows COD only when UPI is absent.
+8. Revalidate immediately before checkout. A changed cart returns `409`; a timeout or ambiguous order response is persisted and cannot be blindly retried.
 
-The `20260803_create_provider_checkout_drafts.sql` migration must be applied
-before starting this version of FastAPI. Checkout drafts are backend-only,
-RLS-protected structured state; browser storage and process memory are not
-used as substitutes.
+The constrained Gemini catalog matcher can rank only the normalized candidate IDs supplied to it. It has no credentials, MCP access, cart mutation, payment, or order tools. Deterministic code rejects invented IDs, unavailable products, insufficient quantities, and ambiguous matches.
 
-Configuration readiness and shopping readiness are distinct. A configured
-OAuth bridge is not enough to search products: saved addresses must load and a
-selected address must establish Zepto store context first.
+Apply `20260815_multi_provider_grocery_platform.sql` before starting this version. It intentionally discards old provider checkout drafts while preserving the native grocery cart. Provider tokens and PKCE verifiers are encrypted with a dedicated Fernet key, stored behind backend-only RLS, and never returned to the browser.
 
-Chat text can plan groceries and prepare cart state, but it must not place a real order by itself.
+Chat can plan groceries and read provider/checkout status, but it cannot synchronize carts or place orders.
 
 ## Local Deployment
 
@@ -196,7 +174,7 @@ Chat text can plan groceries and prepare cart state, but it must not place a rea
 - Node.js and npm.
 - A Supabase project.
 - A Gemini API key for local development, or Vertex AI credentials for cloud deployment.
-- Optional: Zepto MCP authentication if you want live Zepto cart sync.
+- Optional: Zepto MCP authentication or a Swiggy Instamart account for live provider testing.
 
 ### 1. Install Backend Dependencies
 
@@ -217,6 +195,9 @@ pip install -r requirements.txt
    deployment source of truth.
    `20260812_date_specific_meal_plans.sql` intentionally clears the old
    weekday-only schedule and recreates `meal_plans` with exact calendar dates.
+   `20260815_multi_provider_grocery_platform.sql` intentionally recreates
+   provider checkout drafts and adds encrypted provider connections and OAuth
+   flow records; it does not alter the native grocery cart.
 4. Ensure the prototype household profile IDs exist, or update the configured IDs in `backend/app/household_config.py` and `frontend/src/app/householdConfig.js`.
 
 The default prototype IDs are:
@@ -227,7 +208,7 @@ The default prototype IDs are:
 | Anubhav | `11111111-1111-1111-1111-111111111111` |
 | Naman | `22222222-2222-2222-2222-222222222222` |
 
-All seven structured-data tables use Row Level Security with browser roles denied.
+All structured-data tables use Row Level Security with browser roles denied.
 FastAPI must use a backend-only Supabase secret key (preferred) or the temporary
 legacy service-role key. If you create real auth users through Supabase Auth,
 copy their UUIDs into the household config files instead of using the prototype
@@ -257,8 +238,10 @@ KITCH_LLM_MODEL=gemini-3.6-flash
 GOOGLE_GENAI_USE_VERTEXAI=FALSE
 GOOGLE_API_KEY=...
 
-# Optional Zepto MCP setup
+# Provider security and optional integrations
+PROVIDER_CREDENTIAL_ENCRYPTION_KEY=...
 ZEPTO_MCP_ENABLED=false
+SWIGGY_INSTAMART_ENABLED=false
 ```
 
 `backend/.env` is loaded by FastAPI and the ADK runtime. Keep this file gitignored.
@@ -323,7 +306,7 @@ http://127.0.0.1:16686
 
 ADK emits spans for agent invocation, model calls, workflow execution, and tool execution. You can point `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` at any OTLP-compatible collector, use `OTEL_EXPORTER_OTLP_ENDPOINT` if you want one endpoint for multiple telemetry signals, and set `LANGSMITH_API_KEY` when you want LangSmith export in parallel.
 
-### 6. Configure Zepto MCP (Optional)
+### 6. Configure Grocery Providers (Optional)
 
 Leave Zepto disabled for basic local development:
 
@@ -360,6 +343,38 @@ ZEPTO_MCP_TRANSPORT=...
 ZEPTO_MCP_REMOTE_COMMAND=npx
 ZEPTO_MCP_REMOTE_ARGS='["-y","mcp-remote","https://mcp.zepto.co.in/mcp"]'
 ```
+
+Swiggy Instamart uses delegated OAuth and only the `/im` MCP server. Generate a
+dedicated encryption key first:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Then configure local development:
+
+```bash
+PROVIDER_CREDENTIAL_ENCRYPTION_KEY=...
+SWIGGY_INSTAMART_ENABLED=true
+SWIGGY_INSTAMART_ENV=local
+SWIGGY_INSTAMART_MCP_URL=https://mcp.swiggy.com/im
+SWIGGY_OAUTH_BASE_URL=https://mcp.swiggy.com
+SWIGGY_OAUTH_REDIRECT_URI=http://localhost:8000/api/grocery/providers/swiggy_instamart/oauth/callback
+SWIGGY_OAUTH_SCOPE=mcp:tools
+SWIGGY_OAUTH_CLIENT_NAME=Kitch
+FRONTEND_URL=http://localhost:3000
+```
+
+Connect from the Instamart provider card. Kitch dynamically registers the OAuth
+client, stores single-use PKCE state, and encrypts the household access token.
+Swiggy currently requires reconnection when the access token expires; Kitch
+does not fabricate a refresh-token flow.
+
+For staging, use the staging OAuth/MCP origins supplied by Swiggy. Production is
+blocked unless `SWIGGY_INSTAMART_ENV=production`,
+`SWIGGY_INSTAMART_PRODUCTION_APPROVED=true`, an exact HTTPS callback URI, the
+encryption key, and compatible MCP capabilities are all present. Do not run
+automated orders against production.
 
 ### 7. Run the Backend
 
@@ -458,6 +473,21 @@ redacted placeholders are rejected during backend startup.
 | `ZEPTO_MCP_REMOTE_COMMAND` | Local OAuth bridge command. Defaults to `npx`. |
 | `ZEPTO_MCP_REMOTE_ARGS` | Optional custom `mcp-remote` argument list. |
 
+### Swiggy Instamart and Provider Security (Optional)
+
+| Variable | Purpose |
+| --- | --- |
+| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | Fernet key used only by FastAPI to encrypt provider access tokens and PKCE verifiers at rest. Required when Instamart is enabled. |
+| `SWIGGY_INSTAMART_ENABLED` | Enables the Instamart registry entry and adapter. |
+| `SWIGGY_INSTAMART_ENV` | `local`, `staging`, or `production`. |
+| `SWIGGY_INSTAMART_MCP_URL` | Instamart-only MCP endpoint ending in `/im`. |
+| `SWIGGY_OAUTH_BASE_URL` | Swiggy OAuth/DCR origin for the selected environment. |
+| `SWIGGY_OAUTH_REDIRECT_URI` | Exact FastAPI OAuth callback URI. Production must use HTTPS. |
+| `SWIGGY_OAUTH_SCOPE` | Delegated OAuth scope. Defaults to `mcp:tools`. |
+| `SWIGGY_OAUTH_CLIENT_NAME` | Dynamic client-registration display name. |
+| `SWIGGY_INSTAMART_PRODUCTION_APPROVED` | Explicit production gate; leave `false` until Swiggy approval and staging soak complete. |
+| `FRONTEND_URL` | Frontend origin used after the OAuth callback. |
+
 ### Frontend
 
 | Variable | Purpose |
@@ -470,7 +500,8 @@ redacted placeholders are rejected during backend startup.
 backend/
   app/
     agent/              ADK agent graph, prompts, tools, sessions, memory
-    providers/          Zepto MCP provider adapter
+    providers/          Shared provider contracts, MCP/OAuth clients, Zepto and Instamart adapters
+    grocery_checkout.py Provider-neutral synchronization, revalidation, approval, and ordering service
     main.py             FastAPI gateway and browser-facing routes
     supabase_client.py  Supabase data access layer
   database/
@@ -498,10 +529,11 @@ docs/
 - Grocery/cart/buy/order requests save recipe artifacts and update agent-planned native cart rows.
 - Manual cart rows are preserved across agent grocery replanning.
 - Pantry-covered rows remain visible but are excluded from provider sync.
-- Provider prices and fees should only come from provider responses.
+- Provider bill components and payable totals come only from provider responses. A complete line-price sum may be labeled only as an item subtotal.
 - Chat cannot place real orders.
-- Zepto order placement requires a durable reviewed checkout draft, confirmation
-  token, explicit frontend approval, and an unchanged final availability check.
+- Every provider order requires a durable reviewed checkout draft, an exact
+  confirmation token, a provider-returned payment method, explicit frontend
+  approval, and an unchanged final availability check.
 
 ## Current Limitations
 
@@ -511,9 +543,10 @@ docs/
 - Supabase persists product-critical records.
 - A recipe artifact and replacement of agent-generated cart rows are saved in
   one transaction; either both are confirmed or neither is changed.
-- Blinkit live cart insertion is not implemented.
+- Blinkit remains a disabled `Coming soon` provider.
 - Pantry quantity reconciliation across arbitrary units is intentionally limited.
-- Zepto MCP auth and catalog behavior depend on the external provider.
+- Provider MCP schemas, catalog behavior, auth availability, and production access remain externally controlled.
+- Instamart production remains gated until Swiggy approval and a successful staging soak.
 - Known orchestration issue: compound requests that span multiple specialist agents may currently be routed to only one sub-agent.
 
 ## More Documentation

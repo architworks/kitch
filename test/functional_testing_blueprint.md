@@ -500,132 +500,110 @@ recommending items already stocked.
 
 ## Section 7: Ordering App Integration
 
-These scenarios verify the essential handoff from Kitch's durable native
-grocery cart to the selected ordering app. Zepto is the current live provider;
-Blinkit is a disabled future option. These tests stop before real order
-placement.
+These four scenarios apply the same functional contract to Zepto and Swiggy
+Instamart. Use fixtures or Swiggy staging for order-path tests. Never place an
+automated or browser-test order against production.
 
-### Scenario 7.1 - Move Selected Native Cart Items to Zepto
+### Scenario 7.1 - Provider Selection, Connection, and Address
 
-- Prerequisite: The native grocery cart contains at least two eligible,
-  selected items, saved Zepto addresses load successfully, and the Zepto
-  connection reports configured.
-- Workflow check: Open **Groceries** and confirm the main column shows six
-  chronological stages with round numbered markers: native cart, ordering app,
-  delivery address, transfer, Zepto cart review, and payment and order. Later
-  stages must remain visible but locked until their prerequisites are
-  satisfied.
-- Progress-state check: Pending stage markers must be light green and completed
-  stages dark green. After a successful transfer, edit any native-cart row and
-  confirm the transfer, review, and order markers return to pending until the
-  cart is synchronized and reviewed again.
-- Native-cart check: Confirm the native cart can be expanded for row-level
-  review and collapsed back to its item/category/selection summary.
-- Provider check: Confirm Zepto is selected by default. Blinkit must show
-  **Coming soon**, remain disabled, and issue no provider requests.
-- Prompt/action: Review the selected items, choose a saved delivery address,
-  and click **Move to Zepto cart** from the main workflow.
-- Expected behavior: Kitch establishes Zepto store context for the selected
-  address before searching products, sends the selected eligible items to
-  Zepto, and opens a review showing the resolved products, quantities, and
-  availability.
-- Review check: Compare the native selection with the Zepto review. Every
-  successfully resolved item should correspond to a selected native row and
-  must appear in the provider-confirmed cart with the exact returned product
-  id, store-product id, and quantity;
-  unavailable or substituted items should be clearly identified. Confirm the
-  cart-item list uses the main-column width and the order summary appears in
-  the right sidebar. Review the subtotal, discounts, fee lines, total, and
-  total-source label.
-- Cart-row check: Confirm each resolved row shows the Zepto product image when
-  returned, mapped Kitch item, unit price, read-only quantity, pack size, and
-  line subtotal. Rows must be ordered by `price × quantity` descending. No
-  match-quality badges or direct `+`/`−` quantity controls should appear.
-- Transfer-stage check: Confirm stage 4 is one compact row containing its title,
-  explanation, and single transfer button without an extra inner section.
-- Total check: If Zepto returns a final cart total, it must be shown unchanged.
-  If Zepto omits it and returns exact line prices/quantities with no adjustment,
-  their exact sum may be shown and labelled **Exact line-item total**. If any
-  fee, tax, discount, or other adjustment exists without a Zepto final total,
-  the total must be **Unavailable**; Kitch must not calculate it.
-- Native-state check: Syncing to Zepto must not delete, check off, or otherwise
-  mutate the durable native grocery cart.
-- Availability check: A catalog search result alone must not count as success.
-  Products with missing, ambiguous, false, or insufficient availability must
-  remain unresolved, and items absent from the confirmed cart must not appear
-  as successfully transferred.
-- Concurrency and loading check: Start the sync and, while it is running,
-  confirm that a modal transfer animation is visible and retains focus. Verify
-  that selection, quantity, unit, add, delete, clear, quick-action, and address
-  controls are disabled. If a native-cart save is already in progress, the
-  Zepto sync must wait rather than snapshotting stale values.
-- Pass criteria: The sync completes, the prominent **Zepto cart review**
-  accurately represents the selected native items and the sidebar accurately
-  represents either the authoritative provider total or safe line-item total,
-  the cart stays locked only for the duration of the request, payment/order
-  controls unlock only after review, and no order is placed.
-- Fail criteria: Nothing reaches the Zepto review, unrelated items are added,
-  quantities are materially wrong without explanation, native rows change, or
-  the UI claims success after a provider failure. A missing or unserviceable
-  address must fail before product search rather than marking every grocery
-  item unavailable.
+- Prerequisite: Apply the multi-provider migration and configure at least one
+  test provider. Use an authorized Swiggy local/staging account for Instamart.
+- Prompt/action: Open **Groceries**, inspect provider cards, connect Instamart,
+  switch between Zepto and Instamart, and choose a saved address.
+- Provider check: Cards, environment, capabilities, connection state, and API
+  actions must come from the backend registry. Blinkit remains visible,
+  disabled, labelled **Coming soon**, and issues no request.
+- Preference check: The last selected provider persists for the household. With
+  no preference, connected Zepto wins, then connected Instamart; when neither
+  is connected, provider selection remains active.
+- OAuth check: Instamart Connect completes PKCE authorization. Expired/replayed
+  state fails, a 401 or expired token shows **Reconnect**, and Disconnect
+  removes the provider draft without changing the native cart. No token, PKCE
+  verifier, OTP, or raw auth response reaches the browser or logs.
+- Address check: Search and cart controls remain locked until a saved address
+  establishes the provider's serviceable store context.
+- Pass criteria: Provider and address state are accurate, isolated by
+  provider/environment, and survive reload without leaking credentials.
+- Fail criteria: Hardcoded routes determine the card behavior, providers share
+  address/auth state, a disabled card calls an API, or catalog search starts
+  before address context is established.
 
-### Scenario 7.2 - Selection, Pantry Exclusion, and Repeat Sync
+### Scenario 7.2 - Provider Cart Synchronization and Reconciliation
 
-- Prerequisite: Keep one eligible item selected, leave another eligible item
-  unselected, and include at least one pantry-covered row.
-- Prompt/action: Sync the cart to Zepto, inspect the review, then repeat the
-  sync without changing the native selection.
-- Expected behavior: Only selected, non-pantry-covered rows are offered to
-  Zepto. Unselected and already-stocked rows are excluded. Repeating the same
-  sync should refresh or reproduce the same reviewed cart rather than
-  multiplying quantities or creating duplicate products.
-- Stale-review check: After a successful sync, change a native quantity,
-  selection, delivery address, or provider choice. The old provider review,
-  payment state, and acknowledgement must be invalidated, and order placement
-  must remain locked until another sync.
-- Durable-draft check: Reload the frontend or restart the backend and return to
-  Groceries. The same Supabase-backed checkout draft should be restored rather
-  than disappearing or being reconstructed from browser-local state. A true
-  reload must require a fresh final acknowledgement.
-- Timed revalidation check: Make the draft older than five minutes or return
-  focus after that interval. Confirm that Kitch locks checkout editing, reads
-  the live Zepto cart, and revalidates expected products before unlocking it.
-- Repair check: Simulate one previously orderable product becoming unavailable.
-  Kitch should search in the same address/store context, replace it with a
-  confirmed orderable alternative, rebuild the complete provider cart, and
-  show the before/after product. Payment and acknowledgement must reset.
-- Unresolved check: If no orderable alternative exists, keep the unresolved
-  native item visible and block the complete order rather than silently
-  removing it or allowing a partial checkout.
-- Pass criteria: The review respects selection and pantry coverage, the second
-  sync remains equivalent without duplicates, and any later native/provider
-  change invalidates the old review before ordering.
-- Fail criteria: Unselected or pantry-covered items are sent, selected eligible
-  items disappear without explanation, or the retry duplicates products or
-  quantities.
+- Prerequisite: Select at least two eligible native rows, leave another row
+  unselected, and include one pantry-covered row.
+- Prompt/action: Synchronize with each test provider and inspect the review.
+- Expected behavior: Only selected, non-pantry-covered rows are searched in the
+  chosen address context. The complete provider cart is replaced and read back.
+  Search results absent from the confirmed cart, mismatched quantities, missing
+  IDs, ambiguous availability, or insufficient stock remain unresolved.
+- Matcher check: Invented IDs, prompt injection in product text, dietary
+  conflicts, unsafe pack changes, invalid quantities, and confidence below the
+  threshold must not authorize a match. Ambiguous choices stay user-visible.
+- Review check: Show image, pack, read-only quantity, native mapping,
+  replacement details, unavailability, unit price, and line value ordered by
+  value descending. The financial sidebar shows provider-returned subtotal,
+  fees, discounts, and total. A line sum may be labelled **Item subtotal** only;
+  it must not become payable total when adjustments are unknown.
+- Loading check: Synchronization retains a blocking progress dialog and disables
+  cart, provider, address, quick-action, payment, and order controls. Pending
+  native writes finish before the snapshot is taken.
+- Pass criteria: The confirmed provider cart exactly reconciles the selected
+  native intent, repeating sync creates no duplicates, the native cart remains
+  unchanged, and no order is placed.
+- Fail criteria: Search alone is reported as success, excluded rows are sent,
+  the review fabricates a total, state changes during sync, or provider failure
+  produces a completed stage.
 
-### Scenario 7.3 - Zepto Failure and Final-Approval Safety
+### Scenario 7.3 - Durable Revalidation, Repair, and Provider Switching
 
-- Prompt/action: Exercise a recoverable provider failure, unavailable-item
-  response, or incomplete checkout state during cart sync or review.
-- Expected behavior: The UI explains what failed or is unavailable, preserves
-  the native cart, and allows a safe retry. It must not display a completed
-  sync when the provider rejected the operation.
-- Approval check: Confirm that placing an order remains unavailable until the
-  exact Zepto cart, delivery address, payment method, and final acknowledgement
-  have been reviewed. Do not grant final approval or place a real order during
-  this functional test.
-- Final-revalidation check: With a test double or other non-ordering fixture,
-  make the provider cart change during the final availability check. The API
-  must return `409`, show the updated draft, reset approval, and never invoke
-  order placement. An unchanged fixture may proceed only up to the mocked
-  provider-order boundary; never place a live order during this test.
-- Pass criteria: Provider problems are visible and recoverable, native state is
-  preserved, and no order can be placed accidentally or from a stale review.
-- Fail criteria: The UI hides the failure, loses native cart state, shows false
-  success, or permits order placement without the required review and explicit
-  final approval.
+- Prerequisite: Save a successful draft, then make it older than five minutes
+  or simulate product, pack, price, quantity, or provider-cart drift.
+- Prompt/action: Reload or refocus Groceries, allow revalidation, then switch
+  provider and back.
+- Expected behavior: The draft survives frontend/backend restart, is isolated
+  by provider/environment, and is invalidated if the durable native snapshot
+  changed. Stale items are searched again in the same address context; the
+  complete cart is rebuilt and reconciled after safe replacement.
+- Repair check: Show native item → previous product → replacement product, plus
+  price/pack/quantity changes and **Last checked**. Every material change resets
+  payment and acknowledgement. No-alternative rows remain visible and block the
+  complete order.
+- Switching check: Switching preserves the native cart but never carries an
+  address, provider cart, payment, acknowledgement, token, or order state to the
+  other provider. Restoring the target draft requires revalidation; there is no
+  implicit provider failover.
+- Concurrency check: A persisted provider/environment lease serializes sync,
+  repair, and ordering across reloads and backend instances.
+- Pass criteria: Repair produces an exact confirmed cart, stale approval cannot
+  survive material change, and provider state stays isolated.
+- Fail criteria: Browser-local state reconstructs the draft, manual provider
+  drift becomes Kitch intent, unresolved rows disappear, or cross-provider
+  checkout state leaks.
+
+### Scenario 7.4 - Payment Approval, Checkout Safety, and Recovery
+
+- Prerequisite: Use a recorded adapter fixture or Swiggy staging. Do not use a
+  production order account.
+- Payment check: Display only methods returned by the fresh cart. For Instamart,
+  use returned UPI exclusively when present; use COD only when UPI is absent and
+  COD is explicitly returned. If neither is available, keep ordering blocked.
+- Approval check: The final acknowledgement names the exact provider, address,
+  products, quantities, payable total, payment method, and multi-store warning.
+  Reload requires a fresh acknowledgement.
+- Final-validation check: Change the provider cart during the pre-order check.
+  The API must return `409` with the updated draft, reset approval, and not call
+  checkout. An unchanged fixture may proceed to the mocked/staging boundary.
+- Recovery check: Persist checkout-attempt ID, provider order IDs, partial
+  results, pending payment, and ambiguous outcomes. On timeout, inspect
+  documented order history before retry. If duplicate risk remains, store
+  `unknown`, block resubmission, and direct the user to verify in the provider.
+  Poll payment only when the provider advertises a documented status tool.
+- Pass criteria: Exact approval is required, double submission is prevented by
+  UI locking plus the durable lease, and pending/partial/ambiguous state survives reload.
+- Fail criteria: A stale or invented payment method is submitted, checkout is
+  blindly retried, a changed snapshot orders, partial outcomes are flattened,
+  or the UI reports success without confirmed backend/provider state.
 
 ## Section 8: Ephemeral Preference Recall
 
@@ -774,7 +752,7 @@ Close every artifact with a functional summary.
 - Image macro logging:
 - Grocery generation:
 - Pantry-aware groceries:
-- Zepto cart integration:
+- Provider checkout integration:
 - Ephemeral preference recall:
 - Datetime awareness:
 

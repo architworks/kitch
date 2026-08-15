@@ -1,11 +1,11 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
 import asyncio
+import os
 import time
 from datetime import datetime, time as datetime_time, timedelta
-from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List
 from dotenv import load_dotenv
@@ -13,17 +13,12 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
-from app.agent.tools import export_to_delivery, apply_brand_memory_to_cart_items
+from app.agent.tools import apply_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
-from app.providers.zepto import ZeptoProviderAdapter
-from app.checkout_drafts import (
-    draft_row_to_review,
-    invalidate_draft_for_native_drift,
-    native_snapshot_matches,
-    save_initial_draft,
-    save_revalidated_draft,
-    update_draft_review_fields,
-)
+from app.grocery_checkout import GroceryCheckoutService
+from app.providers.base import ProviderOperationError
+from app.providers.instamart import InstamartProviderAdapter
+from app.providers.registry import provider_registry
 from app.household_config import DEFAULT_HOUSEHOLD_SIZE, canonical_user_name, household_members_text
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
@@ -50,10 +45,6 @@ from app.supabase_client import (
     get_meal_plan_snapshot,
     update_household_profile,
     validate_persistence_readiness,
-    claim_provider_checkout_operation,
-    delete_provider_checkout_draft,
-    get_provider_checkout_draft,
-    release_provider_checkout_operation,
 )
 from app.persistence import (
     PersistenceConfigurationError,
@@ -64,6 +55,10 @@ from app.persistence import (
 )
 
 load_dotenv()
+
+grocery_checkout_service = GroceryCheckoutService(
+    cart_mapper=apply_brand_memory_to_cart_items,
+)
 
 
 async def delete_past_meal_plans_at_household_midnight() -> None:
@@ -102,6 +97,9 @@ def looks_like_grocery_request(text: str) -> bool:
         "buy for",
         "add to zepto",
         "zepto",
+        "instamart",
+        "swiggy",
+        "ordering app",
         "cart",
         "tonight",
         "tomorrow",
@@ -243,6 +241,17 @@ async def persistence_exception_handler(
 ):
     return JSONResponse(
         status_code=503,
+        content={"detail": error.public_detail()},
+    )
+
+
+@app.exception_handler(ProviderOperationError)
+async def provider_operation_exception_handler(
+    request: Request,
+    error: ProviderOperationError,
+):
+    return JSONResponse(
+        status_code=error.status_code,
         content={"detail": error.public_detail()},
     )
 
@@ -415,7 +424,7 @@ async def upload_photo_endpoint(
                     f"Now answer this grocery request using the updated pantry state: {user_context}\n\n"
                     "Route to recipe_grocery_planner. Generate the requested recipe+ingredient artifact, "
                     "account for pantry-covered items, and save structured native grocery cart rows when this is a grocery request. "
-                    "Do not sync to Zepto or Blinkit from chat."
+                    "Do not synchronize or order from any external grocery provider in chat."
                 ))],
                 role="user"
             )
@@ -510,6 +519,10 @@ async def update_household_profile_endpoint(payload: Dict[str, Any]):
                     "daily_calorie_target",
                     current["daily_calorie_target"],
                 )
+            ),
+            preferred_grocery_provider=payload.get(
+                "preferred_grocery_provider",
+                current.get("preferred_grocery_provider"),
             ),
         )
         return {"status": "success", "profile": profile}
@@ -632,327 +645,109 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 7. Blinkit / Zepto Brand-Mapped Exporter Route
-@app.post("/api/grocery/export")
-async def export_grocery_endpoint(payload: Dict[str, Any]):
-    """
-    Legacy checkout preview: maps required items to a provider-shaped payload
-    using ADK native brand preference memory. Live Zepto sync uses /api/grocery/zepto/sync-cart.
-    """
-    try:
-        items = payload.get("items", [])
-        provider = payload.get("provider", "blinkit")
-        
-        result = await export_to_delivery(items=items, provider=provider)
-        return {"status": "success", "result": result}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# 7. Provider-neutral grocery commerce
+@app.get("/api/grocery/providers")
+async def grocery_providers_endpoint():
+    response = grocery_checkout_service.providers()
+    response["preferred_provider"] = get_household_profile().get(
+        "preferred_grocery_provider"
+    )
+    return response
 
-@app.get("/api/grocery/zepto/status")
-async def zepto_status_endpoint():
-    """Returns Zepto MCP configuration status for the grocery review UI."""
-    try:
-        return ZeptoProviderAdapter().status()
-    except Exception as e:
-        return {
-            "provider": "zepto",
-            "enabled": False,
-            "state": "failed",
-            "message": str(e),
-        }
 
-@app.get("/api/grocery/zepto/addresses")
-async def zepto_addresses_endpoint():
-    """Returns saved addresses so the user can choose store context before sync."""
-    try:
-        result = await ZeptoProviderAdapter().list_addresses()
-        if result.get("status") != "success":
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "detail": {
-                        "code": result.get("code", "zepto_address_lookup_failed"),
-                        "message": result.get("message", "Kitch could not read Zepto delivery addresses."),
-                        "provider": "zepto",
-                        "retryable": True,
-                    }
-                },
-            )
-        return result
-    except Exception:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "detail": {
-                    "code": "zepto_address_lookup_failed",
-                    "message": "Kitch could not read Zepto delivery addresses.",
-                    "provider": "zepto",
-                    "retryable": True,
-                }
-            },
+@app.post("/api/grocery/providers/{provider_id}/connection/start")
+async def start_provider_connection_endpoint(provider_id: str):
+    adapter = provider_registry.get(provider_id)
+    if not isinstance(adapter, InstamartProviderAdapter):
+        raise ProviderOperationError(
+            provider=provider_id,
+            operation="oauth_start",
+            code="provider_connection_managed_externally",
+            message="This provider does not use Kitch's delegated OAuth connection flow.",
+            status_code=422,
         )
+    return await adapter.oauth.start()
 
-@app.post("/api/grocery/zepto/sync-cart")
-async def sync_zepto_cart_endpoint(payload: Dict[str, Any] | None = None):
-    """
-    Replaces the user's Zepto cart with approved native Kitch cart rows.
-    This does not place an order.
-    """
-    operation_id = str(uuid4())
-    if not claim_provider_checkout_operation(operation_id):
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": {
-                    "code": "provider_checkout_busy",
-                    "message": "Another Zepto checkout operation is already running.",
-                    "provider": "zepto",
-                    "retryable": True,
-                }
-            },
+
+@app.get("/api/grocery/providers/{provider_id}/oauth/callback")
+async def provider_oauth_callback_endpoint(
+    provider_id: str,
+    code: str = "",
+    state: str = "",
+):
+    adapter = provider_registry.get(provider_id)
+    if not isinstance(adapter, InstamartProviderAdapter):
+        raise ProviderOperationError(
+            provider=provider_id,
+            operation="oauth_callback",
+            code="provider_oauth_unsupported",
+            message="This provider does not use Kitch's delegated OAuth callback.",
+            status_code=422,
         )
-    try:
-        payload = payload or {}
-        selected_ids = {str(i) for i in payload.get("cart_item_ids", [])}
-        selected_address_id = str(payload.get("selected_address_id") or "").strip()
-        if not selected_address_id:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "detail": {
-                        "code": "zepto_address_required",
-                        "message": "Select a Zepto delivery address before moving items to the cart.",
-                        "provider": "zepto",
-                        "retryable": False,
-                    }
-                },
-            )
+    await adapter.oauth.complete(code, state)
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return RedirectResponse(
+        f"{frontend_url}/?provider_connection={provider_id}&connection_status=connected"
+    )
 
-        cart_items = get_grocery_cart()
-        export_items = [
-            item for item in cart_items
-            if not item.get("alreadyStocked")
-            and (not selected_ids or str(item.get("id")) in selected_ids)
-        ]
 
-        mapped_items = await apply_brand_memory_to_cart_items(export_items)
-        result = await ZeptoProviderAdapter().sync_cart(
-            mapped_items,
-            selected_address_id=selected_address_id,
+@app.delete("/api/grocery/providers/{provider_id}/connection")
+async def disconnect_provider_endpoint(provider_id: str):
+    adapter = provider_registry.get(provider_id)
+    if not isinstance(adapter, InstamartProviderAdapter):
+        raise ProviderOperationError(
+            provider=provider_id,
+            operation="disconnect",
+            code="provider_disconnect_unsupported",
+            message="This provider connection is managed outside Kitch.",
+            status_code=422,
         )
-        if result.get("status") == "error":
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "detail": {
-                        "code": result.get("code"),
-                        "message": result.get("message"),
-                        "provider": "zepto",
-                        "retryable": result.get("code") not in {
-                            "missing_select_address_tool",
-                            "missing_cart_tools",
-                        },
-                    }
-                },
-            )
-
-        review = save_initial_draft(
-            export_items,
-            mapped_items,
-            result,
-            selected_address_id,
-        )
-        return {
-            "status": result.get("status", "error"),
-            "provider": "zepto",
-            "result": result,
-            "review": review,
-            "review_id": review["review_id"],
-            "confirmation_token": review.get("confirmation_token")
-        }
-    finally:
-        release_provider_checkout_operation(operation_id)
+    await adapter.oauth.disconnect()
+    return {"status": "success", "provider": provider_id, "state": "not_connected"}
 
 
-@app.get("/api/grocery/zepto/checkout-draft")
-async def get_zepto_checkout_draft_endpoint():
-    """Restore the durable checkout draft without contacting Zepto."""
-    draft = draft_row_to_review(get_provider_checkout_draft())
-    return {"status": "success", "provider": "zepto", "draft": draft}
+@app.get("/api/grocery/providers/{provider_id}/addresses")
+async def provider_addresses_endpoint(provider_id: str):
+    return await grocery_checkout_service.addresses(provider_id)
 
 
-@app.patch("/api/grocery/zepto/checkout-draft")
-async def update_zepto_checkout_draft_endpoint(payload: Dict[str, Any]):
-    """Update payment and explicit review acknowledgement on the durable draft."""
-    draft_row = get_provider_checkout_draft()
-    if not draft_row:
-        raise HTTPException(status_code=404, detail="No Zepto checkout draft exists.")
-    allowed_fields = {
-        key: payload[key]
-        for key in (
-            "selected_payment_method_id",
-            "order_review_acknowledged",
-        )
-        if key in payload
-    }
-    if not allowed_fields:
-        raise HTTPException(status_code=422, detail="No supported checkout fields were provided.")
-    review = update_draft_review_fields(draft_row, allowed_fields)
-    return {"status": "success", "provider": "zepto", "draft": review}
+@app.post("/api/grocery/providers/{provider_id}/checkout/sync")
+async def provider_checkout_sync_endpoint(
+    provider_id: str,
+    payload: Dict[str, Any] | None = None,
+):
+    return await grocery_checkout_service.sync(provider_id, payload or {})
 
 
-@app.post("/api/grocery/zepto/revalidate-cart")
-async def revalidate_zepto_cart_endpoint():
-    """Revalidate and automatically repair a durable Zepto checkout draft."""
-    operation_id = str(uuid4())
-    if not claim_provider_checkout_operation(operation_id):
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": {
-                    "code": "provider_checkout_busy",
-                    "message": "Another Zepto checkout operation is already running.",
-                    "provider": "zepto",
-                    "retryable": True,
-                }
-            },
-        )
-    try:
-        draft_row = get_provider_checkout_draft()
-        if not draft_row or not draft_row.get("native_items"):
-            raise HTTPException(status_code=404, detail="No Zepto checkout draft exists.")
-        if not native_snapshot_matches(draft_row, get_grocery_cart()):
-            review = invalidate_draft_for_native_drift(draft_row)
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": {
-                        "code": "native_cart_changed",
-                        "message": "The native cart changed. Move the selected items to Zepto again.",
-                        "provider": "zepto",
-                        "retryable": False,
-                        "draft": review,
-                    }
-                },
-            )
+@app.get("/api/grocery/providers/{provider_id}/checkout")
+async def provider_checkout_draft_endpoint(provider_id: str):
+    return grocery_checkout_service.draft(provider_id)
 
-        result = await ZeptoProviderAdapter().revalidate_cart(
-            draft_row_to_review(draft_row) or {}
-        )
-        if result.get("status") == "error":
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "detail": {
-                        "code": result.get("code", "zepto_revalidation_failed"),
-                        "message": result.get("message", "Zepto cart revalidation failed."),
-                        "provider": "zepto",
-                        "retryable": True,
-                    }
-                },
-            )
-        review, changed = save_revalidated_draft(draft_row, result)
-        return {
-            "status": result.get("status", "error"),
-            "provider": "zepto",
-            "changed": changed,
-            "changes": result.get("changes") or [],
-            "draft": review,
-        }
-    finally:
-        release_provider_checkout_operation(operation_id)
 
-@app.post("/api/grocery/zepto/place-order")
-async def place_zepto_order_endpoint(payload: Dict[str, Any]):
-    """
-    Places the reviewed Zepto cart order. Requires explicit frontend approval
-    through a confirmation token returned by /sync-cart.
-    """
-    operation_id = str(uuid4())
-    if not claim_provider_checkout_operation(operation_id):
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": {
-                    "code": "provider_checkout_busy",
-                    "message": "Another Zepto checkout operation is already running.",
-                    "provider": "zepto",
-                    "retryable": True,
-                }
-            },
-        )
-    try:
-        review_id = payload.get("review_id", "")
-        confirmation_token = payload.get("confirmation_token", "")
-        approved_snapshot_hash = payload.get("approved_snapshot_hash", "")
-        draft_row = get_provider_checkout_draft()
-        review = draft_row_to_review(draft_row)
-        if not draft_row or not review or review_id != review.get("review_id"):
-            raise HTTPException(status_code=404, detail="Zepto checkout draft was not found.")
+@app.patch("/api/grocery/providers/{provider_id}/checkout")
+async def update_provider_checkout_endpoint(
+    provider_id: str,
+    payload: Dict[str, Any],
+):
+    return grocery_checkout_service.update_draft(provider_id, payload)
 
-        if not review.get("can_place_order"):
-            raise HTTPException(status_code=403, detail="This Zepto review is not eligible for order placement.")
-        if not confirmation_token or confirmation_token != review.get("confirmation_token"):
-            raise HTTPException(status_code=403, detail="Final frontend approval token is missing or expired.")
-        if approved_snapshot_hash != review.get("snapshot_hash"):
-            raise HTTPException(status_code=409, detail="Zepto review changed after approval. Review the cart again before placing the order.")
-        if not payload.get("order_review_acknowledged") or not review.get("order_review_acknowledged"):
-            raise HTTPException(status_code=403, detail="Final order review acknowledgement is required.")
 
-        if not native_snapshot_matches(draft_row, get_grocery_cart()):
-            changed_review = invalidate_draft_for_native_drift(draft_row)
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": {
-                        "code": "native_cart_changed",
-                        "message": "The native cart changed after approval. Sync and review it again.",
-                        "provider": "zepto",
-                        "retryable": False,
-                        "draft": changed_review,
-                    }
-                },
-            )
+@app.post("/api/grocery/providers/{provider_id}/checkout/revalidate")
+async def revalidate_provider_checkout_endpoint(provider_id: str):
+    return await grocery_checkout_service.revalidate(provider_id)
 
-        validation = await ZeptoProviderAdapter().revalidate_cart(review)
-        if validation.get("status") == "error":
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "detail": {
-                        "code": validation.get("code", "zepto_revalidation_failed"),
-                        "message": validation.get("message", "Zepto cart revalidation failed."),
-                        "provider": "zepto",
-                        "retryable": True,
-                    }
-                },
-            )
-        refreshed_review, changed = save_revalidated_draft(draft_row, validation)
-        if changed or refreshed_review.get("snapshot_hash") != approved_snapshot_hash:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": {
-                        "code": "provider_cart_changed",
-                        "message": "The Zepto cart changed during the final availability check. Review it again before ordering.",
-                        "provider": "zepto",
-                        "retryable": False,
-                        "draft": refreshed_review,
-                    }
-                },
-            )
-        if not refreshed_review.get("can_place_order"):
-            raise HTTPException(status_code=403, detail="The refreshed Zepto cart is not eligible for ordering.")
 
-        result = await ZeptoProviderAdapter().place_order(review=refreshed_review)
-        if result.get("status") == "success":
-            delete_provider_checkout_draft()
-        return {"status": result.get("status", "error"), "provider": "zepto", "result": result, "review": refreshed_review}
-    except HTTPException:
-        raise
-    finally:
-        release_provider_checkout_operation(operation_id)
+@app.post("/api/grocery/providers/{provider_id}/checkout/place-order")
+async def place_provider_order_endpoint(
+    provider_id: str,
+    payload: Dict[str, Any],
+):
+    return await grocery_checkout_service.place_order(provider_id, payload)
+
+
+@app.post("/api/grocery/providers/{provider_id}/checkout/payment-status")
+async def provider_payment_status_endpoint(provider_id: str):
+    return await grocery_checkout_service.payment_status(provider_id)
 
 @app.get("/api/health")
 async def health_check():
@@ -964,6 +759,7 @@ async def health_check():
             "engine": "google-adk",
             "memory": "ephemeral-process-local",
             "persistence": readiness,
+            "providers": await provider_registry.readiness(),
         }
     except PersistenceError as error:
         return JSONResponse(

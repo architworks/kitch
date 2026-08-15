@@ -59,7 +59,9 @@ Common actions should work through short, casual language:
 
 ### Review Before External Order
 
-Provider cart sync and order placement are separate. If the user asks Kitch to add groceries to Zepto, Kitch may sync the native cart into Zepto. Placing the order still requires a final explicit UI approval.
+Provider cart sync and order placement are separate. Chat may guide the user to
+the Groceries workflow, but only explicit UI actions may synchronize a provider
+cart or approve an order.
 
 ---
 
@@ -103,7 +105,7 @@ Users should be able to:
 3. Modify one meal without damaging the rest of the plan.
 4. Update pantry stock manually, conversationally, or from a fridge photo.
 5. Generate a grocery list from the current plan and pantry.
-6. Sync eligible grocery rows to Zepto for review.
+6. Sync eligible grocery rows to Zepto or Swiggy Instamart for review.
 7. Save brand preferences for future grocery preparation.
 8. Log personal food intake from text or a plate photo.
 9. See personal daily nutrition progress.
@@ -305,74 +307,85 @@ Example prompts:
 The native grocery cart is structured backend state. The Groceries page presents
 one visible, prerequisite-locked workflow: native cart review, ordering-app
 selection, delivery address, provider transfer, provider cart review, then
-payment and order. Zepto is the live default; Blinkit is a disabled
-`Coming soon` placeholder. Provider substitution review should continue to
-improve as live integrations mature.
+payment and order. Zepto and Swiggy Instamart are backend-described providers;
+Blinkit is disabled with `Coming soon`.
 
 ---
 
-## 10. Flow: Prepare an Ordering-App Cart (Current Provider: Zepto)
+## 10. Flow: Prepare and Approve a Provider Cart
 
 ### User Intent
 
-The user wants to move the native Kitch grocery cart into an ordering app. The
-current live provider is Zepto.
+The user wants to project the reviewed native Kitch cart into a supported
+ordering app without losing control of substitutions, price changes, or order approval.
 
 Example prompts:
 
-- "Add this to Zepto."
-- "Put tomorrow's groceries in Zepto."
-- "Plan grocery for the next two days and add it to Zepto."
+- "Open my groceries so I can order them."
+- "Put tomorrow's groceries in Instamart."
+- "Help me review this cart in Zepto."
 
 ### Expected Experience
 
 1. The user reviews the native cart and selects eligible rows.
-2. The user chooses an ordering app; Zepto is available and Blinkit is locked
-   as `Coming soon`.
-3. The user selects a saved delivery address.
-4. The user starts the transfer in a separate, clearly numbered stage.
-5. Kitch uses the native cart as the source of truth, excluding unselected and
+2. The user chooses Zepto or Swiggy Instamart. Blinkit remains visible and
+   disabled. Kitch remembers the household's last selection.
+3. If required, the user connects or reconnects the provider. Instamart shows
+   its environment and uses a household-owned OAuth connection.
+4. The user selects a saved delivery address.
+5. The user starts synchronization in a separate, clearly numbered stage.
+6. Kitch uses the native cart as the source of truth, excluding unselected and
    pantry-covered rows and applying known brand preferences.
-6. Kitch selects only explicitly orderable matches, clears/replaces the Zepto
-   cart, and confirms exact product/store identifiers and quantities in the
+7. Kitch searches only after establishing the selected address context,
+   accepts only explicitly orderable matches, replaces the complete provider
+   cart, and confirms exact identifiers and quantities in the
    resulting provider cart.
-7. The main column shows the actual Zepto cart and unavailable items. The
+8. The main column shows the actual provider cart and unavailable items. The
    read-only rows show product images, mapped native items, unit prices,
    quantities, pack sizes, and line subtotals ordered from highest to lowest
    value. The right sidebar shows the financial summary without narrowing the
    cart list.
-8. The sidebar uses Zepto's total when returned. If no adjustment exists, it
-   may show the exact sum of returned line prices and quantities, clearly
-   labelled as a line-item total.
-9. Returning later restores the durable checkout draft. After five minutes,
+9. The sidebar shows provider-returned subtotal, fees, discounts, and payable
+   total. A complete line-price sum may be shown only as `Item subtotal`, never
+   as the final payable total when adjustments are unknown.
+10. Returning later restores the provider/environment draft. After five minutes,
    Kitch rechecks availability and automatically replaces stale products.
-10. Replacements and other material changes are highlighted and reset payment
+11. Replacements and other material changes are highlighted and reset payment
     and approval. An unresolved selected item blocks the complete order.
-11. The user must acknowledge the exact review before any order is placed;
-    Kitch runs a final revalidation immediately before ordering.
+12. Kitch offers only fresh provider-returned payment methods. Instamart calls
+    `get_payment_options`, passes the selected UPI app/QR flow unchanged, or
+    offers explicit Cash only when UPI is absent.
+13. The user acknowledges the exact provider, address, products, quantities,
+    payable total, payment method, and any multi-store warning. Kitch then runs
+    a final revalidation immediately before ordering.
+14. Pending, partial, or ambiguous order state survives reload. A timeout is
+    not blindly retried while duplicate-order risk remains.
 
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
-- The experience may indicate that the Zepto cart changed only after sync succeeds.
-- The user should see enough information to trust the actual Zepto cart
-  contents and total. Kitch must never derive a final total when Zepto reports
+- The experience may indicate that a provider cart changed only after sync and read-back reconciliation succeed.
+- The user should see enough information to trust the actual provider cart
+  contents and total. Kitch must never derive a final total when a provider reports
   a fee, tax, discount, or other adjustment without its own final total.
 - The native cart starts as a compact summary and can be expanded for row-level
   editing without breaking the checkout chronology.
 - Brand substitutions should be visible.
 - Order placement must require explicit user approval.
-- Auth, payment, address, and OTP issues should surface as recoverable states.
+- Connection, payment, address, capability, and provider failures should surface as safe, provider-scoped states.
 - Editing a native row or selection, changing provider, or changing address
   invalidates the review and locks order placement until a fresh sync.
 - Automatic refresh uses the same blocking progress dialog and locks checkout
   editing until the provider cart has been reconciled.
 - If final revalidation changes the cart, no order is placed and the user is
-  returned to the updated Zepto cart review.
+  returned to the updated provider cart review.
 
 ### Current Product Boundary
 
-Zepto cart sync is implemented behind the MCP adapter, but it depends on external Zepto MCP auth. Blinkit live cart insertion is not implemented.
+Zepto and Instamart implement one backend contract. Instamart is limited to the
+Swiggy `/im` MCP surface; Food and Dineout are inaccessible. Production Instamart
+remains gated until Swiggy approval and a successful staging soak. Blinkit live
+cart insertion is not implemented.
 
 ---
 

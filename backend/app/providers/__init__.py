@@ -1,1 +1,1 @@
-"""Provider adapters for external grocery services."""
+"""Grocery provider implementations and provider-neutral contracts."""

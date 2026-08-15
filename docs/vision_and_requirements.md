@@ -45,7 +45,8 @@ When the user asks for groceries for a meal or dish, Kitch generates a recipe+in
 
 ### 4. Native grocery cart is the source of truth
 
-Kitch owns a provider-agnostic native cart. Zepto/Blinkit/etc. are provider translations of that native cart, not the source of truth.
+Kitch owns a provider-agnostic native cart. Zepto, Swiggy Instamart, and future
+providers are time-sensitive translations of that cart, not independent intent.
 
 **Why:** delivery providers differ in catalog structure, package sizes, availability, auth, address selection, and payment flows. A native cart lets Kitch reason about household grocery needs before any provider-specific mapping happens.
 
@@ -53,7 +54,9 @@ Kitch owns a provider-agnostic native cart. Zepto/Blinkit/etc. are provider tran
 
 Chat text can plan groceries and prepare a provider cart. Chat text must not place a real order. Order placement is only allowed through the final frontend approval control after the user has reviewed the provider cart.
 
-**Why:** Zepto is a real consumer-facing service. Catalog substitutions, payment state, address state, and accidental orders are high-risk. Human-in-the-loop final approval is a product safety requirement, not a UI preference.
+**Why:** grocery providers are real consumer-facing services. Catalog
+substitutions, payment state, address state, timeouts, and duplicate orders are
+high-risk. Human-in-the-loop final approval is a product safety requirement.
 
 ### 6. Preferences stay flexible in ephemeral memory
 
@@ -102,9 +105,9 @@ The Groceries page is the operational checkout-prep screen. It keeps the full
 ordering path visible in this order:
 
 - Review the compact native-cart summary and expand it for row-level changes.
-- Select an ordering app. Zepto is the current live default; Blinkit is shown
-  as a disabled `Coming soon` option.
-- Select a provider delivery address.
+- Select Zepto or Swiggy Instamart from backend-provided descriptors. Blinkit
+  is shown as a disabled `Coming soon` option.
+- Connect or reconnect the provider when required, then select its address.
 - Transfer the selected native rows as a separate checkout stage.
 - Review actual provider cart items, unavailable items, and provider-returned
   totals, with product images and read-only line subtotals sorted by value in
@@ -179,9 +182,9 @@ The floating chat input is the primary mode of interaction. It supports:
 | ID | Requirement | Why |
 | :--- | :--- | :--- |
 | REQ-040 | Keep provider sync behind backend adapters. | Provider APIs/MCP tools are external systems and should not leak into recipe/grocery planning. |
-| REQ-041 | Use Zepto MCP for live Zepto cart sync. | Zepto MCP exposes search/cart/order tools that are suitable for testing native-cart-to-provider-cart translation. |
+| REQ-041 | Run Zepto and Swiggy Instamart through the same provider contract and provider-keyed API. | Supporting a provider must not introduce provider-specific frontend routes or checkout semantics. |
 | REQ-042 | Before provider sync, show "not synced" rather than fake prices. After sync, prefer the provider's final total; an exact line-item sum is allowed only when no tax, fee, discount, or other adjustment is present. | A simple sum is useful when it is mathematically complete, but must never masquerade as a checkout total when provider adjustments exist. |
-| REQ-043 | Moving items to Zepto may replace the existing Zepto cart after the user clicks the sync action. | The user explicitly asked to move selected Kitch rows to Zepto, and replacing avoids ambiguous merges. |
+| REQ-043 | Synchronization replaces the complete selected-provider cart after explicit user action. | Replacement avoids ambiguous merges and keeps the native selection authoritative. |
 | REQ-044 | Order placement requires a durable checkout draft, confirmation token, and unchanged final revalidation. | Ensures the order is based on exactly what the user reviewed and that it remains orderable. |
 | REQ-045 | The app must surface unavailable or unresolved provider items. | Silent failures would lead to missing groceries. |
 | REQ-046 | Blinkit provider sync is deferred. | No Blinkit MCP connection is currently configured. |
@@ -193,6 +196,11 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-052 | Reconcile every initial provider update against the confirmed cart and treat ambiguous availability as unverified. | A search result is not proof that the requested product and quantity were added or remain orderable. |
 | REQ-053 | Revalidate drafts after five minutes on page entry/focus and immediately before ordering; automatically repair stale products and reset approval after every material change. | Provider availability and prices are time-sensitive, so an older snapshot must not authorize an order. |
 | REQ-054 | Block the complete order when any selected native item has no confirmed orderable alternative. | Missing groceries must not be silently dropped from an approved checkout. |
+| REQ-055 | Discover and validate provider MCP capabilities, and degrade only that provider when required schemas are absent. | External schema drift must not corrupt calls or make core Kitch unavailable. |
+| REQ-056 | Encrypt provider tokens and PKCE verifiers, reject OAuth replay/expiry, and never expose provider credentials or sensitive raw payloads. | Household commerce credentials require a backend-only security boundary. |
+| REQ-057 | Offer only fresh provider-returned payment methods; prefer Instamart UPI and allow COD only when UPI is absent and COD is returned. | Kitch must never invent or submit a stale payment choice. |
+| REQ-058 | Persist pending, partial, and ambiguous order outcomes and prevent blind checkout retry. | A timeout must not create duplicate-order risk. |
+| REQ-059 | Provider switching preserves the native cart but isolates address, draft, payment, approval, and order state by provider/environment. | Provider-specific checkout state must never leak across integrations. |
 
 ---
 
@@ -240,6 +248,8 @@ ADK memory stores flexible household preference text.
 - Multiple households.
 - Persistent Vertex AI sessions and memory.
 - Blinkit live cart sync.
+- Swiggy Food and Dineout surfaces.
+- Production Instamart ordering before approval and a successful staging soak.
 - Autonomous order placement from chat.
 - Static recipe database.
 - Snack planning.
@@ -258,6 +268,6 @@ Kitch is working when:
 - Recipe requests produce recipe artifacts without changing the cart.
 - Grocery requests produce recipe artifacts and native cart rows together.
 - Pantry-covered items are visible but excluded from provider sync.
-- The user can choose the current live ordering app, sync selected native rows,
+- The user can choose Zepto or Instamart, sync selected native rows,
   and see actual provider cart details and returned totals.
 - The user cannot place a real order without explicit final approval.

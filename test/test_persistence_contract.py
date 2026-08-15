@@ -244,24 +244,31 @@ class MigrationContractTests(unittest.TestCase):
             schema,
         )
         self.assertIn("provider_checkout_drafts", schema)
+        self.assertIn("provider_connections", schema)
+        self.assertIn("provider_oauth_clients", schema)
+        self.assertIn("provider_oauth_flows", schema)
         self.assertIn("claim_provider_checkout_operation", schema)
         self.assertIn("plan_date DATE NOT NULL", schema)
         self.assertIn("replace_meal_plan_range", schema)
         self.assertIn("apply_meal_plan_edits", schema)
         self.assertNotIn("breakfast_recipe_id", schema)
 
-    def test_provider_checkout_migration_is_durable_and_backend_only(self):
+    def test_multi_provider_migration_is_durable_and_backend_only(self):
         migration = (
             ROOT
             / "backend"
             / "database"
             / "migrations"
-            / "20260803_create_provider_checkout_drafts.sql"
+            / "20260815_multi_provider_grocery_platform.sql"
         ).read_text(encoding="utf-8")
         self.assertIn("BEGIN;", migration)
         self.assertIn("COMMIT;", migration)
-        self.assertIn("CREATE TABLE IF NOT EXISTS public.provider_checkout_drafts", migration)
-        self.assertIn("UNIQUE (profile_id, provider)", migration)
+        self.assertIn("CREATE TABLE public.provider_checkout_drafts", migration)
+        self.assertIn("UNIQUE (profile_id, provider, provider_environment)", migration)
+        self.assertIn("CREATE TABLE IF NOT EXISTS public.provider_connections", migration)
+        self.assertIn("CREATE TABLE IF NOT EXISTS public.provider_oauth_clients", migration)
+        self.assertIn("CREATE TABLE IF NOT EXISTS public.provider_oauth_flows", migration)
+        self.assertIn("preferred_grocery_provider", migration)
         self.assertIn("ENABLE ROW LEVEL SECURITY", migration)
         self.assertIn("FROM PUBLIC, anon, authenticated", migration)
         self.assertIn("TO service_role", migration)

@@ -52,6 +52,7 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "household_size",
         "daily_calorie_target",
         "timezone_name",
+        "preferred_grocery_provider",
         "created_at",
     ),
     "meal_plans": (
@@ -118,6 +119,8 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "id",
         "profile_id",
         "provider",
+        "provider_environment",
+        "capability_version",
         "selected_address_id",
         "selected_native_item_ids",
         "native_items",
@@ -130,18 +133,39 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "cart_summary",
         "checkout_context",
         "store_context",
+        "payment_options",
         "selected_payment_method_id",
+        "selected_payment_method",
+        "payment_state",
         "order_review_acknowledged",
         "can_place_order",
         "order_blockers",
         "confirmation_token",
         "snapshot_hash",
+        "checkout_attempt_id",
+        "provider_order_ids",
+        "order_results",
+        "ambiguous_order",
         "status",
         "last_validated_at",
         "operation_id",
         "lease_expires_at",
         "created_at",
         "updated_at",
+    ),
+    "provider_connections": (
+        "id", "profile_id", "provider", "provider_environment",
+        "access_token_ciphertext", "token_type", "scope", "expires_at",
+        "status", "last_error_code", "connected_at", "updated_at",
+    ),
+    "provider_oauth_clients": (
+        "id", "provider", "provider_environment", "client_id",
+        "registration", "created_at", "updated_at",
+    ),
+    "provider_oauth_flows": (
+        "id", "profile_id", "provider", "provider_environment", "state_hash",
+        "code_verifier_ciphertext", "client_id", "redirect_uri", "expires_at",
+        "used_at", "created_at",
     ),
 }
 
@@ -508,20 +532,22 @@ def update_household_profile(
     diet_preference: str,
     household_size: int,
     daily_calorie_target: int = 2000,
+    preferred_grocery_provider: str | None = None,
 ) -> Dict[str, Any]:
+    payload = {
+        "id": get_household_profile_id(),
+        "full_name": HOUSEHOLD_NAME,
+        "diet_preference": diet_preference,
+        "household_size": household_size,
+        "daily_calorie_target": daily_calorie_target,
+    }
+    if preferred_grocery_provider is not None:
+        payload["preferred_grocery_provider"] = preferred_grocery_provider
     return _confirmed_row(
         "update_household_profile",
         "profiles",
         lambda: supabase.table("profiles")
-        .upsert(
-            {
-                "id": get_household_profile_id(),
-                "full_name": HOUSEHOLD_NAME,
-                "diet_preference": diet_preference,
-                "household_size": household_size,
-                "daily_calorie_target": daily_calorie_target,
-            }
-        )
+        .upsert(payload)
         .execute(),
     )
 
@@ -957,11 +983,17 @@ _PROVIDER_DRAFT_JSON_FIELDS = {
     "cart_summary",
     "checkout_context",
     "store_context",
+    "payment_options",
+    "selected_payment_method",
+    "payment_state",
     "order_blockers",
+    "provider_order_ids",
+    "order_results",
 }
 
 _PROVIDER_DRAFT_WRITABLE_FIELDS = {
     "selected_address_id",
+    "capability_version",
     "selected_native_item_ids",
     "native_items",
     "mapped_items",
@@ -973,12 +1005,19 @@ _PROVIDER_DRAFT_WRITABLE_FIELDS = {
     "cart_summary",
     "checkout_context",
     "store_context",
+    "payment_options",
     "selected_payment_method_id",
+    "selected_payment_method",
+    "payment_state",
     "order_review_acknowledged",
     "can_place_order",
     "order_blockers",
     "confirmation_token",
     "snapshot_hash",
+    "checkout_attempt_id",
+    "provider_order_ids",
+    "order_results",
+    "ambiguous_order",
     "status",
     "last_validated_at",
 }
@@ -991,12 +1030,17 @@ def _normalize_provider_checkout_draft_row(row: Dict[str, Any]) -> Dict[str, Any
             "cart_summary",
             "checkout_context",
             "store_context",
+            "payment_state",
+            "selected_payment_method",
         } else []
         normalized[field] = _coerce_json(normalized.get(field), default)
     return normalized
 
 
-def get_provider_checkout_draft(provider: str = "zepto") -> Dict[str, Any] | None:
+def get_provider_checkout_draft(
+    provider: str,
+    provider_environment: str,
+) -> Dict[str, Any] | None:
     rows = _read_rows(
         "get_provider_checkout_draft",
         "provider_checkout_drafts",
@@ -1004,6 +1048,7 @@ def get_provider_checkout_draft(provider: str = "zepto") -> Dict[str, Any] | Non
         .select("*")
         .eq("profile_id", get_household_profile_id())
         .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
         .limit(1)
         .execute(),
     )
@@ -1012,7 +1057,8 @@ def get_provider_checkout_draft(provider: str = "zepto") -> Dict[str, Any] | Non
 
 def save_provider_checkout_draft(
     draft: Dict[str, Any],
-    provider: str = "zepto",
+    provider: str,
+    provider_environment: str,
 ) -> Dict[str, Any]:
     payload = {
         key: value
@@ -1023,6 +1069,7 @@ def save_provider_checkout_draft(
         {
             "profile_id": get_household_profile_id(),
             "provider": provider,
+            "provider_environment": provider_environment,
             "updated_at": _now_iso(),
         }
     )
@@ -1030,13 +1077,13 @@ def save_provider_checkout_draft(
         "save_provider_checkout_draft",
         "provider_checkout_drafts",
         lambda: supabase.table("provider_checkout_drafts")
-        .upsert(payload, on_conflict="profile_id,provider")
+        .upsert(payload, on_conflict="profile_id,provider,provider_environment")
         .execute(),
     )
     return _normalize_provider_checkout_draft_row(row)
 
 
-def delete_provider_checkout_draft(provider: str = "zepto") -> bool:
+def delete_provider_checkout_draft(provider: str, provider_environment: str) -> bool:
     _confirmed_row(
         "delete_provider_checkout_draft",
         "provider_checkout_drafts",
@@ -1044,6 +1091,7 @@ def delete_provider_checkout_draft(provider: str = "zepto") -> bool:
         .delete()
         .eq("profile_id", get_household_profile_id())
         .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
         .execute(),
     )
     return True
@@ -1051,7 +1099,8 @@ def delete_provider_checkout_draft(provider: str = "zepto") -> bool:
 
 def claim_provider_checkout_operation(
     operation_id: str,
-    provider: str = "zepto",
+    provider: str,
+    provider_environment: str,
     lease_seconds: int = 120,
 ) -> bool:
     data = _execute(
@@ -1062,6 +1111,7 @@ def claim_provider_checkout_operation(
             {
                 "p_profile_id": get_household_profile_id(),
                 "p_provider": provider,
+                "p_provider_environment": provider_environment,
                 "p_operation_id": operation_id,
                 "p_lease_seconds": lease_seconds,
             },
@@ -1078,7 +1128,8 @@ def claim_provider_checkout_operation(
 
 def release_provider_checkout_operation(
     operation_id: str,
-    provider: str = "zepto",
+    provider: str,
+    provider_environment: str,
 ) -> bool:
     data = _execute(
         "release_provider_checkout_operation",
@@ -1088,6 +1139,7 @@ def release_provider_checkout_operation(
             {
                 "p_profile_id": get_household_profile_id(),
                 "p_provider": provider,
+                "p_provider_environment": provider_environment,
                 "p_operation_id": operation_id,
             },
         ).execute(),
@@ -1099,6 +1151,156 @@ def release_provider_checkout_operation(
             "release_provider_checkout_operation", "provider_checkout_drafts"
         )
     return data
+
+
+# Household-owned provider OAuth and delegated connections
+def get_provider_connection(
+    provider: str,
+    provider_environment: str,
+) -> Dict[str, Any] | None:
+    rows = _read_rows(
+        "get_provider_connection",
+        "provider_connections",
+        lambda: supabase.table("provider_connections")
+        .select("*")
+        .eq("profile_id", get_household_profile_id())
+        .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
+        .limit(1)
+        .execute(),
+    )
+    return rows[0] if rows else None
+
+
+def save_provider_connection(
+    provider: str,
+    provider_environment: str,
+    connection: Dict[str, Any],
+) -> Dict[str, Any]:
+    payload = {
+        "profile_id": get_household_profile_id(),
+        "provider": provider,
+        "provider_environment": provider_environment,
+        "access_token_ciphertext": connection["access_token_ciphertext"],
+        "token_type": connection.get("token_type") or "Bearer",
+        "scope": connection.get("scope") or "",
+        "expires_at": connection["expires_at"],
+        "status": connection.get("status") or "connected",
+        "last_error_code": connection.get("last_error_code"),
+        "updated_at": _now_iso(),
+    }
+    return _confirmed_row(
+        "save_provider_connection",
+        "provider_connections",
+        lambda: supabase.table("provider_connections")
+        .upsert(payload, on_conflict="profile_id,provider,provider_environment")
+        .execute(),
+    )
+
+
+def update_provider_connection_status(
+    provider: str,
+    provider_environment: str,
+    status: str,
+    last_error_code: str | None = None,
+) -> Dict[str, Any]:
+    return _confirmed_row(
+        "update_provider_connection_status",
+        "provider_connections",
+        lambda: supabase.table("provider_connections")
+        .update({
+            "status": status,
+            "last_error_code": last_error_code,
+            "updated_at": _now_iso(),
+        })
+        .eq("profile_id", get_household_profile_id())
+        .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
+        .execute(),
+    )
+
+
+def delete_provider_connection(provider: str, provider_environment: str) -> bool:
+    _confirmed_row(
+        "delete_provider_connection",
+        "provider_connections",
+        lambda: supabase.table("provider_connections")
+        .delete()
+        .eq("profile_id", get_household_profile_id())
+        .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
+        .execute(),
+    )
+    return True
+
+
+def get_provider_oauth_client(
+    provider: str,
+    provider_environment: str,
+) -> Dict[str, Any] | None:
+    rows = _read_rows(
+        "get_provider_oauth_client",
+        "provider_oauth_clients",
+        lambda: supabase.table("provider_oauth_clients")
+        .select("*")
+        .eq("provider", provider)
+        .eq("provider_environment", provider_environment)
+        .limit(1)
+        .execute(),
+    )
+    return rows[0] if rows else None
+
+
+def save_provider_oauth_client(
+    provider: str,
+    provider_environment: str,
+    client_id: str,
+    registration: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _confirmed_row(
+        "save_provider_oauth_client",
+        "provider_oauth_clients",
+        lambda: supabase.table("provider_oauth_clients")
+        .upsert(
+            {
+                "provider": provider,
+                "provider_environment": provider_environment,
+                "client_id": client_id,
+                "registration": registration,
+                "updated_at": _now_iso(),
+            },
+            on_conflict="provider,provider_environment",
+        )
+        .execute(),
+    )
+
+
+def create_provider_oauth_flow(flow: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        **flow,
+        "profile_id": get_household_profile_id(),
+    }
+    return _confirmed_row(
+        "create_provider_oauth_flow",
+        "provider_oauth_flows",
+        lambda: supabase.table("provider_oauth_flows").insert(payload).execute(),
+    )
+
+
+def consume_provider_oauth_flow(state_hash: str) -> Dict[str, Any] | None:
+    now = _now_iso()
+    rows = _read_rows(
+        "consume_provider_oauth_flow",
+        "provider_oauth_flows",
+        lambda: supabase.table("provider_oauth_flows")
+        .update({"used_at": now})
+        .eq("profile_id", get_household_profile_id())
+        .eq("state_hash", state_hash)
+        .is_("used_at", "null")
+        .gt("expires_at", now)
+        .execute(),
+    )
+    return rows[0] if rows else None
 
 
 # Recipe and grocery artifacts

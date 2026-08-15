@@ -28,7 +28,9 @@ from .tools import (
     list_recipe_grocery_plans_tool,
     set_household_food_preference_tool,
     search_household_food_preferences_tool,
-    get_current_datetime
+    get_current_datetime,
+    list_grocery_providers_tool,
+    get_grocery_checkout_status_tool,
 )
 from google.adk.agents.callback_context import CallbackContext
 from typing import Optional
@@ -199,7 +201,7 @@ recipe_grocery_planner = LlmAgent(
         "6. Grocery/cart/buy/order wording: call 'get_pantry_stock_tool', generate recipe cards for the requested scope, derive cart rows from the SAME ingredients, mark pantry-covered rows with alreadyStocked=true and a stockNote, then call 'save_recipe_grocery_plan_tool' with update_cart=true. This replaces previous source=agent cart rows and preserves manual rows.\n"
         "7. If the user mentions items already at home or just bought, call 'add_to_pantry_tool' for each item first, then plan using the updated pantry.\n"
         "8. Never invent native cart rows independently of the recipe cards. Recipe and grocery outputs must stay connected through the saved recipe+grocery artifact.\n"
-        "9. Do not call Zepto, Blinkit, provider sync, export, or order-placement tools. Provider cart translation is separate from this agent and happens through backend provider endpoints or a future provider agent.\n"
+        "9. Do not call ordering-provider cart mutation or order-placement tools. Provider cart translation is separate from this agent and happens through the guarded checkout backend.\n"
         "10. Present results in clean markdown. For grocery requests, mention that the native household grocery cart has been updated only after save_recipe_grocery_plan_tool returns status=success.\n"
         "11. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
@@ -247,11 +249,12 @@ kitch_coordinator = LlmAgent(
         "3. For simple greetings or general chat, respond yourself without routing.\n"
         "4. If unsure, ask a clarifying question rather than guessing wrong.\n"
         "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to vision_scanner for logging.\n"
-        "6. If the user asks to add groceries to Zepto/Blinkit, route only the native recipe/grocery planning part to recipe_grocery_planner. Provider cart sync is handled by backend UI actions, not ordinary chat.\n"
+        "6. If the user asks to add groceries to an ordering provider, route only the native recipe/grocery planning part to recipe_grocery_planner. You may read provider availability or checkout status, but provider cart sync and ordering are explicit UI actions.\n"
         "7. Never ask 'which agent should I use' — just figure it out from context.\n"
         "8. Never claim a durable change succeeded unless the specialist received a successful persistence-tool result. Do not turn a tool error into reassuring success language."
     ),
     sub_agents=[chef_planner, vision_scanner, recipe_grocery_planner],
+    tools=[list_grocery_providers_tool, get_grocery_checkout_status_tool],
     before_agent_callback=inject_datetime_callback
 )
 

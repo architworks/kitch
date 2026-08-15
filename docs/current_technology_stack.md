@@ -17,7 +17,7 @@ Kitch is split into:
 3. Google ADK 2.0 agent runtime.
 4. Supabase persistence.
 5. Native Gemini model runtime.
-6. Backend provider adapters, currently Zepto MCP for cart sync and guarded order placement.
+6. A provider-neutral commerce layer with Zepto and Swiggy Instamart adapters.
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,9 @@ flowchart LR
     ADK --> LLM[Configured LLM Provider]
     FastAPI --> Supabase[(Supabase)]
     ADK --> Memory[ADK In-Memory Session and Memory Services]
-    FastAPI --> Zepto[Zepto MCP Adapter]
+    FastAPI --> Checkout[GroceryCheckoutService]
+    Checkout --> Zepto[Zepto MCP Adapter]
+    Checkout --> Instamart[Swiggy Instamart /im Adapter]
 ```
 
 Why this split:
@@ -75,8 +77,8 @@ Current frontend responsibilities:
 - Render floating chat input and expanded chat history.
 - Upload image-plus-text requests.
 - Trigger native cart edits.
-- Trigger Zepto cart sync.
-- Trigger final Zepto order approval.
+- Trigger provider-keyed cart sync, revalidation, payment approval, and checkout.
+- Connect or disconnect providers that advertise delegated authentication.
 
 Why the UI is not the source of truth:
 
@@ -102,6 +104,8 @@ Current packages:
 - `aiosqlite>=0.18.0`
 - `sqlalchemy>=2.0.0`
 - `opentelemetry-exporter-otlp-proto-http>=1.28.0`
+- `httpx>=0.27.0`
+- `cryptography>=44.0.0`
 
 Current local dev command:
 
@@ -154,7 +158,10 @@ Why not Antigravity SDK as runtime:
 - Kitch needs a runtime framework inside the deployed app.
 - ADK better matches the desired production path and service abstractions.
 
-Provider tools such as Zepto sync remain in backend code, but they are not part of the `recipe_grocery_planner` topology.
+Provider mutations remain in deterministic backend services. The coordinator
+has only read-only provider-status tools; the recipe planner has no provider
+tools. A constrained Gemini catalog matcher may select an allowlisted candidate
+but has no MCP, credential, mutation, payment, or order access.
 
 ---
 
@@ -177,6 +184,9 @@ Current tables:
 - `grocery_cart_items`
 - `macro_diary`
 - `provider_checkout_drafts`
+- `provider_connections`
+- `provider_oauth_clients`
+- `provider_oauth_flows`
 
 State ownership:
 
@@ -187,8 +197,11 @@ State ownership:
 - `pantry_stock`: shared household pantry/fridge inventory.
 - `grocery_cart_items`: shared native grocery cart, optionally linked to a recipe+grocery artifact.
 - `macro_diary`: individual macro logs.
-- `provider_checkout_drafts`: durable provider cart mappings, availability
-  state, approval snapshots, repair history, and operation leases.
+- `provider_checkout_drafts`: environment-scoped mappings, confirmed cart,
+  provider bill, approval snapshot, payment/order outcome, repair history, and lease.
+- `provider_connections`: encrypted household provider token and lifecycle state.
+- `provider_oauth_clients`: environment-level dynamic OAuth client registration.
+- `provider_oauth_flows`: expiring one-time PKCE state and verifier records.
 
 Why Supabase:
 
@@ -209,7 +222,7 @@ Important implementation notes:
 
 Persistence contract:
 
-- RLS is enabled for all seven structured-data tables. `anon` and
+- RLS is enabled for every structured-data table. `anon` and
   `authenticated` have no CRUD or sequence access because the frontend uses
   FastAPI rather than direct Supabase access.
 - FastAPI uses a Supabase secret key (preferred) or temporary legacy
@@ -396,7 +409,7 @@ Why this is separate from ADK Web:
 
 ---
 
-## Zepto MCP Configuration
+## Grocery Provider Configuration
 
 Provider adapter location:
 
@@ -422,16 +435,18 @@ Default local OAuth bridge:
 npx -y mcp-remote https://mcp.zepto.co.in/mcp
 ```
 
-Current behavior:
+Shared behavior:
 
-- Kitch syncs selected native cart rows into Zepto only through backend provider endpoints.
-- The Groceries UI uses provider-neutral state and metadata. Zepto is the live
-  default provider; Blinkit is a disabled `Coming soon` placeholder.
+- Kitch syncs selected native rows only through provider-keyed FastAPI endpoints.
+- The Groceries UI fetches provider descriptors, routes, capabilities,
+  environments, and connection state from `ProviderRegistry`.
+- Zepto and Swiggy Instamart are active adapters. Blinkit is a disabled
+  `Coming soon` descriptor.
 - Checkout actions appear in one six-stage main-column sequence: collapsible
   native review, provider choice, delivery address, transfer, provider cart
   review, then payment and order. Sidebar cards contain the financial summary
   and cart-maintenance shortcuts.
-- The frontend loads saved Zepto addresses and requires the user to choose one before sync.
+- The frontend loads the selected provider's saved addresses and requires one before sync.
 - The frontend waits for pending native-cart writes before sync, then locks cart
   editing behind a modal, focus-retaining transfer animation until the provider
   request completes.
@@ -444,20 +459,20 @@ Current behavior:
   address requires a fresh sync.
 - Native-cart or provider-selection changes also invalidate the review so a
   stale snapshot cannot be ordered.
-- Existing Zepto cart is replaced before sync.
+- The complete selected-provider cart is replaced before sync.
 - Search matches require explicit sufficient availability and are counted as
   successful only after exact product/store ids and quantities appear in the
-  confirmed Zepto cart.
+  confirmed selected-provider cart.
 - Durable checkout drafts live in Supabase rather than backend process memory.
 - Drafts older than five minutes are revalidated on Groceries entry/focus.
-- `get_product_details` validates expected products; unavailable products are
+- Provider product-detail operations validate expected products; unavailable products are
   replaced through a new store-context search and the complete cart is rebuilt
   and reconciled. Unresolved rows block final ordering.
 - Final order placement repeats revalidation and returns `409` when any
   approved product, quantity, pack, price, or total changed.
 - Unavailable/unresolved items and replacement history are returned in the review.
-- The adapter normalizes provider-returned subtotal, discount, fee, and total
-  values into `cart_summary`. Zepto's final total always wins. When it is
+- Each adapter normalizes provider-returned subtotal, discount, fee, and total
+  values into `cart_summary`. The provider's final total always wins. When it is
   absent, the adapter can sum exact returned selling prices and cart quantities
   only if no fee, tax, discount, or other adjustment is present; otherwise the
   total stays null.
@@ -469,11 +484,47 @@ Current behavior:
 - Address labels are expanded with actual address text when Zepto exposes it.
 - Order placement requires final frontend approval.
 
-Why Zepto MCP is behind an adapter:
+Why provider MCP is behind adapters:
 
 - MCP auth, tool names, schemas, catalog fields, and order behavior are provider-controlled.
 - Kitch's native cart should remain provider-agnostic.
 - Defensive adapter code prevents provider details from leaking into agent tools.
+
+### Swiggy Instamart OAuth and MCP
+
+Instamart uses only Swiggy's `/im` MCP surface. The adapter discovers
+`tools/list`, allowlists grocery tools, and validates required input schemas;
+missing or incompatible capabilities mark Instamart degraded without making
+core Kitch readiness fail.
+
+| Variable | Purpose |
+| :--- | :--- |
+| `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | Fernet key for tokens and PKCE verifiers. |
+| `SWIGGY_INSTAMART_ENABLED` | Enable the Instamart adapter and provider card. |
+| `SWIGGY_INSTAMART_ENV` | `local`, `staging`, or `production`. |
+| `SWIGGY_INSTAMART_MCP_URL` | Instamart endpoint; must target `/im`. |
+| `SWIGGY_OAUTH_BASE_URL` | OAuth 2.1 and dynamic-registration origin. |
+| `SWIGGY_OAUTH_REDIRECT_URI` | Exact callback URI; HTTPS is mandatory in production. |
+| `SWIGGY_OAUTH_SCOPE` | Delegated scope, default `mcp:tools`. |
+| `SWIGGY_OAUTH_CLIENT_NAME` | Dynamic-registration client name. |
+| `SWIGGY_INSTAMART_PRODUCTION_APPROVED` | Explicit production approval gate. |
+| `FRONTEND_URL` | Redirect destination after callback. |
+
+One dynamic client registration is stored per environment and one encrypted
+connection per household/provider/environment. OAuth state is hashed,
+single-use, and expires after ten minutes; PKCE verifiers and access tokens are
+encrypted. Since Swiggy does not currently issue a usable refresh token, expiry
+or HTTP 401 changes the connection to `reconnect_required`.
+
+Instamart sync establishes address context, searches address-orderable SKUs,
+uses `spinId` and `skuId`, replaces the complete cart, calls `get_cart`, and
+reconciles every line. Provider bill components are authoritative. A line-item
+sum can be shown only as `Item subtotal`, never as payable total when adjustments
+are unknown. `get_payment_options` is the source of UPI apps and QR flow;
+opaque app IDs are passed through unchanged. UPI is exclusive when returned,
+and COD is allowed only if UPI is absent and Cash is returned. Checkout timeouts are reconciled through
+documented order history before any retry; unresolved duplicate risk is stored
+as `unknown`.
 
 ---
 
@@ -525,16 +576,19 @@ Why backend and frontend are not collapsed into one simple static deployment:
 
 - The backend needs Python, ADK, multimodal handling, MCP clients, and provider approval logic.
 - Agent turns and image requests can be longer-running than simple static/API edge functions.
-- A persistent backend process is easier to reason about while integrating Zepto MCP and later Vertex services.
+- A persistent backend process is easier to reason about while integrating provider MCP services and later Vertex services.
 
 ---
 
 ## Known Boundaries
 
 - Backend restarts clear in-memory sessions and memory.
-- Supabase must be migrated in every environment before relying on `recipe_grocery_plans` and `grocery_cart_items.recipe_grocery_plan_id`.
-- Zepto MCP auth/OAuth setup is external and must be completed before live sync works.
+- Supabase migrations, including `20260815_multi_provider_grocery_platform.sql`,
+  must be applied before starting FastAPI. That migration discards existing
+  provider drafts but preserves the native cart.
+- Provider auth and environment access must be completed before live sync works.
 - Blinkit live cart insertion is not implemented.
+- Instamart production remains gated until approval and the staging soak complete.
 - Auth and multi-household registration are deferred.
 - Local prototype members live in configuration.
 - Provider order placement is real and must remain behind explicit final approval.

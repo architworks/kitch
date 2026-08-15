@@ -65,42 +65,27 @@ const DEFAULT_MEAL_SLOT = "breakfast";
 const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
 const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
-const DEFAULT_ORDERING_PROVIDER = "zepto";
+const DEFAULT_ORDERING_PROVIDER = "";
 const PROVIDER_REVALIDATE_AFTER_MS = 5 * 60 * 1000;
-const ORDERING_PROVIDERS = [
-  {
-    id: "zepto",
-    label: "Zepto",
-    brandLabel: "zepto",
-    description: "Live cart sync, availability review, and guarded order placement.",
-    enabled: true,
-    theme: {
-      start: "#8c62d8",
-      end: "#573099"
-    },
+
+const withProviderRoutes = (provider) => {
+  const base = provider?.api_base;
+  if (!base) return { ...provider, routes: null };
+  return {
+    ...provider,
+    brandLabel: provider.brand_label || provider.label,
     routes: {
-      status: "/api/grocery/zepto/status",
-      addresses: "/api/grocery/zepto/addresses",
-      syncCart: "/api/grocery/zepto/sync-cart",
-      checkoutDraft: "/api/grocery/zepto/checkout-draft",
-      revalidateCart: "/api/grocery/zepto/revalidate-cart",
-      placeOrder: "/api/grocery/zepto/place-order"
+      addresses: `${base}/addresses`,
+      syncCart: `${base}/checkout/sync`,
+      checkoutDraft: `${base}/checkout`,
+      revalidateCart: `${base}/checkout/revalidate`,
+      placeOrder: `${base}/checkout/place-order`,
+      paymentStatus: `${base}/checkout/payment-status`,
+      connectionStart: `${base}/connection/start`,
+      connection: `${base}/connection`
     }
-  },
-  {
-    id: "blinkit",
-    label: "Blinkit",
-    brandLabel: "blinkit",
-    description: "A future ordering option for the same reviewed native cart.",
-    enabled: false,
-    badge: "Coming soon",
-    theme: {
-      start: "#f5c400",
-      end: "#148447"
-    },
-    routes: null
-  }
-];
+  };
+};
 
 class ApiResponseError extends Error {
   constructor(status, detail) {
@@ -713,6 +698,8 @@ export default function Home() {
   const [isChatTyping, setIsChatTyping] = useState(false);
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
+  const [orderingProviders, setOrderingProviders] = useState([]);
+  const [preferredOrderingProvider, setPreferredOrderingProvider] = useState("");
   const [selectedOrderingProvider, setSelectedOrderingProvider] = useState(DEFAULT_ORDERING_PROVIDER);
   const [isNativeCartExpanded, setIsNativeCartExpanded] = useState(false);
   const [providerCartReview, setProviderCartReview] = useState(null);
@@ -729,6 +716,7 @@ export default function Home() {
   const [providerSyncStage, setProviderSyncStage] = useState("idle");
   const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
+  const [isCheckingProviderPayment, setIsCheckingProviderPayment] = useState(false);
   const [isProviderOrderComplete, setIsProviderOrderComplete] = useState(false);
   const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
@@ -748,11 +736,21 @@ export default function Home() {
   const groceryMutationCountRef = useRef(0);
   const providerSyncInFlightRef = useRef(false);
   const providerDraftRestoreInFlightRef = useRef(false);
+  const providerSwitchRevalidationRef = useRef(false);
   const providerSyncTimersRef = useRef([]);
   const providerSyncDialogRef = useRef(null);
-  const selectedProvider = ORDERING_PROVIDERS.find(
-    provider => provider.id === selectedOrderingProvider
-  ) || ORDERING_PROVIDERS[0];
+  const selectedProvider = useMemo(() => (
+    orderingProviders.find(provider => provider.id === selectedOrderingProvider) || {
+      id: "",
+      label: "ordering provider",
+      brandLabel: "provider",
+      enabled: false,
+      state: "not_selected",
+      message: "Select an ordering provider to continue.",
+      capabilities: {},
+      routes: null
+    }
+  ), [orderingProviders, selectedOrderingProvider]);
 
   const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
     if (!review) {
@@ -803,6 +801,9 @@ export default function Home() {
       }
       if (data.profile.household_size) {
         setHouseholdSize(data.profile.household_size);
+      }
+      if (data.profile.preferred_grocery_provider) {
+        setPreferredOrderingProvider(data.profile.preferred_grocery_provider);
       }
     }
     if (data.meal_plan) {
@@ -859,28 +860,41 @@ export default function Home() {
     }
   }, []);
 
-  const syncProviderStatus = useCallback(async () => {
-    if (!selectedProvider.enabled || !selectedProvider.routes) return null;
+  const syncProviderRegistry = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.status));
+      const res = await fetch(apiUrl("/api/grocery/providers"));
       await requireSuccessfulResponse(res);
       const data = await res.json();
-      setProviderConnectionStatus(data);
-      return data;
+      const providers = (Array.isArray(data.providers) ? data.providers : []).map(withProviderRoutes);
+      setOrderingProviders(providers);
+      setProviderConnectionStatus(null);
+      const preferred = data.preferred_provider || preferredOrderingProvider;
+      setSelectedOrderingProvider(current => {
+        if (providers.some(provider => provider.id === current && provider.enabled)) return current;
+        if (providers.some(provider => provider.id === preferred && provider.enabled)) return preferred;
+        const connectedZepto = providers.find(provider => provider.id === "zepto" && provider.enabled && provider.state === "configured");
+        const connectedInstamart = providers.find(provider => provider.id === "swiggy_instamart" && provider.enabled && provider.state === "connected");
+        return connectedZepto?.id || connectedInstamart?.id || "";
+      });
+      return providers;
     } catch (e) {
-      console.error(`Failed to sync ${selectedProvider.label} status`, e);
-      const status = {
-        provider: selectedProvider.id,
+      console.error("Failed to load grocery provider registry", e);
+      setOrderingProviders([]);
+      setProviderConnectionStatus({
         state: "failed",
-        message: `Could not contact the backend ${selectedProvider.label} status endpoint.`
-      };
-      setProviderConnectionStatus(status);
-      return status;
+        message: "Could not load ordering providers from Kitch."
+      });
+      return [];
     }
-  }, [selectedProvider]);
+  }, [preferredOrderingProvider]);
 
   const syncProviderAddresses = useCallback(async () => {
     if (!selectedProvider.enabled || !selectedProvider.routes) return null;
+    if (selectedProvider.requires_connection && selectedProvider.state !== "connected") {
+      setProviderSavedAddresses(null);
+      setSelectedProviderAddress("");
+      return null;
+    }
     setIsProviderAddressLoading(true);
     setProviderAddressLoadError("");
     try {
@@ -948,11 +962,31 @@ export default function Home() {
   useEffect(() => {
     if (activeTab !== "groceries") return undefined;
     const timer = window.setTimeout(() => {
-      syncProviderStatus();
-      syncProviderAddresses();
+      syncProviderRegistry();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeTab, syncProviderAddresses, syncProviderStatus]);
+  }, [activeTab, syncProviderRegistry]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries" || !selectedProvider.id) return undefined;
+    const timer = window.setTimeout(() => syncProviderAddresses(), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, selectedProvider.id, selectedProvider.state, syncProviderAddresses]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connectedProvider = params.get("provider_connection");
+    if (!connectedProvider || params.get("connection_status") !== "connected") return;
+    window.history.replaceState({}, "", window.location.pathname);
+    const timer = window.setTimeout(() => {
+      setActiveTab("groceries");
+      setSelectedOrderingProvider(connectedProvider);
+      setPreferredOrderingProvider(connectedProvider);
+      setAlertBanner({ show: true, text: "The household grocery-provider connection is ready." });
+      syncProviderRegistry();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [syncProviderRegistry]);
 
   useEffect(() => {
     if (!isProviderSyncing) return undefined;
@@ -1280,7 +1314,7 @@ export default function Home() {
       providerSyncInFlightRef.current = false;
       setIsProviderSyncing(false);
       setProviderSyncStage("idle");
-      syncProviderStatus();
+      syncProviderRegistry();
     }
   };
 
@@ -1336,18 +1370,29 @@ export default function Home() {
       const data = await res.json();
       let review = data.draft || null;
       if (!review || !Array.isArray(review.native_items) || review.native_items.length === 0) {
+        providerSwitchRevalidationRef.current = false;
         return null;
       }
 
-      if (review.order_review_acknowledged) {
+      if (review.order_review_acknowledged || review.selected_payment_method_id) {
         const resetRes = await fetch(apiUrl(selectedProvider.routes.checkoutDraft), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ order_review_acknowledged: false })
+          body: JSON.stringify({
+            order_review_acknowledged: false,
+            selected_payment_method_id: null
+          })
         });
         await requireSuccessfulResponse(resetRes);
         review = (await resetRes.json()).draft || review;
       }
+      const requiresSwitchRevalidation = providerSwitchRevalidationRef.current;
+      providerSwitchRevalidationRef.current = false;
+      if (requiresSwitchRevalidation) {
+        await revalidateProviderCart({ announce: false });
+        return review;
+      }
+
       applyProviderDraft(review, { resetAcknowledgement: true });
 
       const validatedAt = Date.parse(review.last_validated_at || "");
@@ -1421,11 +1466,46 @@ export default function Home() {
     if (!provider.enabled || providerSyncInFlightRef.current) return;
     if (provider.id === selectedOrderingProvider) return;
     setSelectedOrderingProvider(provider.id);
+    providerSwitchRevalidationRef.current = true;
+    setPreferredOrderingProvider(provider.id);
     setProviderConnectionStatus(null);
     setProviderSavedAddresses(null);
     setProviderAddressLoadError("");
     setSelectedProviderAddress("");
     invalidateProviderReview();
+    fetch(apiUrl("/api/household/profile"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferred_grocery_provider: provider.id })
+    }).catch(error => console.error("Failed to remember ordering provider", error));
+  };
+
+  const startProviderConnection = async (provider) => {
+    if (!provider?.routes?.connectionStart || providerSyncInFlightRef.current) return;
+    try {
+      const res = await fetch(apiUrl(provider.routes.connectionStart), { method: "POST" });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      if (!data.authorization_url) throw new Error("The provider did not return an authorization URL.");
+      window.location.assign(data.authorization_url);
+    } catch (e) {
+      triggerBannerAlert(apiErrorMessage(e, `Could not connect ${provider.label}.`));
+    }
+  };
+
+  const disconnectProvider = async (provider) => {
+    if (!provider?.routes?.connection || providerSyncInFlightRef.current) return;
+    try {
+      const res = await fetch(apiUrl(provider.routes.connection), { method: "DELETE" });
+      await requireSuccessfulResponse(res);
+      invalidateProviderReview();
+      setProviderSavedAddresses(null);
+      setSelectedProviderAddress("");
+      await syncProviderRegistry();
+      triggerBannerAlert(`${provider.label} disconnected from this household.`);
+    } catch (e) {
+      triggerBannerAlert(apiErrorMessage(e, `Could not disconnect ${provider.label}.`));
+    }
   };
 
   const placeProviderOrder = async () => {
@@ -1482,6 +1562,39 @@ export default function Home() {
       setIsProviderSyncing(false);
       setProviderSyncStage("idle");
       setIsPlacingProviderOrder(false);
+    }
+  };
+
+  const checkProviderPaymentStatus = async () => {
+    if (!selectedProvider?.routes?.paymentStatus || providerSyncInFlightRef.current) return;
+    providerSyncInFlightRef.current = true;
+    setIsProviderSyncing(true);
+    setIsCheckingProviderPayment(true);
+    startProviderSyncProgress();
+    try {
+      const res = await fetch(apiUrl(selectedProvider.routes.paymentStatus), { method: "POST" });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      const review = data.review || data;
+      applyProviderDraft(review);
+      setIsProviderOrderComplete(review.status === "ordered");
+      clearProviderSyncTimers();
+      setProviderSyncStage("complete");
+      triggerBannerAlert(
+        review.status === "ordered"
+          ? `${selectedProvider.label} confirmed the payment and order.`
+          : `The ${selectedProvider.label} payment is still ${review.payment_state?.status || "pending"}.`
+      );
+    } catch (e) {
+      clearProviderSyncTimers();
+      setProviderSyncStage("failed");
+      triggerBannerAlert(apiErrorMessage(e, `Could not check the ${selectedProvider.label} payment status.`));
+    } finally {
+      clearProviderSyncTimers();
+      providerSyncInFlightRef.current = false;
+      setIsProviderSyncing(false);
+      setIsCheckingProviderPayment(false);
+      setProviderSyncStage("idle");
     }
   };
 
@@ -1838,7 +1951,9 @@ export default function Home() {
         minute: "2-digit"
       }).format(new Date(providerCartReview.last_validated_at))
     : "Not checked yet";
-  const providerCartDetails = providerCartReview?.zepto_cart || providerCartReview?.result?.zepto_cart || providerCartReview?.result || null;
+  const providerCartDetails = providerCartReview?.provider_cart || providerCartReview?.result?.provider_cart || providerCartReview?.result || null;
+  const providerStoreGroups = Array.isArray(providerCartDetails?.stores) ? providerCartDetails.stores : [];
+  const providerMultiStore = Boolean(providerCartDetails?.multi_store || providerStoreGroups.length > 1);
   const providerCartSummary = providerCartReview?.cart_summary || {
     currency: "INR",
     subtotal_minor: null,
@@ -1874,31 +1989,48 @@ export default function Home() {
   const selectedProviderAddressDisplay = selectedProviderAddressOption
     ? formatProviderAddressParts(selectedProviderAddressOption, `Selected ${selectedProvider.label} address`)
     : null;
-  const providerPaymentOptions = collectObjectsWithAnyKey(providerCheckoutContext.payment_methods, ["payment", "method", "payment_method", "id"]);
+  const providerPaymentOptions = collectObjectsWithAnyKey(
+    providerCartReview?.payment_options || providerCheckoutContext.payment_methods,
+    ["payment", "method", "payment_method", "id"]
+  );
+  const providerPaymentState = providerCartReview?.payment_state || {};
+  const providerPaymentPending = providerCartReview?.status === "payment_pending";
+  const providerOrderAmbiguous = providerCartReview?.status === "unknown" || providerCartReview?.ambiguous_order;
   const providerOrderBlockers = Array.isArray(providerCartReview?.order_blockers) ? providerCartReview.order_blockers : [];
   const nativeCartStageComplete = checkoutItems.length > 0;
-  const providerStageComplete = Boolean(selectedProvider.enabled);
-  const addressStageComplete = Boolean(selectedProviderAddress);
+  const providerStageComplete = Boolean(selectedProvider.id && selectedProvider.enabled);
+  const providerConnectionState = providerConnectionStatus?.state || selectedProvider.state || "unknown";
+  const providerConnectionReady = Boolean(
+    selectedProvider.id
+    && (selectedProvider.requires_connection
+      ? providerConnectionState === "connected"
+      : ["configured", "connected", "ready"].includes(providerConnectionState))
+  );
+  const addressStageComplete = providerConnectionReady && Boolean(selectedProviderAddress);
   const providerReviewConfirmed = ["success", "ready", "changed"].includes(providerReviewStatus)
     && providerMatchedItems.length > 0;
   const transferStageComplete = providerReviewConfirmed;
   const reviewStageComplete = transferStageComplete && providerReviewAcknowledged;
+  const providerOrderCompleted = isProviderOrderComplete || providerCartReview?.status === "ordered";
   const canPlaceProviderOrder = providerCartReview?.can_place_order
     && Boolean(providerCartReview?.confirmation_token)
     && Boolean(providerCartReview?.snapshot_hash)
     && Boolean(selectedProviderAddress)
     && providerOrderBlockers.length === 0
+    && Boolean(selectedProviderPaymentMethod)
     && providerReviewAcknowledged
     && !isUpdatingProviderReview;
-  const providerConnectionState = providerConnectionStatus?.state || "unknown";
   const providerStatusLabel = providerCartReview?.store_context?.state === "store_context_ready"
     ? `${selectedProvider.label} store ready`
     : providerSavedAddressOptions.length > 0
       ? `${selectedProvider.label} connected`
       : ({
     configured: `${selectedProvider.label} configured`,
+    connected: `${selectedProvider.label} connected`,
     browser_login_required: "Browser login required",
-    not_connected: "Not connected",
+    not_connected: `Connect ${selectedProvider.label}`,
+    reconnect_required: `Reconnect ${selectedProvider.label}`,
+    gated: `${selectedProvider.label} access gated`,
     disabled: "Disabled",
     failed: `${selectedProvider.label} sign-in needs attention`,
     unknown: `Checking ${selectedProvider.label} sign-in`
@@ -1911,8 +2043,11 @@ export default function Home() {
         : `Select a delivery address before moving items to ${selectedProvider.label}.`
       : ({
     configured: `Loading saved addresses to verify the ${selectedProvider.label} connection.`,
+    connected: `Select a saved delivery address before moving items to ${selectedProvider.label}.`,
     browser_login_required: `Sign in to ${selectedProvider.label} in the browser to continue.`,
-    not_connected: `Connect ${selectedProvider.label} before moving items to cart.`,
+    not_connected: `Authorize the household provider account before reading saved addresses.`,
+    reconnect_required: `The provider connection expired or was revoked. Reconnect before continuing.`,
+    gated: selectedProvider.message || `${selectedProvider.label} production access is not enabled.`,
     disabled: `${selectedProvider.label} cart sync is not enabled right now.`,
     failed: `Reconnect ${selectedProvider.label} and try again.`,
     unknown: `Checking whether ${selectedProvider.label} is ready.`
@@ -2066,12 +2201,16 @@ export default function Home() {
               <span className="provider-transfer-kicker">Secure cart handoff</span>
               <h2 id="provider-transfer-title">
                 {providerSyncStage === "complete"
-                  ? isPlacingProviderOrder
+                  ? isCheckingProviderPayment
+                    ? `${selectedProvider.label} payment status is updated`
+                    : isPlacingProviderOrder
                     ? `Your ${selectedProvider.label} checkout is confirmed`
                     : `Your ${selectedProvider.label} cart is ready`
                   : providerSyncStage === "failed"
-                    ? "The transfer needs attention"
-                    : isPlacingProviderOrder
+                    ? isCheckingProviderPayment ? "Payment status could not be read" : "The transfer needs attention"
+                    : isCheckingProviderPayment
+                      ? `Checking your ${selectedProvider.label} payment…`
+                      : isPlacingProviderOrder
                       ? `Checking ${selectedProvider.label} availability before ordering…`
                       : providerCartReview
                         ? `Refreshing your ${selectedProvider.label} cart…`
@@ -2082,7 +2221,9 @@ export default function Home() {
                   ? "The reviewed products and unavailable items are ready for you to inspect."
                   : providerSyncStage === "failed"
                     ? "Kitch could not complete the handoff. Your native cart was left unchanged."
-                    : isPlacingProviderOrder
+                    : isCheckingProviderPayment
+                      ? `Kitch is making one documented status check with ${selectedProvider.label}; it will not resubmit the order.`
+                      : isPlacingProviderOrder
                       ? `Kitch is confirming every approved product and quantity with ${selectedProvider.label} before placing the order.`
                       : providerCartReview
                         ? `We’ve paused cart editing while ${selectedProvider.label} checks availability and replaces stale products when necessary.`
@@ -3079,7 +3220,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="ordering-provider-grid" role="radiogroup" aria-label="Ordering app">
-                      {ORDERING_PROVIDERS.map(provider => {
+                      {orderingProviders.map(provider => {
                         const isSelected = provider.id === selectedOrderingProvider;
                         return (
                           <button
@@ -3095,12 +3236,25 @@ export default function Home() {
                             <span className="provider-option-copy">
                               <strong>{provider.label}</strong>
                               <small>{provider.description}</small>
+                              {provider.environment && <small>{provider.environment} environment</small>}
                             </span>
-                            <em>{provider.enabled ? (isSelected ? "Selected" : "Available") : provider.badge}</em>
+                            <em>{provider.enabled ? (isSelected ? "Selected" : provider.state === "connected" || provider.state === "configured" ? "Ready" : "Available") : provider.badge}</em>
                           </button>
                         );
                       })}
                     </div>
+                    {selectedProvider.requires_connection && (
+                      <div className="provider-connection-actions">
+                        <span>Powered by Swiggy</span>
+                        {providerConnectionState === "connected" ? (
+                          <button type="button" disabled={isProviderSyncing} onClick={() => disconnectProvider(selectedProvider)}>Disconnect household account</button>
+                        ) : (
+                          <button type="button" disabled={isProviderSyncing || selectedProvider.production_gated} onClick={() => startProviderConnection(selectedProvider)}>
+                            {providerConnectionState === "reconnect_required" ? "Reconnect Swiggy" : "Connect Swiggy"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </section>
 
                   <section className={`checkout-stage checkout-timeline-stage address-transfer-stage ${checkoutItems.length === 0 ? "locked" : ""}`}>
@@ -3108,15 +3262,33 @@ export default function Home() {
                     <div className="checkout-stage-heading">
                       <div>
                         <h2>Select delivery address</h2>
-                        <p>Choose the saved address that Zepto should use to establish the serviceable store.</p>
+                        <p>Choose the saved address that {selectedProvider.label} should use to establish its serviceable store context.</p>
                       </div>
                     </div>
-                    {checkoutItems.length === 0 ? (
+                    {!selectedProvider.id ? (
+                      <div className="checkout-locked-state">
+                        <span aria-hidden="true">⌑</span>
+                        <div><strong>Select an ordering provider</strong><p>Address selection depends on the provider chosen in stage 2.</p></div>
+                      </div>
+                    ) : checkoutItems.length === 0 ? (
                       <div className="checkout-locked-state">
                         <span aria-hidden="true">⌑</span>
                         <div>
                           <strong>Select at least one native-cart item</strong>
                           <p>Address selection unlocks after the native cart has an eligible selection.</p>
+                        </div>
+                      </div>
+                    ) : !providerConnectionReady ? (
+                      <div className="checkout-locked-state">
+                        <span aria-hidden="true">⌑</span>
+                        <div>
+                          <strong>{providerStatusLabel}</strong>
+                          <p>{providerStatusDescription}</p>
+                          {selectedProvider.requires_connection && !selectedProvider.production_gated && (
+                            <button type="button" onClick={() => startProviderConnection(selectedProvider)}>
+                              {providerConnectionState === "reconnect_required" ? "Reconnect provider" : "Connect provider"}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -3221,7 +3393,7 @@ export default function Home() {
 
                           {(providerReplacements.length > 0 || providerCartChanges.length > 0) && (
                             <div className="provider-cart-change-summary" role="status">
-                              <strong>Zepto cart changes require review</strong>
+                              <strong>{selectedProvider.label} cart changes require review</strong>
                               {providerReplacements.map((replacement, index) => {
                                 const nativeName = replacement.native_item?.name || "Selected item";
                                 const before = replacement.previous_product?.name || replacement.previous_product?.title || "previous product";
@@ -3283,7 +3455,7 @@ export default function Home() {
                   </section>
 
                   <section className={`checkout-stage checkout-timeline-stage provider-payment-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
-                    <span className={`checkout-stage-number ${isProviderOrderComplete ? "completed" : "pending"}`} aria-hidden="true">6</span>
+                    <span className={`checkout-stage-number ${providerOrderCompleted ? "completed" : "pending"}`} aria-hidden="true">6</span>
                     <div className="checkout-stage-heading">
                       <div>
                         <h2>Payment and order</h2>
@@ -3300,6 +3472,34 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="provider-payment-grid">
+                        {(providerPaymentPending || providerOrderAmbiguous || providerOrderCompleted) && (
+                          <div className="provider-blocker-list" role="status">
+                            <strong>
+                              {providerOrderCompleted
+                                ? "Order confirmed"
+                                : providerOrderAmbiguous
+                                  ? "Order outcome needs verification"
+                                  : "Payment pending"}
+                            </strong>
+                            <span>
+                              {providerOrderCompleted
+                                ? `${selectedProvider.label} confirmed this order.`
+                                : providerOrderAmbiguous
+                                  ? `Kitch will not resubmit this checkout. Verify it in ${selectedProvider.label} before taking another action.`
+                                  : `Payment is ${providerPaymentState.status || "pending"}. Do not place the order again.`}
+                            </span>
+                            {providerPaymentPending && selectedProvider.capabilities?.payment_status && (
+                              <button
+                                type="button"
+                                className="soft-action-btn"
+                                onClick={checkProviderPaymentStatus}
+                                disabled={isCheckingProviderPayment || isPlacingProviderOrder}
+                              >
+                                {isCheckingProviderPayment ? "Checking…" : "Check payment status once"}
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="provider-checkout-address">
                           <span>Delivery address</span>
                           {selectedProviderAddressDisplay ? (
@@ -3326,7 +3526,7 @@ export default function Home() {
                                   updateProviderReview({ selected_payment_method_id: value || null });
                                 }}
                               >
-                                <option value="">Use {selectedProvider.label} default</option>
+                                <option value="">Select payment method</option>
                                 {providerPaymentOptions.map((option, idx) => {
                                   const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${idx}`);
                                   const label = optionValue(option, ["label", "name", "payment_method", "paymentMethod", "method", "title"], JSON.stringify(option).slice(0, 90));
@@ -3335,7 +3535,7 @@ export default function Home() {
                               </select>
                             </label>
                           ) : (
-                            <p>{selectedProvider.label} did not expose selectable payment options. The current account default will be used if you approve the order.</p>
+                            <p>{selectedProvider.label} did not return a supported payment method, so order placement remains blocked.</p>
                           )}
                         </div>
 
@@ -3350,8 +3550,15 @@ export default function Home() {
                               updateProviderReview({ order_review_acknowledged: checked });
                             }}
                           />
-                          I reviewed the exact {selectedProvider.label} cart, total, delivery address, payment state, and unavailable items.
+                          I reviewed the exact {selectedProvider.label} cart, total, delivery address, payment state, unavailable items{providerMultiStore ? ", and multi-store fulfillment" : ""}.
                         </label>
+
+                        {providerMultiStore && (
+                          <div className="provider-blocker-list">
+                            <strong>Multi-store fulfillment</strong>
+                            <span>{selectedProvider.label} split this cart across {providerStoreGroups.length || "multiple"} stores. Review every item and the complete provider bill before approval.</span>
+                          </div>
+                        )}
 
                         {providerOrderBlockers.length > 0 && (
                           <div className="provider-blocker-list">

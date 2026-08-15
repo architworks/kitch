@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from typing import Iterator
 
 
 _OTEL_ENDPOINT_ENV_KEYS = (
@@ -104,3 +106,26 @@ def configure_adk_tracing() -> bool:
             raise RuntimeError(message) from exc
         print(message)
         return False
+
+
+@contextmanager
+def provider_operation_span(
+    provider: str,
+    environment: str,
+    operation: str,
+) -> Iterator[object]:
+    """Trace safe provider metadata without tokens, addresses, or payloads."""
+    try:
+        from opentelemetry import trace
+
+        with trace.get_tracer("kitch.providers").start_as_current_span(
+            "grocery_provider.operation",
+            attributes={
+                "grocery.provider": provider,
+                "deployment.environment": environment,
+                "grocery.operation": operation,
+            },
+        ) as span:
+            yield span
+    except ImportError:
+        yield object()

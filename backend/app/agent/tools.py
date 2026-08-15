@@ -21,7 +21,9 @@ from app.supabase_client import (
     get_recipe_grocery_plan as db_get_recipe_grocery_plan,
     list_recipe_grocery_plans as db_list_recipe_grocery_plans,
 )
-from app.providers.zepto import ZeptoProviderAdapter
+from app.checkout_drafts import draft_row_to_review
+from app.providers.registry import provider_registry
+from app.supabase_client import get_provider_checkout_draft
 
 # --- Safety Parsing Helper ---
 def _ensure_dict(val):
@@ -308,39 +310,28 @@ async def search_household_food_preferences_tool(query: str, tool_context: ToolC
   except Exception as e:
     return {"status": "error", "message": f"Failed to search household food preferences: {str(e)}", "preferences": []}
 
-async def sync_native_cart_to_zepto_tool(
-    selected_address_id: str = "",
-    tool_context: ToolContext = None,
-) -> Dict[str, Any]:
-  """
-  Replace the user's Zepto cart with unchecked, non-stocked items from Kitch's
-  native household grocery cart after establishing store context from a saved
-  delivery address. This does not place an order.
-  """
-  cart_items = [
-    item for item in db_get_grocery_cart()
-    if not item.get("checked") and not item.get("alreadyStocked")
-  ]
-  mapped_items = await _apply_brand_memory_to_items(cart_items, tool_context)
-  return await ZeptoProviderAdapter().sync_cart(
-    mapped_items,
-    selected_address_id=selected_address_id,
-  )
+def list_grocery_providers_tool() -> Dict[str, Any]:
+  """Read provider availability without exposing credentials or mutation tools."""
+  return {"status": "success", "providers": provider_registry.descriptors()}
 
-async def get_zepto_cart_tool() -> Dict[str, Any]:
-  """
-  Fetch the current Zepto cart through the configured Zepto MCP connection.
-  """
-  return await ZeptoProviderAdapter().get_cart()
 
-async def place_zepto_order_tool(confirmation_token: str = "") -> Dict[str, Any]:
-  """
-  Agents cannot place real Zepto orders from chat. The backend HTTP endpoint
-  owns final approval token validation after the frontend approval button.
-  """
+def get_grocery_checkout_status_tool(provider: str) -> Dict[str, Any]:
+  """Read a sanitized durable checkout status for the requested provider."""
+  descriptor = provider_registry.descriptor(provider)
+  if provider not in {"zepto", "swiggy_instamart"}:
+    return {"status": "unavailable", "provider": provider}
+  row = get_provider_checkout_draft(provider, str(descriptor["environment"]))
+  review = draft_row_to_review(row)
+  if not review or not review.get("native_items"):
+    return {"status": "empty", "provider": provider}
   return {
-    "status": "error",
-    "message": "Final frontend approval is required before placing a real Zepto order. Use the Zepto review button in the app."
+    "status": review.get("status"),
+    "provider": provider,
+    "last_validated_at": review.get("last_validated_at"),
+    "matched_item_count": len(review.get("matched_items") or []),
+    "unavailable_item_count": len(review.get("unavailable_items") or []),
+    "can_place_order": bool(review.get("can_place_order")),
+    "order_blockers": review.get("order_blockers") or [],
   }
 
 def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:
@@ -495,79 +486,3 @@ async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: 
     print(f"*** set_brand_preference failed with: {e} ***")
     traceback.print_exc()
     return {"status": "error", "message": f"Failed to set brand preference in memory: {str(e)}"}
-
-# --- Section 4: Grocery List Delivery Exporter ---
-async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_context: ToolContext = None) -> str:
-  """
-  Decoupled Checkout Exporter: Translates generic required ingredients in your grocery list
-  into your favored branded products from the shared factual memory service, then returns
-  a provider-shaped payload preview. Live merchant cart insertion is intentionally deferred.
-  """
-  print(f"*** export_to_delivery called with items={items}, provider='{provider}' ***")
-  provider_clean = provider.lower().strip()
-  if provider_clean not in ["blinkit", "zepto"]:
-    raise ValueError(f"Merchant provider: {provider} is currently unsupported.")
-  
-  to_buy = [i for i in items if not i.get("checked") and not i.get("alreadyStocked")]
-  payload = []
-  
-  # Resolve memory service
-  mem_svc = None
-  if tool_context:
-    if hasattr(tool_context, "get_invocation_context"):
-      try:
-        mem_svc = tool_context.get_invocation_context().memory_service
-      except Exception:
-        pass
-    elif hasattr(tool_context, "_invocation_context"):
-      try:
-        mem_svc = tool_context._invocation_context.memory_service
-      except Exception:
-        pass
-        
-  if not mem_svc:
-    try:
-      from app.agent.core import memory_service as fallback_mem_svc
-      mem_svc = fallback_mem_svc
-    except ImportError:
-      pass
-  
-  for item in to_buy:
-    item_name = item.get("name") or item.get("item")
-    amount = item.get("amount", item.get("quantity", item.get("qty", 1)))
-    unit = item.get("unit", "piece")
-
-    if not item_name:
-      continue
-
-    name_clean = str(item_name).lower().strip()
-    branded_name = str(item_name).strip()
-    
-    # Query shared household memory natively for brand preferences
-    if mem_svc:
-      memory_result = await mem_svc.search_memory(
-          app_name="kitch",
-          user_id="shared_household",
-          query=f"preferred brand for {name_clean}"
-      )
-      if memory_result.memories:
-        # Resolve the top matched text part as our brand replacement
-        text_match = memory_result.memories[0].content.parts[0].text
-        # Safety check: ensure it matches a brand phrasing
-        if text_match and len(text_match) < 100:
-          if ":" in text_match:
-            branded_name = text_match.split(":", 1)[1].strip()
-          else:
-            branded_name = text_match
-          
-    payload.append({
-      "name": branded_name,
-      "qty": amount,
-      "unit": unit
-    })
-    
-  return (
-    f"Prepared {len(payload)} legacy {provider_clean.capitalize()} preview items with ADK native brand memory active. "
-    f"This preview tool does not modify provider carts. For live Zepto cart sync, use sync_native_cart_to_zepto_tool. "
-    f"Mapped items: {payload}"
-  )
