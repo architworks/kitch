@@ -21,8 +21,8 @@ Kitch uses a Google ADK 2.0 hub-and-spoke topology:
 - Python tools for deterministic side effects.
 - Supabase for structured app state.
 - ADK memory for flexible household preferences.
-- A deterministic multi-provider commerce layer for Zepto and Swiggy Instamart.
-- One constrained Gemini catalog-matching specialist outside the chat graph.
+- A provider-neutral commerce layer with separate Zepto adapter behavior.
+- One dedicated Gemini Instamart cart agent with a guarded `/im` MCP toolset.
 
 ```mermaid
 flowchart TD
@@ -98,13 +98,17 @@ flowchart TD
     GetDatetime --> RuntimeContext[Runtime datetime context]
 
     API --> Checkout[GroceryCheckoutService]
-    Checkout --> Matcher[provider_catalog_matcher]
+    Checkout --> InstamartAgent[instamart_cart_agent]
+    InstamartAgent --> CommercePolicy[CommerceToolPolicy]
     Checkout --> ProviderAdapters[Backend Provider Adapters]
     ProviderAdapters --> Zepto[Zepto MCP]
     ProviderAdapters --> Instamart[Swiggy Instamart /im MCP]
 ```
 
-Provider sync is intentionally outside the `recipe_grocery_planner`. The agent owns native recipe+grocery planning. The backend owns provider cart sync and order approval boundaries.
+Provider sync is intentionally outside the `recipe_grocery_planner`. The
+dedicated Instamart cart agent handles provider product reasoning only after an
+explicit sync request. The backend owns authority, durable review, payment, and
+order approval boundaries.
 
 ---
 
@@ -327,23 +331,36 @@ Current backend-owned provider behavior:
 - A real order requires a provider-returned payment method, explicit frontend
   acknowledgement, and one unchanged final provider check.
 
-`provider_catalog_matcher` is a constrained internal Gemini specialist, not an
-ADK sub-agent with tools. Its input contains only one native item, household
-dietary constraints, and normalized orderable candidates. Its output is an
-allowlisted candidate ID, confidence, and substitution reasoning. Deterministic
-code rejects invented IDs, low confidence, insufficient quantities, unsafe
-pack substitutions, and ambiguous results. The matcher never sees credentials,
-calls MCP, mutates carts, selects payment, or orders.
+`instamart_cart_agent` is a dedicated Gemini ADK agent with Swiggy's native MCP
+tools: `get_addresses`, `search_products`, `your_go_to_items`, `update_cart`,
+and `get_cart`. It reads the backend-scoped native selection, searches explicit
+process-local ordering preferences, treats Swiggy history as weaker evidence,
+interprets pack and quantity descriptions semantically, and automatically
+chooses the best reasonable orderable match. Multiple brands or pack sizes are
+normal search results, not grounds for rejection.
 
-Why provider behavior is outside the agent topology:
+The agent updates the complete Instamart cart once and may repair it once after
+reading the confirmed cart. An after-tool callback captures the exact MCP
+results. Durable product, price, quantity, and bill state comes from the final
+`get_cart`, while the model contributes persisted match reasoning, preference
+source, quantity coverage, excess, alternatives, and confidence.
+
+`CommerceToolPolicy` carries server-owned `read`, `cart_write`, and `checkout`
+authority in request context unavailable to the model. The agent toolset omits
+checkout entirely. Middleware independently denies checkout from chat, sync,
+and revalidation, denies unknown mutating tools, and allows checkout only from
+the UI place-order endpoint after the durable snapshot checks pass.
+
+Why checkout remains outside the agent topology:
 
 - Provider tools can modify real external carts and place real orders.
 - Product safety requires explicit approval boundaries.
 - Provider responses include operational details that should be reviewed by the user, not hidden inside an agent turn.
 
-The coordinator receives only read-only provider-registry and checkout-status
-tools. It may guide a user to the Groceries workflow, but cannot claim a sync or
-order succeeded without confirmed backend state.
+The coordinator receives read-only provider status plus one explicit
+`sync_instamart_cart_tool`. That tool invokes the same guarded service used by
+the Groceries UI and returns an `UPDATE_PROVIDER_CART` action only after a
+confirmed draft exists. It has no order capability.
 
 ---
 
@@ -588,9 +605,10 @@ Provider tools/adapters:
 
 - `list_grocery_providers_tool` and `get_grocery_checkout_status_tool` are
   read-only coordinator tools.
-- Provider address, search, cart, payment, and checkout mutations exist only in
-  backend services and adapters.
-- No agent tool can mutate a provider cart or place an order.
+- `sync_instamart_cart_tool` authorizes only reversible Instamart cart writes
+  after an explicit chat instruction.
+- The dedicated cart agent can search and update Instamart, but no agent can
+  select payment or place an order.
 
 Why:
 

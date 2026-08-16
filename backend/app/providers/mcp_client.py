@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any, AsyncIterator, Dict
 
 from app.telemetry import provider_operation_span
+from app.commerce_policy import CommerceToolPolicy
 
 
 def to_plain(value: Any) -> Any:
@@ -65,6 +66,7 @@ class McpProviderClient:
         name: str,
         arguments: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        CommerceToolPolicy.authorize(name)
         with provider_operation_span(self.provider_id, self.environment, name):
             return to_plain(await session.call_tool(name, arguments or {}))
 

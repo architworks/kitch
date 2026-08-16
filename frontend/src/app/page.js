@@ -1750,6 +1750,10 @@ export default function Home() {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
         } else if (act.type === "UPDATE_GROCERY_CART") {
           triggerBannerAlert("Grocery cart updated by Kitch Agent!");
+        } else if (act.type === "UPDATE_PROVIDER_CART") {
+          setSelectedOrderingProvider(act.provider || "swiggy_instamart");
+          setActiveTab("groceries");
+          triggerBannerAlert("Instamart cart prepared. Review the confirmed products before checkout.");
         }
       }
     } catch (e) {
@@ -3542,6 +3546,23 @@ export default function Home() {
                                       <div className="provider-product-main">
                                         <strong>{productName}</strong>
                                         <span>{native.name ? `From Kitch item: ${native.name}` : `Added to ${selectedProvider.label} cart`}</span>
+                                        {selectedProvider.id === "swiggy_instamart" && match.matching && (
+                                          <div className="provider-agent-match-details">
+                                            <span>
+                                              Requested {match.matching.requested_quantity ?? native.amount ?? "—"} {match.matching.requested_unit || native.unit || ""}
+                                              {match.matching.fulfilled_quantity != null && ` · fulfils ${match.matching.fulfilled_quantity}`}
+                                              {Number(match.matching.excess_quantity || 0) > 0 && ` · ${match.matching.excess_quantity} excess`}
+                                            </span>
+                                            <span>
+                                              Preference: {match.matching.preference_source === "explicit"
+                                                ? "household preference"
+                                                : match.matching.preference_source === "history"
+                                                  ? "Swiggy history"
+                                                  : "none"}
+                                            </span>
+                                            {match.matching.reason && <small>{match.matching.reason}</small>}
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                     <strong className="provider-line-price" role="cell">{formatMinorCurrency(priceMinor, providerCurrency) || "Unavailable"}</strong>

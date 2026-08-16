@@ -40,7 +40,8 @@ flowchart LR
     Runner --> Sessions[ADK Sessions]
 
     API --> Checkout[GroceryCheckoutService]
-    Checkout --> Matcher[Guarded Gemini catalog matcher]
+    Checkout --> InstamartAgent[Gemini Instamart cart agent]
+    InstamartAgent --> ToolPolicy[Commerce tool policy]
     Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
     Checkout --> InstamartAdapter[InstamartProviderAdapter]
     ZeptoAdapter --> ZeptoMCP[Zepto MCP]
@@ -291,11 +292,12 @@ sequenceDiagram
     UI->>API: POST .../{provider}/checkout/sync + address id
     API->>Service: sync native snapshot
     Service->>DB: Read cart; acquire provider/environment lease
-    Service->>Adapter: establish address and sync selected rows
-    Adapter->>MCP: Address-scoped search
-    Adapter->>MCP: Replace complete provider cart
-    Adapter->>MCP: Read provider cart
-    Adapter-->>API: Cart result + unavailable rows + normalized totals
+    Service->>Agent: Run Instamart cart agent for explicit Instamart sync
+    Agent->>MCP: Address-scoped iterative search + ordering history
+    Agent->>MCP: Replace complete provider cart
+    Agent->>MCP: Read provider cart and repair once if needed
+    Agent-->>Service: Match reasoning + captured exact MCP results
+    Service-->>API: Confirmed cart + unavailable rows + normalized totals
     Service->>DB: Save durable draft + bill + mappings + token
     API-->>UI: Confirmed checkout draft
     UI->>UI: Close dialog; unlock edits; show review
@@ -326,9 +328,13 @@ Important rules:
   unit, add, delete, clear, address, and quick-action controls. A modal progress
   dialog retains focus until the request succeeds or fails.
 - Product search cannot start until the selected provider confirms the address/store context.
-- Search results do not count as cart success. The adapter must confirm exact
+- Search results do not count as cart success. The backend must confirm exact
   provider identifiers and quantities in the returned provider cart.
-- Missing or ambiguous availability is unverified and cannot unlock ordering.
+- Multiple brands and pack sizes are normal Instamart results. Gemini chooses
+  the best reasonable orderable option using explicit household ordering
+  preferences, semantic quantity coverage, minimum excess, Swiggy history,
+  total price, and fewer packs. An item is unresolved only when no acceptable
+  confirmed product exists.
 - A review is locked to the address/store context used during product resolution.
 - Changing the native cart, selection, provider, or address invalidates the
   current review and requires a new cart sync.
@@ -360,11 +366,18 @@ Important rules:
 - Actual address labels are shown when the selected provider exposes them.
 - The UI distinguishes enabled, connected, reconnect-required, degraded,
   production-gated, and address/store-ready states.
-- Instamart uses only `/im`, discovers tool schemas, and becomes degraded when
-  required capabilities are missing or incompatible.
-- Instamart calls `get_payment_options` for the fresh cart. UPI is exclusive
-  when returned; its opaque app ID is echoed unchanged, or the documented QR
-  flag is used. COD is offered only when UPI is absent and Cash is returned.
+- Instamart uses only `/im`. Its dedicated agent receives only
+  `get_addresses`, `search_products`, `your_go_to_items`, `update_cart`, and
+  `get_cart`; checkout and other mutations are absent.
+- `CommerceToolPolicy` uses server-owned request authority. Cart writes are
+  allowed only for explicit UI/chat sync, refresh, or order preflight.
+  Checkout is independently allowed only for the UI place-order endpoint.
+- Exact MCP update/read results are captured after tool calls. Durable cart and
+  bill state never comes from the model's textual reconstruction.
+- Instamart displays only payment methods returned by the fresh confirmed cart
+  or provider payment capability. UPI is exclusive when returned; its opaque
+  app ID is echoed unchanged, or the documented QR flag is used. COD is offered
+  only when UPI is absent and Cash is returned.
 - When Instamart returns exactly one supported payment method, Kitch records it
   automatically and presents it as a fixed checkout detail. Multiple Instamart
   methods still require a choice. Zepto retains its independent multi-option

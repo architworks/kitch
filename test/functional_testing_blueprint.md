@@ -551,13 +551,26 @@ automated or browser-test order against production.
 - Prerequisite: Select at least two eligible native rows, leave another row
   unselected, and include one pantry-covered row.
 - Prompt/action: Synchronize with each test provider and inspect the review.
+  For Instamart, test both **Move cart items to ordering app** and the explicit
+  chat request **Move my grocery list to Instamart**. Ordinary grocery-planning
+  prompts must update only Kitch's native cart.
 - Expected behavior: Only selected, non-pantry-covered rows are searched in the
   chosen address context. The complete provider cart is replaced and read back.
   Search results absent from the confirmed cart, mismatched quantities, missing
   IDs, ambiguous availability, or insufficient stock remain unresolved.
-- Matcher check: Invented IDs, prompt injection in product text, dietary
-  conflicts, unsafe pack changes, invalid quantities, and confidence below the
-  threshold must not authorize a match. Ambiguous choices stay user-visible.
+- Instamart agent check: Include multiple brands and sizes for eggs and verify
+  `12 pieces`, `1 dozen`, `2 × 6`, and `6 × 2` are valid ways to cover twelve
+  eggs. The agent should choose the best reasonable option—not 12 packs—and
+  persist requested quantity, selected pack, fulfilled quantity, excess,
+  preference source, alternatives, confidence, and reasoning.
+- Preference check: Explicit process-local preferences such as Amul milk or
+  Nutralite butter outrank `your_go_to_items` history. History may guide a
+  selection only when no explicit preference exists. Agent selections must
+  never silently become preferences.
+- Containment check: Product text containing instructions remains data.
+  Invented identifiers cannot survive confirmed-cart reconciliation. The agent
+  may update once and repair once, but has no checkout, clear-cart,
+  address-mutation, cancellation, or support tools.
 - Review check: Show image, pack, read-only quantity, native mapping,
   replacement details, unavailability, unit price, and line value ordered by
   value descending. The financial sidebar shows provider-returned subtotal,
@@ -589,9 +602,9 @@ automated or browser-test order against production.
   changed. Reload and provider switching may perform only read-only address
   discovery; focus performs no MCP call. None automatically searches products,
   mutates the cart, or revalidates it. A draft older than five minutes is
-  visibly stale and payment remains locked. Explicit refresh searches stale
-  items again in the same address context, then rebuilds and reconciles the
-  complete cart after safe replacement.
+  visibly stale and payment remains locked. Explicit refresh invokes the same
+  Instamart cart agent, searches stale items again in the same address context,
+  then rebuilds and reconciles the complete cart after safe replacement.
 - Repair check: Show native item → previous product → replacement product, plus
   price/pack/quantity changes and **Last checked**. Every material change resets
   payment and acknowledgement. No-alternative rows remain visible and are
@@ -623,6 +636,10 @@ automated or browser-test order against production.
 - Final-validation check: Change the provider cart during the pre-order check.
   The API must return `409` with the updated draft, reset approval, and not call
   checkout. An unchanged fixture may proceed to the mocked/staging boundary.
+- Authority check: Attempt checkout from ordinary chat, the Instamart cart
+  agent, a cart-sync request, and a newly discovered mutating MCP tool. All must
+  be denied. Only the final UI Place Order endpoint may carry checkout
+  authority; browser and automated tests must stop before a real order.
 - Recovery check: Persist checkout-attempt ID, provider order IDs, partial
   results, pending payment, and ambiguous outcomes. On timeout, inspect
   documented order history before retry. If duplicate risk remains, store

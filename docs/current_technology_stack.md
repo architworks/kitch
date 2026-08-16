@@ -158,10 +158,11 @@ Why not Antigravity SDK as runtime:
 - Kitch needs a runtime framework inside the deployed app.
 - ADK better matches the desired production path and service abstractions.
 
-Provider mutations remain in deterministic backend services. The coordinator
-has only read-only provider-status tools; the recipe planner has no provider
-tools. A constrained Gemini catalog matcher may select an allowlisted candidate
-but has no MCP, credential, mutation, payment, or order access.
+Instamart matching and reversible cart preparation run in a dedicated Gemini
+ADK agent with a five-tool `/im` MCP allowlist. The coordinator may invoke it
+only for an explicit Instamart sync request; the recipe planner still owns only
+the native cart. Server-owned middleware authorizes cart writes per request and
+keeps payment selection and checkout outside every agent toolset.
 
 ---
 
@@ -524,9 +525,12 @@ single-use, and expires after ten minutes; PKCE verifiers and access tokens are
 encrypted. Since Swiggy does not currently issue a usable refresh token, expiry
 or HTTP 401 changes the connection to `reconnect_required`.
 
-Instamart sync establishes address context, searches address-orderable SKUs,
-uses `spinId` and `skuId`, replaces the complete cart, calls `get_cart`, and
-reconciles every line. Provider bill components are authoritative. A line-item
+Instamart sync runs `instamart_cart_agent`, which establishes address context,
+uses explicit ordering preferences and weaker `your_go_to_items` history,
+searches and reformulates as needed, reasons about real-world packs, uses
+`spinId` and `skuId`, replaces the complete cart, and calls `get_cart`. Exact
+tool results are captured outside model text and structurally reconciled before
+persistence. Provider bill components are authoritative. A line-item
 sum can be shown only as `Item subtotal`, never as payable total when adjustments
 are unknown. `get_payment_options` is the source of UPI apps and QR flow;
 opaque app IDs are passed through unchanged. UPI is exclusive when returned,
@@ -591,9 +595,10 @@ Why backend and frontend are not collapsed into one simple static deployment:
 ## Known Boundaries
 
 - Backend restarts clear in-memory sessions and memory.
-- Supabase migrations, including `20260815_multi_provider_grocery_platform.sql`,
-  must be applied before starting FastAPI. That migration discards existing
-  provider drafts but preserves the native cart.
+- Supabase migrations, including `20260815_multi_provider_grocery_platform.sql`
+  and `20260816_agent_driven_instamart_cart.sql`, must be applied before
+  starting FastAPI. The latter discards only pre-agent Instamart drafts and
+  preserves the native cart.
 - Provider auth and environment access must be completed before live sync works.
 - Blinkit live cart insertion is not implemented.
 - Instamart production remains gated until approval and the staging soak complete.

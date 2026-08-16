@@ -67,11 +67,57 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             "last_validated_at": "2026-08-15T00:00:00+00:00",
         }
 
-    def service(self, adapter):
+    def service(self, adapter, instamart_agent=None):
         return GroceryCheckoutService(
             registry=FakeRegistry(adapter),
             cart_mapper=AsyncMock(side_effect=lambda items: items),
+            instamart_agent=instamart_agent,
         )
+
+    async def test_instamart_sync_uses_cart_agent_and_persists_confirmed_result(self):
+        native_item = self.draft_row()["native_items"][0]
+        capture = SimpleNamespace(marker="captured")
+        agent = SimpleNamespace(synchronize=AsyncMock(return_value=SimpleNamespace(
+            capture=capture,
+            final_text="confirmed",
+        )))
+        result = {
+            "status": "success",
+            "items": [{"native_item": native_item}],
+            "unavailable_items": [],
+            "cart_summary": {"total_minor": 9900},
+            "store_context": {"status": "ready"},
+            "payment_options": [{"id": "Cash", "kind": "cod"}],
+        }
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="staging", label="Swiggy Instamart"),
+            confirmed_agent_result=lambda items, address, received_capture: result,
+            enrich_agent_result_with_payment=AsyncMock(side_effect=lambda value: value),
+        )
+        service = self.service(adapter, agent)
+        saved_review = {"review_id": "draft-agent", "matched_items": result["items"]}
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_grocery_cart", return_value=[native_item]),
+            patch("app.grocery_checkout.save_initial_draft", return_value=saved_review) as save_draft,
+        ):
+            response = await service.sync(
+                "swiggy_instamart",
+                {
+                    "cart_item_ids": ["1"],
+                    "selected_address_id": "home-1",
+                    "user_instruction": "Move my cart to Instamart",
+                },
+                authority_source="chat_sync",
+            )
+        self.assertEqual(response["review"]["review_id"], "draft-agent")
+        agent.synchronize.assert_awaited_once()
+        call = agent.synchronize.await_args.kwargs
+        self.assertEqual(call["source"], "chat_sync")
+        self.assertEqual(call["native_items"], [native_item])
+        self.assertEqual(call["selected_address_id"], "home-1")
+        save_draft.assert_called_once()
 
     async def test_order_time_change_stops_before_provider_checkout(self):
         row = self.draft_row()

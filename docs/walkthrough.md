@@ -77,7 +77,7 @@ flowchart TD
     3. It calls `get_pantry_stock_tool` before grocery planning.
     4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
     5. For grocery requests it transactionally saves the artifact and replaces agent-generated `grocery_cart_items`, preserving manual rows. If either part fails, neither new change is committed.
-*   **Provider Boundary**: External-cart translation is not part of the recipe+grocery agent. The Groceries page fetches Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the backend. A shared checkout service owns synchronization, durable revalidation, payment approval, and ordering; a constrained Gemini matcher can only select allowlisted catalog candidates.
+*   **Provider Boundary**: External-cart translation is not part of the recipe+grocery agent. The Groceries page fetches Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the backend. A dedicated Gemini Instamart cart agent may search and prepare the reversible cart after an explicit UI or chat request. A shared checkout service and server-owned commerce policy retain durable revalidation, payment approval, and UI-only ordering authority.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: `/api/state/{user_name}` returns the authoritative current calendar week and next chronological meal, while `/api/meal-plan` loads navigated weeks.

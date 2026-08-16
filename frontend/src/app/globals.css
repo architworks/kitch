@@ -4681,6 +4681,26 @@ button {
   font-weight: 600;
 }
 
+.provider-agent-match-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.provider-agent-match-details span,
+.provider-agent-match-details small {
+  color: #66705f;
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.provider-agent-match-details small {
+  flex-basis: 100%;
+  color: #4d5949;
+}
+
 .provider-line-price,
 .provider-line-subtotal {
   color: var(--ink);

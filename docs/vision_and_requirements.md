@@ -181,7 +181,7 @@ The floating chat input is the primary mode of interaction. It supports:
 
 | ID | Requirement | Why |
 | :--- | :--- | :--- |
-| REQ-040 | Keep provider sync behind backend adapters. | Provider APIs/MCP tools are external systems and should not leak into recipe/grocery planning. |
+| REQ-040 | Keep provider sync behind the backend commerce service. Instamart uses a dedicated MCP cart agent; recipe/grocery planning never receives provider tools. | Provider reasoning can be agentic without coupling native grocery planning to an external cart. |
 | REQ-041 | Run Zepto and Swiggy Instamart through the same provider contract and provider-keyed API. | Supporting a provider must not introduce provider-specific frontend routes or checkout semantics. |
 | REQ-042 | Before provider sync, show "not synced" rather than fake prices. After sync, prefer the provider's final total; an exact line-item sum is allowed only when no tax, fee, discount, or other adjustment is present. | A simple sum is useful when it is mathematically complete, but must never masquerade as a checkout total when provider adjustments exist. |
 | REQ-043 | Synchronization replaces the complete selected-provider cart after explicit user action. | Replacement avoids ambiguous merges and keeps the native selection authoritative. |
@@ -202,6 +202,9 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-057A | Automatically select and display Instamart's sole provider-returned payment method as read-only; show a selector only when Instamart returns multiple supported methods. Keep Zepto payment selection independent. | A one-option dropdown adds no meaningful consent, while provider-specific behavior must not reduce Zepto's supported choices. |
 | REQ-058 | Persist pending, partial, and ambiguous order outcomes and prevent blind checkout retry. | A timeout must not create duplicate-order risk. |
 | REQ-059 | Provider switching preserves the native cart but isolates address, draft, payment, approval, and order state by provider/environment. | Provider-specific checkout state must never leak across integrations. |
+| REQ-060 | Let the Instamart cart agent interpret brands, pack descriptions, and quantity coverage, using explicit process-local household preferences before Swiggy history. | Real catalog variants such as one dozen, 12 pieces, and 2 × 6 cannot be handled reliably by rigid preprocessing. |
+| REQ-061 | Permit explicit UI and chat Instamart synchronization, but authorize `checkout` only from the final UI place-order endpoint through server-owned middleware. | Cart preparation is reversible; order placement is consequential and must not be model-triggerable. |
+| REQ-062 | Persist match reasoning but derive durable cart, prices, quantities, and totals only from captured `update_cart`/`get_cart` results. | Agent prose must never become evidence that a provider mutation or price succeeded. |
 
 ---
 

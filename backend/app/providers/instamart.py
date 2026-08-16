@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -16,8 +15,8 @@ from app.providers.base import (
     ProviderDescriptor,
     ProviderOperationError,
 )
-from app.providers.catalog_matcher import ProviderCatalogMatcher
 from app.providers.mcp_client import McpProviderClient, to_plain
+from app.commerce_policy import CommerceToolPolicy
 from app.providers.swiggy_oauth import SwiggyOAuthBroker
 from app.supabase_client import update_provider_connection_status
 
@@ -25,11 +24,12 @@ from app.supabase_client import update_provider_connection_status
 REQUIRED_INSTAMART_TOOLS = {
     "get_addresses",
     "search_products",
+    "your_go_to_items",
     "update_cart",
     "get_cart",
-    "get_payment_options",
 }
 ALLOWED_INSTAMART_TOOLS = REQUIRED_INSTAMART_TOOLS | {
+    "get_payment_options",
     "checkout",
     "get_orders",
     "get_order_details",
@@ -46,7 +46,6 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         self,
         *,
         oauth: SwiggyOAuthBroker | None = None,
-        matcher: ProviderCatalogMatcher | None = None,
         client: McpProviderClient | None = None,
     ) -> None:
         self.oauth = oauth or SwiggyOAuthBroker()
@@ -60,8 +59,167 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         self.enabled = os.environ.get("SWIGGY_INSTAMART_ENABLED", "false").lower() in {
             "1", "true", "yes"
         }
-        self.matcher = matcher or ProviderCatalogMatcher()
         self._client = client
+
+    def confirmed_agent_result(
+        self,
+        native_items: List[Dict[str, Any]],
+        selected_address_id: str,
+        capture: Any,
+    ) -> Dict[str, Any]:
+        """Build durable review state from the exact final MCP cart response.
+
+        Gemini supplies semantic mapping metadata. This method performs only
+        structural ID/quantity reconciliation against captured ``get_cart``;
+        it never re-ranks products or interprets pack descriptions.
+        """
+        for update_result in capture.tool_results.get("update_cart") or []:
+            self._unwrap(update_result)
+        raw_cart = self._unwrap(capture.latest("get_cart"))
+        confirmed_cart = self._normalize_cart(raw_cart)
+        report = capture.structured_result or {}
+        report_matches = report.get("matches") if isinstance(report, dict) else []
+        unresolved = report.get("unresolved_items") if isinstance(report, dict) else []
+        report_matches = report_matches if isinstance(report_matches, list) else []
+        unavailable = unresolved if isinstance(unresolved, list) else []
+        native_by_id = {
+            str(item.get("id")): item
+            for item in native_items
+            if item.get("id") is not None
+        }
+        cart_by_id = {
+            (
+                str(line.get("spin_id") or ""),
+                str(line.get("sku_id") or ""),
+            ): line
+            for line in confirmed_cart.get("items") or []
+        }
+        confirmed: List[Dict[str, Any]] = []
+        matched_native_ids: set[str] = set()
+        for metadata in report_matches:
+            if not isinstance(metadata, dict):
+                continue
+            native_id = str(
+                metadata.get("native_item_id")
+                or (metadata.get("native_item") or {}).get("id")
+                or ""
+            )
+            spin_id = str(
+                metadata.get("spin_id")
+                or metadata.get("spinId")
+                or metadata.get("selected_spin_id")
+                or ""
+            )
+            sku_id = str(
+                metadata.get("sku_id")
+                or metadata.get("skuId")
+                or metadata.get("selected_sku_id")
+                or ""
+            )
+            native = native_by_id.get(native_id)
+            actual = cart_by_id.get((spin_id, sku_id))
+            try:
+                expected_quantity = int(metadata.get("cart_quantity") or 0)
+            except (TypeError, ValueError):
+                expected_quantity = 0
+            if not native or not actual or expected_quantity <= 0 or int(actual.get("quantity") or 0) != expected_quantity:
+                unavailable.append({
+                    "name": (native or {}).get("name") or metadata.get("native_item_name") or "Selected item",
+                    "reason": "The agent-selected Instamart SKU and quantity were absent from the confirmed cart.",
+                    "matching": metadata,
+                })
+                continue
+            matched_native_ids.add(native_id)
+            matching = {
+                "matching_mode": "gemini_mcp_agent",
+                "requested_quantity": metadata.get("requested_quantity"),
+                "requested_unit": metadata.get("requested_unit"),
+                "fulfilled_quantity": metadata.get("fulfilled_quantity"),
+                "excess_quantity": metadata.get("excess_quantity"),
+                "preference_source": metadata.get("preference_source") or "none",
+                "alternatives_considered": metadata.get("alternatives_considered") or [],
+                "confidence": metadata.get("confidence"),
+                "reason": metadata.get("reasoning") or metadata.get("reason") or "Selected by the Instamart cart agent.",
+            }
+            confirmed.append({
+                "native_item": native,
+                "matched_product": {
+                    **actual,
+                    "name": actual.get("name") or metadata.get("product_name") or "Instamart product",
+                    "pack_size": actual.get("pack_size") or metadata.get("pack") or "",
+                },
+                "matching": matching,
+                "cart_item": actual,
+            })
+
+        unresolved_ids = {
+            str(item.get("native_item_id") or (item.get("native_item") or {}).get("id") or "")
+            for item in unavailable
+            if isinstance(item, dict)
+        }
+        for native_id, native in native_by_id.items():
+            if native_id not in matched_native_ids and native_id not in unresolved_ids:
+                unavailable.append({
+                    "native_item_id": native_id,
+                    "name": native.get("name"),
+                    "reason": "The Instamart agent did not confirm a product for this native item.",
+                })
+
+        payment_options = self._payment_options(raw_cart)
+        return {
+            **self._base_result("adk-mcp-agent-v1", selected_address_id),
+            "status": "success" if confirmed else "blocked",
+            "items": confirmed,
+            "unavailable_items": unavailable,
+            "replacements": [],
+            "changes": [],
+            "changed": False,
+            "provider_cart": confirmed_cart,
+            "cart_summary": self._cart_summary(raw_cart, confirmed),
+            "payment_options": payment_options,
+            "checkout_context": {"payment_methods": payment_options},
+            "agent_matching": {
+                "mode": "gemini_mcp_agent",
+                "repair_attempted": bool(report.get("repair_attempted")),
+                "update_cart_calls": len(capture.tool_results.get("update_cart") or []),
+                "get_cart_calls": len(capture.tool_results.get("get_cart") or []),
+            },
+            "message": (
+                f"Instamart confirmed {len(confirmed)} selected item"
+                f"{'s' if len(confirmed) != 1 else ''}; {len(unavailable)} item"
+                f"{'s were' if len(unavailable) != 1 else ' was'} not found and will not be ordered."
+                if confirmed and unavailable
+                else "The Instamart cart was prepared by Gemini and confirmed for review."
+                if confirmed
+                else "Instamart did not confirm a reasonable product for any selected item."
+            ),
+        }
+
+    async def enrich_agent_result_with_payment(
+        self,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Read payment capability outside the agent's MCP allowlist."""
+        client = self._client_for_request()
+        try:
+            async with client.session() as session:
+                tools, _ = await self._validated_tools(client, session, set())
+                if "get_payment_options" not in tools:
+                    return result
+                payload = self._unwrap(
+                    await client.call_tool(session, "get_payment_options", {})
+                )
+                options = self._payment_options(payload)
+                result["payment_options"] = options
+                result["checkout_context"] = {"payment_methods": options}
+                return result
+        except Exception as exc:
+            self._mark_401(exc)
+            context = dict(result.get("checkout_context") or {})
+            context["payment_error"] = True
+            context.setdefault("payment_methods", result.get("payment_options") or [])
+            result["checkout_context"] = context
+            return result
 
     def descriptor(self) -> ProviderDescriptor:
         if not self.enabled:
@@ -198,223 +356,22 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         items: List[Dict[str, Any]],
         selected_address_id: str = "",
     ) -> Dict[str, Any]:
-        if not selected_address_id:
-            return self._error(
-                "address_required",
-                "Select a Swiggy delivery address before moving items to Instamart.",
-            )
-        if not items:
-            return self._error("cart_empty", "Select at least one native grocery item.")
-        client = self._client_for_request()
-        try:
-            async with client.session() as session:
-                tools, version = await self._validated_tools(client, session, REQUIRED_INSTAMART_TOOLS)
-                selections: List[Dict[str, Any]] = []
-                unavailable: List[Dict[str, Any]] = []
-                for item in items:
-                    query = str(item.get("search_name") or item.get("name") or "").strip()
-                    try:
-                        requested_amount = float(item.get("amount") or 0)
-                    except (TypeError, ValueError):
-                        requested_amount = 0
-                    if requested_amount <= 0:
-                        unavailable.append({
-                            "name": item.get("name"),
-                            "reason": "The native item has an invalid quantity.",
-                            "candidates": [],
-                        })
-                        continue
-                    search_payload = self._unwrap(
-                        await client.call_tool(
-                            session,
-                            "search_products",
-                            {"addressId": selected_address_id, "query": query},
-                        )
-                    )
-                    candidates = self._product_candidates(search_payload, item)
-                    decision = await self.matcher.choose(item, candidates)
-                    candidate = next(
-                        (
-                            value for value in candidates
-                            if decision and value["candidate_id"] == decision["candidate_id"]
-                        ),
-                        None,
-                    )
-                    if not candidate:
-                        unavailable.append(
-                            {
-                                "name": item.get("name"),
-                                "reason": "Instamart did not return one unambiguous orderable variant.",
-                                "candidates": candidates[:5],
-                            }
-                        )
-                        continue
-                    selections.append(
-                        {
-                            "native_item": item,
-                            "matched_product": candidate,
-                            "matching": decision,
-                            "cart_item": {
-                                **candidate,
-                                "quantity": candidate["requested_quantity"],
-                            },
-                        }
-                    )
-
-                if not selections:
-                    return {
-                        **self._base_result(version, selected_address_id),
-                        "status": "blocked",
-                        "items": [],
-                        "unavailable_items": unavailable,
-                        "provider_cart": None,
-                        "cart_summary": self._empty_summary(),
-                        "payment_options": [],
-                        "message": "No selected item had an orderable Instamart match, so the provider cart was not changed.",
-                    }
-
-                update_items = [
-                    {
-                        "spinId": match["matched_product"]["spin_id"],
-                        "skuId": match["matched_product"]["sku_id"],
-                        "quantity": match["cart_item"]["quantity"],
-                    }
-                    for match in selections
-                ]
-                update_payload = self._unwrap(
-                    await client.call_tool(
-                        session,
-                        "update_cart",
-                        {
-                            "selectedAddressId": selected_address_id,
-                            "items": update_items,
-                        },
-                    )
-                )
-                self._raise_tool_failure(update_payload, "update_cart")
-                confirmed_payload = self._unwrap(await client.call_tool(session, "get_cart", {}))
-                self._raise_tool_failure(confirmed_payload, "get_cart")
-                confirmed_cart = self._normalize_cart(confirmed_payload)
-                confirmed, reconciliation_failures = self._reconcile(selections, confirmed_cart["items"])
-                payment_payload = self._unwrap(
-                    await client.call_tool(session, "get_payment_options", {})
-                )
-                self._raise_tool_failure(payment_payload, "get_payment_options")
-                payment_options = self._payment_options(payment_payload)
-                unavailable.extend(reconciliation_failures)
-                status = "success" if confirmed else "blocked"
-                return {
-                    **self._base_result(version, selected_address_id),
-                    "status": status,
-                    "items": confirmed,
-                    "unavailable_items": unavailable,
-                    "replacements": [],
-                    "changes": [],
-                    "changed": False,
-                    "provider_cart": confirmed_cart,
-                    "cart_summary": self._cart_summary(confirmed_payload, confirmed),
-                    "payment_options": payment_options,
-                    "checkout_context": {"payment_methods": payment_options},
-                    "message": (
-                        f"The Instamart cart was confirmed with {len(confirmed)} available item"
-                        f"{'s' if len(confirmed) != 1 else ''}; {len(unavailable)} selected item"
-                        f"{'s were' if len(unavailable) != 1 else ' was'} not found and will not be ordered."
-                        if confirmed and unavailable
-                        else "The Instamart cart was replaced and confirmed for review."
-                        if confirmed
-                        else "Instamart did not confirm an orderable product for any selected item."
-                    ),
-                }
-        except ProviderOperationError as exc:
-            return self._error(exc.code, exc.message)
-        except Exception as exc:
-            self._mark_401(exc)
-            return self._error(
-                "provider_cart_sync_failed",
-                "Kitch could not synchronize the Instamart cart.",
-            )
+        raise ProviderOperationError(
+            provider=self.provider_id,
+            operation="sync_cart",
+            code="agent_cart_service_required",
+            message="Instamart cart synchronization must run through the guarded Gemini cart agent service.",
+            status_code=500,
+        )
 
     async def revalidate_cart(self, draft: Dict[str, Any]) -> Dict[str, Any]:
-        refreshed = await self.sync_cart(
-            list(draft.get("mapped_items") or draft.get("native_items") or []),
-            str(draft.get("selected_address_id") or ""),
+        raise ProviderOperationError(
+            provider=self.provider_id,
+            operation="revalidate_cart",
+            code="agent_cart_service_required",
+            message="Instamart cart revalidation must run through the guarded Gemini cart agent service.",
+            status_code=500,
         )
-        if refreshed.get("status") == "error":
-            return refreshed
-        previous = list(draft.get("matched_items") or [])
-        current = list(refreshed.get("items") or [])
-        previous_by_native = {
-            str((item.get("native_item") or {}).get("id")): item for item in previous
-        }
-        replacements = []
-        changes = []
-        for match in current:
-            native_id = str((match.get("native_item") or {}).get("id"))
-            old = previous_by_native.get(native_id)
-            if not old:
-                changes.append({"type": "added", "native_item": match.get("native_item")})
-                continue
-            old_product = old.get("matched_product") or {}
-            new_product = match.get("matched_product") or {}
-            if old_product.get("candidate_id") != new_product.get("candidate_id"):
-                replacements.append(
-                    {
-                        "native_item": match.get("native_item"),
-                        "previous_product": old_product,
-                        "replacement_product": new_product,
-                    }
-                )
-            else:
-                old_cart = old.get("cart_item") or {}
-                new_cart = match.get("cart_item") or {}
-                changed_fields = [
-                    key for key in ("price_minor", "pack_size", "quantity", "store_id")
-                    if old_cart.get(key) != new_cart.get(key)
-                ]
-                if changed_fields:
-                    changes.append({
-                        "type": "product_changed",
-                        "native_item": match.get("native_item"),
-                        "fields": changed_fields,
-                    })
-        if len(previous) != len(current):
-            changes.append({"type": "membership_changed"})
-        if (draft.get("cart_summary") or {}) != (refreshed.get("cart_summary") or {}):
-            changes.append({"type": "bill_changed"})
-        previous_payments = [
-            (option.get("id"), option.get("kind"), option.get("flow"), option.get("provider_value"))
-            for option in draft.get("payment_options") or []
-        ]
-        current_payments = [
-            (option.get("id"), option.get("kind"), option.get("flow"), option.get("provider_value"))
-            for option in refreshed.get("payment_options") or []
-        ]
-        if previous_payments != current_payments:
-            changes.append({"type": "payment_methods_changed"})
-        previous_cart = draft.get("provider_cart") or {}
-        refreshed_cart = refreshed.get("provider_cart") or {}
-        if previous_cart.get("stores") != refreshed_cart.get("stores"):
-            changes.append({"type": "store_fulfillment_changed"})
-        previous_unavailable = sorted(
-            (
-                str(item.get("name") or ""),
-                str(item.get("reason") or ""),
-            )
-            for item in draft.get("unavailable_items") or []
-        )
-        current_unavailable = sorted(
-            (
-                str(item.get("name") or ""),
-                str(item.get("reason") or ""),
-            )
-            for item in refreshed.get("unavailable_items") or []
-        )
-        if previous_unavailable != current_unavailable:
-            changes.append({"type": "unavailable_items_changed"})
-        refreshed["replacements"] = replacements
-        refreshed["changes"] = changes
-        refreshed["changed"] = bool(replacements or changes)
-        return refreshed
 
     async def get_cart(self) -> Dict[str, Any]:
         client = self._client_for_request()
@@ -468,6 +425,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                         "payment_method_invalid",
                         "The selected Instamart payment method is no longer supported.",
                     )
+                CommerceToolPolicy.authorize("checkout")
                 payload = self._unwrap(await client.call_tool(session, "checkout", args))
                 self._raise_tool_failure(payload, "checkout")
                 order_ids = self._find_values(payload, {"orderId", "order_id"})
@@ -663,7 +621,11 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         return data if isinstance(data, dict) else value
 
     def _raise_tool_failure(self, payload: Dict[str, Any], operation: str) -> None:
-        if payload.get("success") is False or payload.get("isError") is True:
+        if (
+            payload.get("success") is False
+            or payload.get("isError") is True
+            or (payload.get("error") and payload.get("success") is not True)
+        ):
             error = payload.get("error") or {}
             message = error.get("message") if isinstance(error, dict) else str(error)
             raise ProviderOperationError(
@@ -718,125 +680,6 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             addresses.append(normalized)
         deduped = {address["id"]: address for address in addresses}
         return list(deduped.values())
-
-    def _product_candidates(
-        self,
-        payload: Dict[str, Any],
-        native_item: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        candidates: List[Dict[str, Any]] = []
-        product_lists = self._lists_for_keys(payload, {"products", "similarProducts", "similar_products"})
-        for products in product_lists:
-            for product in products:
-                if not isinstance(product, dict):
-                    continue
-                variations = product.get("variations") or product.get("variants") or [product]
-                if not isinstance(variations, list):
-                    variations = [product]
-                for variation in variations:
-                    if not isinstance(variation, dict):
-                        continue
-                    merged = {**product, **variation}
-                    spin_id = self._first(merged, "spinId", "spin_id")
-                    sku_id = self._first(merged, "skuId", "sku_id")
-                    if not spin_id or not sku_id:
-                        continue
-                    pack_size = str(self._first(
-                        merged,
-                        "packSize",
-                        "itemVariant",
-                        "quantityDescription",
-                        "unit",
-                    ) or "")
-                    requested_quantity = self._requested_pack_quantity(native_item, pack_size)
-                    if requested_quantity is None:
-                        continue
-                    available_value = self._first(merged, "available", "isAvailable", "inStock", "orderable")
-                    available_quantity = self._first(
-                        merged,
-                        "availableQuantity",
-                        "available_quantity",
-                        "inventory",
-                        "stock",
-                        "maxQuantity",
-                    )
-                    if isinstance(available_value, str):
-                        available = available_value.lower() in {"true", "yes", "available", "in_stock"}
-                    else:
-                        available = available_value is True
-                    try:
-                        quantity = int(available_quantity)
-                    except (TypeError, ValueError):
-                        # A boolean in-stock flag does not prove the requested
-                        # quantity is orderable. Missing stock counts stay
-                        # unverified and cannot authorize cart mutation.
-                        quantity = 0
-                    candidates.append(
-                        {
-                            "candidate_id": f"{spin_id}:{sku_id}",
-                            "spin_id": str(spin_id),
-                            "sku_id": str(sku_id),
-                            "name": str(self._first(
-                                merged,
-                                "name",
-                                "itemName",
-                                "title",
-                                "productName",
-                            ) or "Instamart product"),
-                            "brand": str(self._first(merged, "brand", "brandName") or ""),
-                            "pack_size": pack_size,
-                            "price_minor": self._minor(self._first(
-                                merged,
-                                "sellingPrice",
-                                "price",
-                                "discountedPrice",
-                                "discountedFinalPrice",
-                            )),
-                            "image_url": self._first(merged, "imageUrl", "image_url", "thumbnail"),
-                            "available": available,
-                            "available_quantity": quantity,
-                            "requested_quantity": requested_quantity,
-                        }
-                    )
-        return list({item["candidate_id"]: item for item in candidates}.values())
-
-    @staticmethod
-    def _requested_pack_quantity(native_item: Dict[str, Any], pack_size: str) -> int | None:
-        try:
-            amount = float(native_item.get("amount") or 0)
-        except (TypeError, ValueError):
-            return None
-        if amount <= 0:
-            return None
-        unit = str(native_item.get("unit") or "piece").strip().lower()
-        normalized_unit = re.sub(r"[^a-z]", "", unit)
-        native_scales = {
-            "ml": ("volume", 1.0), "milliliter": ("volume", 1.0), "milliliters": ("volume", 1.0),
-            "l": ("volume", 1000.0), "liter": ("volume", 1000.0), "liters": ("volume", 1000.0),
-            "cup": ("volume", 240.0), "cups": ("volume", 240.0),
-            "tbsp": ("volume", 15.0), "tablespoon": ("volume", 15.0), "tablespoons": ("volume", 15.0),
-            "tsp": ("volume", 5.0), "teaspoon": ("volume", 5.0), "teaspoons": ("volume", 5.0),
-            "g": ("weight", 1.0), "gram": ("weight", 1.0), "grams": ("weight", 1.0),
-            "kg": ("weight", 1000.0), "kilogram": ("weight", 1000.0), "kilograms": ("weight", 1000.0),
-        }
-        pack_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(ml|l|litres?|liters?|g|kg|grams?|kilograms?)\b", pack_size.lower())
-        if normalized_unit in native_scales and pack_match:
-            pack_unit = re.sub(r"[^a-z]", "", pack_match.group(2))
-            aliases = {
-                "litre": "l", "litres": "l", "liter": "l", "liters": "l",
-                "gram": "g", "grams": "g", "kilogram": "kg", "kilograms": "kg",
-            }
-            pack_unit = aliases.get(pack_unit, pack_unit)
-            pack_scale = native_scales.get(pack_unit)
-            native_scale = native_scales[normalized_unit]
-            if not pack_scale or pack_scale[0] != native_scale[0]:
-                return None
-            desired_base = amount * native_scale[1]
-            pack_base = float(pack_match.group(1)) * pack_scale[1]
-            return max(1, int(math.ceil(desired_base / pack_base)))
-        if normalized_unit in native_scales and pack_match is None:
-            return None
-        return max(1, int(math.ceil(amount)))
 
     def _normalize_cart(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         lines = []
@@ -909,45 +752,6 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             "stores": list(stores.values()),
             "multi_store": len(stores) > 1,
         }
-
-    def _reconcile(
-        self,
-        matches: List[Dict[str, Any]],
-        cart_items: List[Dict[str, Any]],
-    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        confirmed = []
-        failures = []
-        for match in matches:
-            expected = match["cart_item"]
-            actual = next(
-                (
-                    line for line in cart_items
-                    if line.get("candidate_id") == expected.get("candidate_id")
-                    and int(line.get("quantity") or 0) == int(expected.get("quantity") or 0)
-                ),
-                None,
-            )
-            if not actual:
-                failures.append(
-                    {
-                        "name": (match.get("native_item") or {}).get("name"),
-                        "reason": "The selected Instamart SKU and quantity were absent from the confirmed cart.",
-                    }
-                )
-                continue
-            confirmed.append({**match, "cart_item": actual})
-        expected_ids = {match["cart_item"].get("candidate_id") for match in matches}
-        unexpected = [
-            line for line in cart_items
-            if line.get("candidate_id") not in expected_ids
-        ]
-        if unexpected:
-            failures.append({
-                "name": "Provider cart drift",
-                "reason": "Instamart returned products outside the authoritative Kitch selection.",
-                "unexpected_products": [line.get("name") for line in unexpected],
-            })
-        return confirmed, failures
 
     def _cart_summary(
         self,

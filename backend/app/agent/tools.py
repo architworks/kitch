@@ -310,6 +310,38 @@ async def search_household_food_preferences_tool(query: str, tool_context: ToolC
   except Exception as e:
     return {"status": "error", "message": f"Failed to search household food preferences: {str(e)}", "preferences": []}
 
+async def apply_zepto_brand_memory_to_cart_items(
+  items: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+  """Preserve Zepto's existing preference-enriched search terms only.
+
+  Instamart never calls this mapper; its dedicated cart agent reads ordering
+  preferences directly and reasons over the live MCP catalogue.
+  """
+  mem_svc = _resolve_memory_service(None)
+  mapped_items: List[Dict[str, Any]] = []
+  for item in items:
+    item_name = str(item.get("name") or item.get("item") or "").strip()
+    mapped = dict(item)
+    mapped["search_name"] = item_name
+    if mem_svc and item_name:
+      try:
+        memory_result = await mem_svc.search_memory(
+          app_name="kitch",
+          user_id="shared_household",
+          query=f"preferred brand for {item_name.lower()}",
+        )
+        if memory_result.memories:
+          text = str(memory_result.memories[0].content.parts[0].text or "").strip()
+          if text and len(text) < 160:
+            mapped["search_name"] = text.split(":", 1)[1].strip() if ":" in text else text
+      except Exception:
+        # Preference memory is advisory and ephemeral. Its unavailability must
+        # not become a substitute for or failure of Zepto's durable cart path.
+        pass
+    mapped_items.append(mapped)
+  return mapped_items
+
 def list_grocery_providers_tool() -> Dict[str, Any]:
   """Read provider availability without exposing credentials or mutation tools."""
   return {"status": "success", "providers": provider_registry.descriptors()}
@@ -332,6 +364,41 @@ def get_grocery_checkout_status_tool(provider: str) -> Dict[str, Any]:
     "unavailable_item_count": len(review.get("unavailable_items") or []),
     "can_place_order": bool(review.get("can_place_order")),
     "order_blockers": review.get("order_blockers") or [],
+  }
+
+async def sync_instamart_cart_tool(
+  user_request: str,
+  cart_item_ids: List[str] | None = None,
+  selected_address_id: str = "",
+) -> Dict[str, Any]:
+  """
+  Synchronize the existing native household grocery cart to Swiggy Instamart
+  only after an explicit user instruction to move, sync, or refresh it. This
+  reversible cart operation can never place an order.
+  """
+  from app.main import grocery_checkout_service
+
+  request = str(user_request or "").strip()
+  if not request:
+    return {
+      "status": "error",
+      "message": "An explicit user request to synchronize Instamart is required.",
+    }
+  result = await grocery_checkout_service.sync_from_chat(
+    cart_item_ids=[str(value) for value in (cart_item_ids or [])],
+    selected_address_id=str(selected_address_id or ""),
+    user_instruction=request,
+  )
+  review = result.get("review") or {}
+  return {
+    "status": result.get("status"),
+    "provider": "swiggy_instamart",
+    "matched_item_count": len(review.get("matched_items") or []),
+    "unavailable_items": review.get("unavailable_items") or [],
+    "selected_address_id": review.get("selected_address_id"),
+    "address_selection": result.get("address_selection"),
+    "message": review.get("message") or result.get("message") or "Instamart cart synchronized.",
+    "ui_action": "UPDATE_PROVIDER_CART",
   }
 
 def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:
@@ -361,128 +428,3 @@ def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
   Query Supabase to fetch the daily plate log history and macros for a user.
   """
   return db_get_macro_diary(user_name)
-
-# --- Section 3: Brand Preference Memory Management (ADK Native Memory) ---
-def get_brand_preference(ingredient: str) -> Dict[str, Any]:
-  """
-  Factual verification tool helper representing brand lookup confirmations.
-  """
-  return {"status": "query_completed", "ingredient": ingredient}
-
-async def _apply_brand_memory_to_items(items: List[Dict[str, Any]], tool_context: ToolContext = None) -> List[Dict[str, Any]]:
-  """
-  Adds a provider search name to each native cart row using household brand memory.
-  The native item name remains generic.
-  """
-  mem_svc = None
-  if tool_context:
-    if hasattr(tool_context, "get_invocation_context"):
-      try:
-        mem_svc = tool_context.get_invocation_context().memory_service
-      except Exception:
-        pass
-    elif hasattr(tool_context, "_invocation_context"):
-      try:
-        mem_svc = tool_context._invocation_context.memory_service
-      except Exception:
-        pass
-
-  if not mem_svc:
-    try:
-      from app.agent.core import memory_service as fallback_mem_svc
-      mem_svc = fallback_mem_svc
-    except ImportError:
-      pass
-
-  mapped_items = []
-  for item in items:
-    item_name = str(item.get("name") or item.get("item") or "").strip()
-    mapped = dict(item)
-    mapped["search_name"] = item_name
-
-    if mem_svc and item_name:
-      try:
-        memory_result = await mem_svc.search_memory(
-            app_name="kitch",
-            user_id="shared_household",
-            query=f"preferred brand for {item_name.lower()}"
-        )
-        if memory_result.memories:
-          text_match = memory_result.memories[0].content.parts[0].text
-          if text_match and len(text_match) < 100:
-            mapped["search_name"] = text_match.split(":", 1)[1].strip() if ":" in text_match else text_match.strip()
-      except Exception:
-        pass
-
-    mapped_items.append(mapped)
-
-  return mapped_items
-
-async def apply_brand_memory_to_cart_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-  """
-  Public helper for non-agent API routes that need provider search terms with
-  household brand preferences applied.
-  """
-  return await _apply_brand_memory_to_items(items, None)
-
-async def set_brand_preference(ingredient: str, branded_sku: str, tool_context: ToolContext = None) -> Dict[str, Any]:
-  """
-  Instructs the agent to record a brand preference for an ingredient. 
-  This writes the preference natively to the shared household memory store.
-  
-  Args:
-      ingredient: Generic ingredient name (e.g. 'bread')
-      branded_sku: Specific brand preferred (e.g. 'Bakers Dozen Whole Wheat')
-  """
-  print(f"*** set_brand_preference called with ingredient='{ingredient}', branded_sku='{branded_sku}' ***")
-  try:
-    from google.adk.events import Event
-    from google.genai.types import Content, Part
-    import time
-    
-    # Resolve memory service
-    mem_svc = None
-    if tool_context:
-      if hasattr(tool_context, "get_invocation_context"):
-        try:
-          mem_svc = tool_context.get_invocation_context().memory_service
-        except Exception:
-          pass
-      elif hasattr(tool_context, "_invocation_context"):
-        try:
-          mem_svc = tool_context._invocation_context.memory_service
-        except Exception:
-          pass
-          
-    if not mem_svc:
-      try:
-        from app.agent.core import memory_service as fallback_mem_svc
-        mem_svc = fallback_mem_svc
-      except ImportError:
-        pass
-        
-    if mem_svc:
-      event = Event(
-          id=f"brand_pref_{ingredient.lower().strip()}_{int(time.time())}",
-          content=Content(parts=[Part(text=f"{ingredient.lower().strip()}: {branded_sku.strip()}")]),
-          author="system",
-          timestamp=time.time()
-      )
-      await mem_svc.add_events_to_memory(
-          app_name="kitch",
-          user_id="shared_household",
-          events=[event]
-      )
-      
-    return {
-        "status": "success", 
-        "message": (
-          "Updated ephemeral process-local brand preference memory: "
-          f"'{ingredient}' will map to '{branded_sku}'."
-        )
-    }
-  except Exception as e:
-    import traceback
-    print(f"*** set_brand_preference failed with: {e} ***")
-    traceback.print_exc()
-    return {"status": "error", "message": f"Failed to set brand preference in memory: {str(e)}"}

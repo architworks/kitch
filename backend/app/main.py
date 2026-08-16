@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service
-from app.agent.tools import apply_brand_memory_to_cart_items
+from app.agent.tools import apply_zepto_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
 from app.grocery_checkout import GroceryCheckoutService
 from app.providers.base import ProviderOperationError
@@ -43,6 +43,7 @@ from app.supabase_client import (
     delete_past_meal_plans,
     get_household_timezone,
     get_meal_plan_snapshot,
+    get_provider_checkout_draft,
     update_household_profile,
     validate_persistence_readiness,
 )
@@ -57,7 +58,7 @@ from app.persistence import (
 load_dotenv()
 
 grocery_checkout_service = GroceryCheckoutService(
-    cart_mapper=apply_brand_memory_to_cart_items,
+    cart_mapper=apply_zepto_brand_memory_to_cart_items,
 )
 
 
@@ -287,6 +288,13 @@ async def chat_endpoint(payload: ChatRequest):
         pantry_before = get_pantry_stock()
         grocery_cart_before = get_grocery_cart()
         latest_recipe_plan_before = get_latest_recipe_grocery_plan_metadata()
+        instamart_environment = str(
+            provider_registry.descriptor("swiggy_instamart")["environment"]
+        )
+        instamart_draft_before = get_provider_checkout_draft(
+            "swiggy_instamart",
+            instamart_environment,
+        )
         
         # 3. Construct a standard Content message for the ADK runner
         user_message = Content(
@@ -308,6 +316,10 @@ async def chat_endpoint(payload: ChatRequest):
         pantry_after = get_pantry_stock()
         grocery_cart_after = get_grocery_cart()
         latest_recipe_plan_after = get_latest_recipe_grocery_plan_metadata()
+        instamart_draft_after = get_provider_checkout_draft(
+            "swiggy_instamart",
+            instamart_environment,
+        )
 
         # Only confirmed persisted state changes can produce mutation actions.
         action = None
@@ -325,6 +337,17 @@ async def chat_endpoint(payload: ChatRequest):
             }
         elif pantry_after != pantry_before:
             action = {"type": "UPDATE_PANTRY"}
+        elif (
+            (instamart_draft_after or {}).get("snapshot_hash"),
+            (instamart_draft_after or {}).get("updated_at"),
+        ) != (
+            (instamart_draft_before or {}).get("snapshot_hash"),
+            (instamart_draft_before or {}).get("updated_at"),
+        ):
+            action = {
+                "type": "UPDATE_PROVIDER_CART",
+                "provider": "swiggy_instamart",
+            }
         elif grocery_cart_after != grocery_cart_before:
             action = {"type": "UPDATE_GROCERY_CART"}
         elif latest_recipe_plan_after != latest_recipe_plan_before:

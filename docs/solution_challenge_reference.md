@@ -183,7 +183,7 @@ Use this table as the compact version during recording.
 | Memory management | "Supabase stores durable product state; ADK memory stores flexible household preferences." | Separates reliable UI records from fuzzy conversational memory. |
 | Delegation/routing | "A coordinator routes to specialist agents for meal planning, vision/macros/pantry, and recipe/grocery planning." | Keeps prompts and tool access scoped instead of giving every tool to one giant agent. |
 | Tools | "Agents call Python tools for deterministic reads/writes like saving meal plans, logging macros, and updating native cart rows." | Converts AI reasoning into auditable state changes. |
-| MCP/provider integration | "Zepto and Instamart implement one backend adapter contract and are not exposed directly to the grocery agent." | Keeps provider-specific auth/catalog/order behavior outside core planning. |
+| MCP/provider integration | "Zepto keeps its adapter flow; Instamart has a dedicated MCP cart agent outside the recipe planner, guarded by backend authority." | Enables semantic catalog reasoning without exposing checkout to chat or planning agents. |
 | Guardrails | "Provider ordering is not an agent tool. The user must review a saved snapshot and explicitly approve." | Addresses real-world side effects: money, address, substitutions, delivery. |
 | Failure posture | "When AI is uncertain or provider matching fails, Kitch shows reviewable state instead of silently acting." | Centers trust and debuggability. |
 
@@ -337,7 +337,7 @@ Mitigation:
 
 Talking point:
 
-> Tools are where model reasoning becomes system action. Kitch agents do not directly edit frontend state. They call Python tools that read and write Supabase or ADK memory. Provider integration is separate: Zepto and Instamart MCP are wrapped by deterministic backend adapters instead of being exposed directly to the recipe planner.
+> Tools are where model reasoning becomes system action. Kitch agents do not directly edit frontend state. They call Python tools that read and write Supabase or ADK memory. Provider integration is separate from the recipe planner: Zepto keeps its adapter flow, while a dedicated Instamart cart agent uses a restricted MCP toolset behind server-owned authority.
 
 Internal Python tools:
 
@@ -354,7 +354,9 @@ External/provider integration:
 
 - Zepto and Instamart are accessed through adapters implementing `GroceryProviderAdapter`.
 - Instamart is limited to Swiggy's `/im` MCP tools; Food and Dineout are inaccessible.
-- A constrained Gemini matcher can rank normalized candidates but cannot call MCP or mutate external state.
+- A dedicated Gemini Instamart cart agent can search, interpret packs, and
+  update the reversible cart, but it cannot call checkout or other consequential
+  provider mutations.
 - Native cart rows are mapped into provider search/cart operations.
 - Provider results return actual cart items and unavailable items.
 
@@ -438,7 +440,7 @@ Use this as a concise system-design narration:
 
 > Memory is split deliberately. Supabase is the source of truth for structured records like meal plans, pantry, recipe artifacts, cart rows, and macro logs. ADK memory is used for flexible household preferences like "avoid tofu" or "prefer Amul butter." That keeps the UI reliable while still letting preferences stay conversational.
 
-> Tools are the execution layer. Agents call Python tools for deterministic writes, and provider MCP tools are wrapped behind backend adapters. A constrained matcher may select only allowlisted candidates, while cart mutation and ordering remain deterministic. The agent can prepare a native cart, but final order placement requires a saved review snapshot and explicit UI approval.
+> Tools are the execution layer. Agents call Python tools for structured app writes. Instamart product matching and reversible cart preparation are agent-driven through a five-tool MCP allowlist; exact provider results are captured by the backend. Final order placement still requires a saved review snapshot, server-owned checkout authority, and explicit UI approval.
 
 ---
 
@@ -744,7 +746,7 @@ Use this section to show that the prototype is engineered as a system. Some trad
 **What would change our mind:**
 
 - If provider operations were read-only, agent-owned tools would be lower risk.
-- The current constrained catalog matcher already demonstrates the safe limit:
+- The current Instamart cart agent demonstrates the safe boundary:
   it can rank allowlisted candidates but cannot mutate carts or order.
 
 ---
@@ -837,7 +839,7 @@ The main principle: when something goes wrong, Kitch should preserve user trust 
 | Pantry quantity math is imperfect | App underbuys or overbuys when units are ambiguous. | Full arbitrary unit reconciliation is deferred. The app shows pantry-covered rows and keeps review/edit controls in the native cart. |
 | Macro estimate is wrong | User's calorie or macro diary is inaccurate. | Macros are estimates. Logs are scoped to active user and should support correction workflows. |
 | Food logs to wrong user | Archit's meal appears in Anubhav's diary. | Active member is explicit in UI. Macro logs are individual, not household-wide. |
-| Provider SKU match is wrong | External cart contains the wrong brand, pack size, or substitute. | Matcher output is allowlisted and deterministically validated; unresolved items remain visible and the user reviews the confirmed cart. |
+| Provider SKU match is wrong | External cart contains the wrong brand, pack size, or substitute. | Gemini reasons over the live catalogue and preferences; exact `get_cart` results, alternatives, quantity coverage, and unresolved items remain reviewable before checkout. |
 | Provider price/fees surprise user | Kitch shows an expected amount that differs from provider checkout. | Kitch does not show fake prices before provider sync. Prices/fees come from provider response. |
 | Provider cart replacement surprises user | Existing external cart is overwritten by Kitch sync. | Sync is explicit and communicates that the selected provider cart is replaced by the reviewed native intent. |
 | Provider OAuth expires or MCP degrades | One provider cannot sync. | Native cart and core readiness remain available; the UI shows reconnect/degraded state for only that provider. |

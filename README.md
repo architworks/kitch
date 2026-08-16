@@ -133,13 +133,17 @@ flowchart TD
     GetDatetime --> RuntimeContext[Runtime datetime context]
 
     API --> CheckoutService[GroceryCheckoutService]
-    CheckoutService --> Matcher[Guarded Gemini catalog matcher]
+    CheckoutService --> InstamartAgent[Gemini Instamart cart agent]
+    InstamartAgent --> ToolPolicy[Commerce tool policy]
     CheckoutService --> ProviderAdapters[Provider adapters]
     ProviderAdapters --> Zepto[Zepto MCP]
     ProviderAdapters --> Instamart[Swiggy Instamart /im MCP]
 ```
 
-Provider sync is intentionally outside the `recipe_grocery_planner`. The agent owns native recipe+grocery planning. The backend owns provider cart sync and order approval boundaries.
+Provider sync is intentionally outside the `recipe_grocery_planner`. A dedicated
+`instamart_cart_agent` may prepare an Instamart cart after an explicit UI or
+chat request. The backend still owns durable review, authority, payment, and
+order approval boundaries.
 
 ### Multi-Provider Grocery Integration
 
@@ -152,7 +156,10 @@ The checkout flow is:
 1. Review and select eligible native Kitch cart rows.
 2. Choose a connected provider, or connect the household Swiggy account through OAuth 2.1 PKCE.
 3. Select a provider delivery address before any catalog search.
-4. Search only in that address context, match orderable SKUs, replace the complete provider cart, and confirm it with a read-after-write call.
+4. For Instamart, let the dedicated Gemini MCP agent search iteratively, apply
+   explicit household ordering preferences before weaker Swiggy history,
+   interpret real pack descriptions, replace the complete cart, and confirm it
+   through `get_cart`. Zepto keeps its separate adapter behavior.
 5. Persist the normalized provider cart, bill, mappings, blockers, environment, capability version, and immutable approval snapshot in Supabase.
 6. Revalidate stale drafts and repair unavailable products; every material change resets payment and approval.
 7. Offer only fresh provider-returned payment methods. Instamart calls
@@ -160,11 +167,23 @@ The checkout flow is:
    uses the documented QR flag, and allows COD only when UPI is absent.
 8. Revalidate immediately before checkout. A changed cart returns `409`; a timeout or ambiguous order response is persisted and cannot be blindly retried.
 
-The constrained Gemini catalog matcher can rank only the normalized candidate IDs supplied to it. It has no credentials, MCP access, cart mutation, payment, or order tools. Deterministic code rejects invented IDs, unavailable products, insufficient quantities, and ambiguous matches.
+The Instamart cart agent receives only `get_addresses`, `search_products`,
+`your_go_to_items`, `update_cart`, and `get_cart`. A server-owned
+`CommerceToolPolicy` grants reversible cart mutation only to explicit sync or
+revalidation operations. The agent never receives `checkout`; the policy also
+rejects checkout unless the call originates from the approved UI place-order
+endpoint. Exact `update_cart` and `get_cart` results—not agent prose—become the
+durable review.
 
-Apply `20260815_multi_provider_grocery_platform.sql` before starting this version. It intentionally discards old provider checkout drafts while preserving the native grocery cart. Provider tokens and PKCE verifiers are encrypted with a dedicated Fernet key, stored behind backend-only RLS, and never returned to the browser.
+Apply `20260815_multi_provider_grocery_platform.sql`, followed by
+`20260816_agent_driven_instamart_cart.sql`, before starting this version. The
+latter discards deterministic-matcher Instamart drafts while preserving the
+native grocery cart. Provider tokens and PKCE verifiers are encrypted with a
+dedicated Fernet key, stored behind backend-only RLS, and never returned to the
+browser.
 
-Chat can plan groceries and read provider/checkout status, but it cannot synchronize carts or place orders.
+Chat can plan native groceries and, only when explicitly asked to move, sync,
+or refresh Instamart, invoke the guarded cart agent. Chat cannot place orders.
 
 ## Local Deployment
 
@@ -198,6 +217,8 @@ pip install -r requirements.txt
    `20260815_multi_provider_grocery_platform.sql` intentionally recreates
    provider checkout drafts and adds encrypted provider connections and OAuth
    flow records; it does not alter the native grocery cart.
+   `20260816_agent_driven_instamart_cart.sql` clears only old Instamart drafts
+   so every review is rebuilt by the agent-driven confirmed-cart contract.
 4. Ensure the prototype household profile IDs exist, or update the configured IDs in `backend/app/household_config.py` and `frontend/src/app/householdConfig.js`.
 
 The default prototype IDs are:

@@ -17,6 +17,11 @@ from app.checkout_drafts import (
 )
 from app.providers.base import ProviderOperationError
 from app.providers.registry import ProviderRegistry, provider_registry
+from app.agent.instamart_cart_agent import InstamartCartAgentService
+from app.commerce_policy import (
+    CommercePermission,
+    commerce_request_context,
+)
 from app.supabase_client import (
     claim_provider_checkout_operation,
     get_grocery_cart,
@@ -34,10 +39,12 @@ class GroceryCheckoutService:
         self,
         *,
         registry: ProviderRegistry = provider_registry,
-        cart_mapper: CartMapper,
+        cart_mapper: CartMapper | None = None,
+        instamart_agent: InstamartCartAgentService | None = None,
     ) -> None:
         self.registry = registry
         self.cart_mapper = cart_mapper
+        self.instamart_agent = instamart_agent or InstamartCartAgentService()
 
     def providers(self) -> Dict[str, Any]:
         return {"providers": self.registry.descriptors()}
@@ -64,6 +71,8 @@ class GroceryCheckoutService:
         self,
         provider_id: str,
         payload: Dict[str, Any],
+        *,
+        authority_source: str = "ui_sync",
     ) -> Dict[str, Any]:
         adapter = self.registry.get(provider_id)
         descriptor = adapter.descriptor()
@@ -94,11 +103,32 @@ class GroceryCheckoutService:
                     message="Select at least one eligible native-cart item.",
                     status_code=422,
                 )
-            mapped_items = await self.cart_mapper(export_items)
-            result = await adapter.sync_cart(
-                mapped_items,
-                selected_address_id=selected_address_id,
-            )
+            if provider_id == "swiggy_instamart":
+                outcome = await self.instamart_agent.synchronize(
+                    adapter=adapter,
+                    native_items=export_items,
+                    selected_address_id=selected_address_id,
+                    source=authority_source,
+                    user_instruction=str(payload.get("user_instruction") or ""),
+                    operation_id=operation_id,
+                )
+                result = adapter.confirmed_agent_result(
+                    export_items,
+                    selected_address_id,
+                    outcome.capture,
+                )
+                result = await adapter.enrich_agent_result_with_payment(result)
+                mapped_items = export_items
+            else:
+                mapped_items = (
+                    await self.cart_mapper(export_items)
+                    if self.cart_mapper
+                    else export_items
+                )
+                result = await adapter.sync_cart(
+                    mapped_items,
+                    selected_address_id=selected_address_id,
+                )
             self._raise_result_error(provider_id, "sync_cart", result)
             review = save_initial_draft(
                 export_items,
@@ -196,7 +226,14 @@ class GroceryCheckoutService:
                     status_code=409,
                     draft=changed,
                 )
-            result = await adapter.revalidate_cart(draft_row_to_review(row) or {})
+            current_review = draft_row_to_review(row) or {}
+            result = await self._revalidate_provider(
+                provider_id,
+                adapter,
+                current_review,
+                operation_id=operation_id,
+                source="ui_revalidation",
+            )
             self._raise_result_error(provider_id, "revalidate_cart", result)
             review, changed = save_revalidated_draft(row, result)
             return {
@@ -293,7 +330,13 @@ class GroceryCheckoutService:
                     draft=changed,
                 )
 
-            validation = await adapter.revalidate_cart(review)
+            validation = await self._revalidate_provider(
+                provider_id,
+                adapter,
+                review,
+                operation_id=operation_id,
+                source="ui_order_preflight",
+            )
             self._raise_result_error(provider_id, "place_order_revalidation", validation)
             refreshed, changed = save_revalidated_draft(row, validation)
             if changed or refreshed.get("snapshot_hash") != payload.get("approved_snapshot_hash"):
@@ -316,7 +359,14 @@ class GroceryCheckoutService:
                 provider_id,
                 descriptor.environment,
             )
-            outcome = await adapter.place_order(draft_row_to_review(pending_row) or refreshed)
+            with commerce_request_context(
+                source="ui_place_order",
+                permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+                operation_id=operation_id,
+            ):
+                outcome = await adapter.place_order(
+                    draft_row_to_review(pending_row) or refreshed
+                )
             outcome["checkout_attempt_id"] = checkout_attempt_id
             final_review = save_order_outcome(pending_row, outcome)
             return {
@@ -351,6 +401,142 @@ class GroceryCheckoutService:
             "provider": provider_id,
             "review": save_order_outcome(row, outcome),
         }
+
+    async def sync_from_chat(
+        self,
+        *,
+        cart_item_ids: List[str] | None = None,
+        selected_address_id: str = "",
+        user_instruction: str = "",
+    ) -> Dict[str, Any]:
+        """Explicit chat-only Instamart synchronization with safe address fallback."""
+        provider_id = "swiggy_instamart"
+        adapter = self.registry.get(provider_id)
+        environment = adapter.descriptor().environment
+        address_id = str(selected_address_id or "").strip()
+        if not address_id:
+            existing = get_provider_checkout_draft(provider_id, environment)
+            address_id = str((existing or {}).get("selected_address_id") or "").strip()
+        used_default = False
+        if not address_id:
+            address_result = await adapter.list_addresses()
+            addresses = list(address_result.get("addresses") or [])
+            selected = next(
+                (address for address in addresses if address.get("is_default")),
+                addresses[0] if addresses else None,
+            )
+            if not selected:
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="chat_sync_cart",
+                    code="provider_address_required",
+                    message="Connect Swiggy and add a saved delivery address before moving the cart from chat.",
+                    status_code=422,
+                )
+            address_id = str(selected.get("id") or "")
+            used_default = True
+        result = await self.sync(
+            provider_id,
+            {
+                "cart_item_ids": cart_item_ids or [],
+                "selected_address_id": address_id,
+                "user_instruction": user_instruction,
+            },
+            authority_source="chat_sync",
+        )
+        result["address_selection"] = "provider_default" if used_default else "last_selected"
+        return result
+
+    async def _revalidate_provider(
+        self,
+        provider_id: str,
+        adapter: Any,
+        review: Dict[str, Any],
+        *,
+        operation_id: str,
+        source: str,
+    ) -> Dict[str, Any]:
+        if provider_id != "swiggy_instamart":
+            return await adapter.revalidate_cart(review)
+        outcome = await self.instamart_agent.synchronize(
+            adapter=adapter,
+            native_items=list(review.get("native_items") or []),
+            selected_address_id=str(review.get("selected_address_id") or ""),
+            source=source,
+            previous_review=review,
+            operation_id=operation_id,
+        )
+        refreshed = adapter.confirmed_agent_result(
+            list(review.get("native_items") or []),
+            str(review.get("selected_address_id") or ""),
+            outcome.capture,
+        )
+        refreshed = await adapter.enrich_agent_result_with_payment(refreshed)
+        return self._annotate_revalidation_changes(review, refreshed)
+
+    @staticmethod
+    def _annotate_revalidation_changes(
+        previous_review: Dict[str, Any],
+        refreshed: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        previous = list(previous_review.get("matched_items") or [])
+        current = list(refreshed.get("items") or [])
+        previous_by_native = {
+            str((item.get("native_item") or {}).get("id")): item
+            for item in previous
+        }
+        replacements: List[Dict[str, Any]] = []
+        changes: List[Dict[str, Any]] = []
+        for match in current:
+            native_id = str((match.get("native_item") or {}).get("id"))
+            old = previous_by_native.get(native_id)
+            if not old:
+                changes.append({"type": "added", "native_item": match.get("native_item")})
+                continue
+            old_product = old.get("matched_product") or {}
+            new_product = match.get("matched_product") or {}
+            old_id = old_product.get("candidate_id")
+            new_id = new_product.get("candidate_id")
+            if old_id != new_id:
+                replacements.append({
+                    "native_item": match.get("native_item"),
+                    "previous_product": old_product,
+                    "replacement_product": new_product,
+                })
+                continue
+            old_cart = old.get("cart_item") or {}
+            new_cart = match.get("cart_item") or {}
+            changed_fields = [
+                key
+                for key in ("price_minor", "line_total_minor", "pack_size", "quantity", "store_id")
+                if old_cart.get(key) != new_cart.get(key)
+            ]
+            if changed_fields:
+                changes.append({
+                    "type": "product_changed",
+                    "native_item": match.get("native_item"),
+                    "fields": changed_fields,
+                })
+        if len(previous) != len(current):
+            changes.append({"type": "membership_changed"})
+        if (previous_review.get("cart_summary") or {}) != (refreshed.get("cart_summary") or {}):
+            changes.append({"type": "bill_changed"})
+        if (previous_review.get("payment_options") or []) != (refreshed.get("payment_options") or []):
+            changes.append({"type": "payment_methods_changed"})
+        previous_unavailable = sorted(
+            (str(item.get("name") or ""), str(item.get("reason") or ""))
+            for item in previous_review.get("unavailable_items") or []
+        )
+        current_unavailable = sorted(
+            (str(item.get("name") or ""), str(item.get("reason") or ""))
+            for item in refreshed.get("unavailable_items") or []
+        )
+        if previous_unavailable != current_unavailable:
+            changes.append({"type": "unavailable_items_changed"})
+        refreshed["replacements"] = replacements
+        refreshed["changes"] = changes
+        refreshed["changed"] = bool(replacements or changes)
+        return refreshed
 
     def _claim(self, provider: str, environment: str, operation_id: str) -> None:
         if not claim_provider_checkout_operation(
