@@ -67,6 +67,7 @@ const CHAT_HISTORY_BATCH_SIZE = 6;
 const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
 const DEFAULT_ORDERING_PROVIDER = "";
 const PROVIDER_REVALIDATE_AFTER_MS = 5 * 60 * 1000;
+const SWIGGY_LOGO_URL = "/swiggy-logo.svg";
 
 const withProviderRoutes = (provider) => {
   const base = provider?.api_base;
@@ -85,6 +86,20 @@ const withProviderRoutes = (provider) => {
       connection: `${base}/connection`
     }
   };
+};
+
+const ProviderBrandMark = ({ provider, small = false }) => {
+  if (provider?.id !== "swiggy_instamart") {
+    return <span className={`provider-brand ${small ? "small" : ""}`}>{provider?.brandLabel}</span>;
+  }
+  return (
+    <span className={`provider-brand provider-brand-swiggy ${small ? "small" : ""}`}>
+      <span className="provider-swiggy-logo-clip" aria-hidden="true">
+        <Image src={SWIGGY_LOGO_URL} alt="" width={447} height={447} priority={!small} />
+      </span>
+      <span className="provider-swiggy-wordmark">Swiggy</span>
+    </span>
+  );
 };
 
 class ApiResponseError extends Error {
@@ -2253,7 +2268,21 @@ export default function Home() {
                   <circle cx="493" cy="100" r="20" fill="#df6645" />
                   <path d="m485 83 8 8 9-9" fill="none" stroke="#477b3e" strokeWidth="5" />
                   <path d="M527 98c-8-27 2-43 15-47 14 15 12 34-2 51M557 101c8-30 23-39 36-34 4 18-6 33-26 42" fill="#6b9852" />
-                  <text x="535" y="160" textAnchor="middle" fill="#fff" fontSize="29" fontWeight="800">{selectedProvider.brandLabel}</text>
+                  {selectedProvider.id === "swiggy_instamart" ? (
+                    <>
+                      <rect x="498" y="126" width="74" height="49" rx="9" fill="#fff" opacity="0.96" />
+                      <image
+                        href={SWIGGY_LOGO_URL}
+                        x="501"
+                        y="128"
+                        width="68"
+                        height="45"
+                        preserveAspectRatio="xMidYMin slice"
+                      />
+                    </>
+                  ) : (
+                    <text x="535" y="160" textAnchor="middle" fill="#fff" fontSize="29" fontWeight="800">{selectedProvider.brandLabel}</text>
+                  )}
                 </g>
                 <circle className="transfer-spark spark-one" cx="334" cy="42" r="5" fill="#b8ce75" />
                 <circle className="transfer-spark spark-two" cx="425" cy="55" r="4" fill="#d1df9c" />
@@ -3296,13 +3325,13 @@ export default function Home() {
                             disabled={!provider.enabled || isProviderSyncing}
                             onClick={() => selectOrderingProvider(provider)}
                           >
-                            <span className="provider-brand">{provider.brandLabel}</span>
+                            <ProviderBrandMark provider={provider} />
                             <span className="provider-option-copy">
                               <strong>{provider.label}</strong>
+                              <em>{provider.enabled ? (isSelected ? "Selected" : provider.state === "connected" || provider.state === "configured" ? "Ready" : "Available") : provider.badge}</em>
                               <small>{provider.description}</small>
                               {provider.environment && <small>{provider.environment} environment</small>}
                             </span>
-                            <em>{provider.enabled ? (isSelected ? "Selected" : provider.state === "connected" || provider.state === "configured" ? "Ready" : "Available") : provider.badge}</em>
                           </button>
                         );
                       })}
@@ -3358,7 +3387,7 @@ export default function Home() {
                     ) : (
                       <div className="provider-address-stage-body">
                         <div className={`provider-connection-state ${providerConnectionState}`}>
-                          <span className="provider-brand small">{selectedProvider.brandLabel}</span>
+                          <ProviderBrandMark provider={selectedProvider} small />
                           <div>
                             <strong>{providerStatusLabel}</strong>
                             <p>{providerStatusDescription}</p>

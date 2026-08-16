@@ -3745,12 +3745,12 @@ button {
 }
 
 .ordering-provider-option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 13px;
-  align-items: center;
-  min-height: 92px;
-  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 184px;
+  padding: 18px;
   color: var(--ink);
   background: rgba(250, 242, 237, 0.4);
   border: 1px solid rgba(115, 121, 111, 0.18);
@@ -3776,13 +3776,66 @@ button {
 }
 
 .provider-brand {
-  min-width: 74px;
+  min-width: 0;
   color: #6f3ec5;
   font-family: var(--font-head);
   font-size: 20px;
   font-style: normal;
   font-weight: 950;
   text-transform: lowercase;
+}
+
+.provider-brand-swiggy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #fc8019;
+  text-transform: none;
+}
+
+.provider-swiggy-logo-clip {
+  position: relative;
+  display: block;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 35px;
+  overflow: hidden;
+}
+
+.provider-swiggy-logo-clip img {
+  position: absolute;
+  top: -1px;
+  left: -7px;
+  width: 46px;
+  height: 46px;
+  max-width: none;
+}
+
+.provider-swiggy-wordmark {
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.provider-brand-swiggy.small {
+  min-width: 78px;
+  gap: 4px;
+}
+
+.provider-brand-swiggy.small .provider-swiggy-logo-clip {
+  flex-basis: 25px;
+  width: 25px;
+  height: 28px;
+}
+
+.provider-brand-swiggy.small .provider-swiggy-logo-clip img {
+  left: -5px;
+  width: 35px;
+  height: 35px;
+}
+
+.provider-brand-swiggy.small .provider-swiggy-wordmark {
+  font-size: 14px;
 }
 
 .provider-brand.small {
@@ -3795,7 +3848,7 @@ button {
 }
 
 .provider-swiggy_instamart .provider-brand {
-  color: #e65b18;
+  color: #fc8019;
 }
 
 .provider-connection-actions {
@@ -3835,11 +3888,12 @@ button {
 
 .provider-option-copy {
   display: grid;
-  gap: 4px;
+  gap: 7px;
+  width: 100%;
 }
 
 .provider-option-copy strong {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 950;
 }
 
@@ -3851,6 +3905,8 @@ button {
 }
 
 .ordering-provider-option em {
+  justify-self: start;
+  width: fit-content;
   padding: 5px 8px;
   color: var(--sage-deep);
   background: rgba(202, 236, 188, 0.5);
@@ -4304,15 +4360,6 @@ button {
   .checkout-stage-heading,
   .checkout-stage-heading.compact {
     gap: 10px;
-  }
-
-  .ordering-provider-option {
-    grid-template-columns: minmax(64px, auto) minmax(0, 1fr);
-  }
-
-  .ordering-provider-option em {
-    grid-column: 2 / 3;
-    justify-self: start;
   }
 
   .provider-connection-actions {
