@@ -138,8 +138,41 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         try:
             async with client.session() as session:
                 tools, version = await self._validated_tools(client, session, {"get_addresses"})
-                payload = self._unwrap(await client.call_tool(session, "get_addresses", {}))
-                addresses = self._normalize_addresses(payload)
+                addresses: List[Dict[str, Any]] = []
+                seen_address_ids: set[str] = set()
+                page = 1
+                while True:
+                    payload = self._unwrap(
+                        await client.call_tool(
+                            session,
+                            "get_addresses",
+                            {"page": page, "pageSize": 10},
+                        ),
+                        prefer_structured=True,
+                    )
+                    for address in self._normalize_addresses(payload):
+                        if address["id"] in seen_address_ids:
+                            continue
+                        seen_address_ids.add(address["id"])
+                        addresses.append(address)
+
+                    pagination = payload.get("pagination")
+                    has_more = (
+                        bool(pagination.get("hasMore"))
+                        if isinstance(pagination, dict)
+                        else False
+                    )
+                    if not has_more:
+                        break
+                    if page >= 100:
+                        raise ProviderOperationError(
+                            provider=self.provider_id,
+                            operation="list_addresses",
+                            code="provider_response_malformed",
+                            message="Instamart returned invalid address pagination.",
+                            retryable=True,
+                        )
+                    page += 1
                 return {
                     "status": "success",
                     "provider": self.provider_id,
@@ -575,9 +608,16 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             },
         }
 
-    def _unwrap(self, payload: Any) -> Dict[str, Any]:
+    def _unwrap(self, payload: Any, *, prefer_structured: bool = False) -> Dict[str, Any]:
         value = to_plain(payload)
-        if isinstance(value, dict) and isinstance(value.get("content"), list):
+        if (
+            prefer_structured
+            and isinstance(value, dict)
+            and isinstance(value.get("structuredContent"), dict)
+        ):
+            self._raise_tool_failure(value, "provider_call")
+            value = value["structuredContent"]
+        elif isinstance(value, dict) and isinstance(value.get("content"), list):
             for block in value["content"]:
                 if not isinstance(block, dict):
                     continue
@@ -621,16 +661,38 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             address_id = self._first(value, "id", "addressId", "address_id")
             if not address_id:
                 continue
-            label = self._first(value, "label", "type", "name", "addressLabel") or "Saved address"
+            label = self._first(
+                value,
+                "label",
+                "addressTag",
+                "address_tag",
+                "addressCategory",
+                "address_category",
+                "type",
+                "name",
+                "addressLabel",
+            )
             full = self._first(
                 value,
+                "addressLine",
+                "address_line",
+                "displayText",
+                "display_text",
                 "formattedAddress",
                 "formatted_address",
                 "fullAddress",
                 "full_address",
                 "address",
             )
-            addresses.append({"id": str(address_id), "label": str(label), "address": str(full or label)})
+            label_text = str(label or "").strip()
+            full_text = str(full or "").strip()
+            if not label_text and not full_text:
+                continue
+            addresses.append({
+                "id": str(address_id),
+                "label": label_text or "Saved address",
+                "address": full_text or label_text,
+            })
         deduped = {address["id"]: address for address in addresses}
         return list(deduped.values())
 

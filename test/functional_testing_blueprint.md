@@ -21,6 +21,20 @@ not persistence across a backend restart.
 Every test run should produce a dated artifact that is detailed enough for
 debugging. Do not record only duration and status.
 
+The report must be easy to triage before it is detailed:
+
+- Put the overall `PASS`, `FAIL`, `PARTIAL`, `INCONCLUSIVE`, and `BLOCKED`
+  counts at the top.
+- Immediately follow them with a summary table containing **Scenario**,
+  **Status**, **What worked**, and **What was unsuccessful**.
+- For every non-pass scenario, start its detailed section with a bold
+  `Unsuccessful:` one-sentence explanation. A reader must not need to scan the
+  evidence to understand why the scenario did not pass.
+- Put diagnostic evidence after the decision summary. Do not lead with setup,
+  implementation detail, or long narrative paragraphs.
+- Keep the human-readable report concise. Put exhaustive machine evidence in
+  `results.json`; do not duplicate the full structured payload in prose.
+
 For each scenario, record:
 
 - Scenario ID and title.

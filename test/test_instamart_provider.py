@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -28,18 +29,35 @@ class FakeContext:
 
 
 class FakeInstamartClient:
-    def __init__(self, *, cart_items=None, available=True, tools=None, checkout_error=False):
+    def __init__(
+        self,
+        *,
+        cart_items=None,
+        available=True,
+        tools=None,
+        checkout_error=False,
+        address_pages=None,
+    ):
         self.calls = []
         self.cart_items = cart_items
         self.available = available
         self.checkout_error = checkout_error
+        self.address_pages = address_pages or [[{
+            "id": "home-1",
+            "addressTag": "Home",
+            "addressCategory": "HOME",
+            "addressLine": "HSR Layout, Bengaluru 560102",
+            "phoneNumber": "redacted-by-adapter",
+        }]]
         names = tools or {
             "get_addresses", "search_products", "update_cart", "get_cart",
             "get_payment_options", "checkout", "get_orders", "track_order",
             "check_payment_status",
         }
         schemas = {
-            "get_addresses": {},
+            "get_addresses": {
+                "page": {"type": "number"}, "pageSize": {"type": "number"},
+            },
             "search_products": {
                 "addressId": {"type": "string"}, "query": {"type": "string"},
             },
@@ -75,7 +93,27 @@ class FakeInstamartClient:
         arguments = arguments or {}
         self.calls.append((name, arguments))
         if name == "get_addresses":
-            return {"success": True, "data": {"addresses": [{"id": "home-1", "label": "Home", "address": "Bengaluru"}]}}
+            page = int(arguments.get("page", 1))
+            addresses = self.address_pages[page - 1] if page <= len(self.address_pages) else []
+            structured = {
+                "addresses": addresses,
+                "pagination": {
+                    "page": page,
+                    "pageSize": 10,
+                    "total": sum(len(rows) for rows in self.address_pages),
+                    "totalPages": len(self.address_pages),
+                    "hasMore": page < len(self.address_pages),
+                },
+                "imWidgetV2Eligible": True,
+            }
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({"success": True, "data": structured}),
+                }],
+                "structuredContent": structured,
+                "isError": False,
+            }
         if name == "search_products":
             variation = {
                 "spinId": "spin-1",
@@ -168,6 +206,42 @@ class InstamartProviderTests(unittest.TestCase):
 
     def item(self):
         return {"id": 1, "name": "Milk", "amount": 1, "unit": "L"}
+
+    def test_live_address_shape_is_normalized_without_phone_number(self):
+        client = FakeInstamartClient()
+
+        result = asyncio.run(self.adapter(client).list_addresses())
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["addresses"], [{
+            "id": "home-1",
+            "label": "Home",
+            "address": "HSR Layout, Bengaluru 560102",
+        }])
+        self.assertEqual(
+            next(args for name, args in client.calls if name == "get_addresses"),
+            {"page": 1, "pageSize": 10},
+        )
+
+    def test_all_address_pages_are_loaded_and_deduplicated(self):
+        client = FakeInstamartClient(address_pages=[
+            [{"id": "home-1", "addressTag": "Home", "addressLine": "HSR Layout"}],
+            [
+                {"id": "home-1", "addressTag": "Home", "addressLine": "HSR Layout"},
+                {"id": "work-1", "addressTag": "Work", "addressLine": "Indiranagar"},
+            ],
+        ])
+
+        result = asyncio.run(self.adapter(client).list_addresses())
+
+        self.assertEqual(
+            [(row["id"], row["label"]) for row in result["addresses"]],
+            [("home-1", "Home"), ("work-1", "Work")],
+        )
+        self.assertEqual(
+            [args["page"] for name, args in client.calls if name == "get_addresses"],
+            [1, 2],
+        )
 
     def test_sync_is_address_scoped_replaces_cart_and_confirms_result(self):
         client = FakeInstamartClient()

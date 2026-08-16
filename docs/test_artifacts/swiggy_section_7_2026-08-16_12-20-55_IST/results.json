@@ -1,0 +1,197 @@
+{
+  "run": {
+    "date": "2026-08-16",
+    "timezone": "Asia/Kolkata",
+    "recorded_at": "2026-08-16T12:20:55+05:30",
+    "completed_at": "2026-08-16T12:50:50+05:30",
+    "environment": "local",
+    "model": "gemini-3.5-flash-lite",
+    "section": 7,
+    "real_order_placed": false,
+    "real_instamart_cart_changed": true,
+    "browser_available": true,
+    "browser_driver": "chrome_devtools_mcp"
+  },
+  "summary": {
+    "pass": 0,
+    "fail": 2,
+    "partial": 2,
+    "blocked": 0,
+    "automated_assertions_passed": 38,
+    "automated_assertions_failed": 0,
+    "frontend_lint": "pass"
+  },
+  "live_evidence": {
+    "oauth_dynamic_registration": "pass",
+    "pkce_authorization_url_shape": "pass",
+    "oauth_connection": "pass",
+    "provider_state": "connected",
+    "saved_address_count": 10,
+    "capability_version_present": true,
+    "connection_survived_backend_restart": true,
+    "token_stored_as_fernet_ciphertext": true,
+    "pkce_verifiers_encrypted": true,
+    "completed_oauth_flow_present": true,
+    "sensitive_registration_keys_present": [],
+    "invalid_oauth_state_http_status": 403,
+    "invalid_oauth_state_code": "oauth_state_invalid",
+    "disabled_blinkit_http_status": 404,
+    "disabled_blinkit_code": "provider_not_available",
+    "provider_preference_persisted_and_restored": true,
+    "live_checkout_draft_present": true,
+    "live_sync_http_status": 200,
+    "live_sync_status": "blocked",
+    "selected_native_rows": 3,
+    "exported_native_rows": 2,
+    "pantry_covered_row_excluded": true,
+    "matched_rows": 1,
+    "unavailable_or_drift_rows": 2,
+    "confirmed_provider_cart_rows": 2,
+    "provider_total_minor": 14300,
+    "provider_total_currency": "INR",
+    "payment_option_count": 7,
+    "order_blocker_count": 2,
+    "can_place_order": false,
+    "live_draft_survived_backend_restart": true,
+    "provider_cart_images_present": true,
+    "provider_cart_exact_names_present": false,
+    "provider_cart_pack_fields_present": false,
+    "provider_cart_price_fields_present": false,
+    "browser_zepto_disabled": true,
+    "browser_zepto_auth_tab_opened": false,
+    "browser_instamart_selected": true,
+    "browser_instamart_connected": true,
+    "browser_address_labels_distinguishable": false,
+    "live_revalidation_http_status": 200,
+    "live_revalidation_changed": true,
+    "live_revalidation_replacement": "Dabur coconut milk -> Real Thai coconut milk",
+    "post_revalidation_provider_total_minor": 21800,
+    "post_revalidation_provider_cart_rows": 1,
+    "post_revalidation_unresolved_rows": 1,
+    "post_revalidation_payment_reset": true,
+    "post_revalidation_acknowledgement_reset": true,
+    "browser_native_selected_count": 32,
+    "durable_draft_selected_count": 2,
+    "native_draft_selection_consistent": false,
+    "browser_payment_options_visible": 7,
+    "browser_upi_only_when_upi_returned": true,
+    "browser_cod_visible": false,
+    "browser_place_order_disabled": true,
+    "browser_reload_reset_payment": true,
+    "browser_reload_reset_acknowledgement": true,
+    "browser_exact_approval_summary_present": false,
+    "browser_narrow_viewport_horizontal_overflow": true
+  },
+  "scenarios": [
+    {
+      "id": "7.1",
+      "title": "Provider Selection, Connection, and Address",
+      "status": "fail",
+      "passed_checks": [
+        "backend registry descriptors",
+        "dynamic registration and PKCE initiation",
+        "household OAuth completion",
+        "encrypted credential persistence",
+        "saved address retrieval",
+        "invalid state rejection",
+        "disabled Blinkit rejection",
+        "provider preference persistence and restoration",
+        "connection survives backend restart"
+      ],
+      "failed_checks": [
+        "default Uvicorn access logging exposes OAuth callback query parameters",
+        "saved address choices all render as indistinguishable Saved address labels"
+      ],
+      "browser_checks": [
+        "Swiggy selected and connected",
+        "Zepto disabled without opening an authentication tab",
+        "Blinkit disabled and marked Coming soon",
+        "store context ready"
+      ]
+    },
+    {
+      "id": "7.2",
+      "title": "Provider Cart Synchronization and Reconciliation",
+      "status": "partial",
+      "passed_checks": [
+        "12 Instamart adapter assertions",
+        "address-scoped fixture sync",
+        "complete-cart replacement contract",
+        "confirmed-cart read-back reconciliation",
+        "availability and quantity fail-closed behavior",
+        "matcher containment",
+        "payment option normalization",
+        "live address-scoped cart replacement",
+        "live pantry-covered row exclusion",
+        "live provider-returned total",
+        "live blocked draft persistence across restart"
+      ],
+      "issues": [
+        "Confirmed provider cart line rendered with a generic name and unavailable line price/subtotal."
+      ],
+      "accepted_outcomes": [
+        "Chia Seeds remained visible as unresolved rather than being matched ambiguously.",
+        "The provider-added FREEBIE line remained visible in the confirmed cart."
+      ],
+      "browser_checks": [
+        "provider cart review rendered",
+        "unresolved Chia Seeds remained visible",
+        "provider fees and authoritative total rendered",
+        "order stayed blocked"
+      ]
+    },
+    {
+      "id": "7.3",
+      "title": "Durable Revalidation, Repair, and Provider Switching",
+      "status": "fail",
+      "passed_checks": [
+        "native drift invalidation fixture",
+        "replacement and change fixture",
+        "durable connection across backend restart",
+        "provider-environment lease schema",
+        "live blocked checkout draft survives backend restart",
+        "stale page entry triggered successful revalidation",
+        "replacement and material changes rendered with Last checked",
+        "material change reset payment and acknowledgement",
+        "unresolved item remained visible and blocked ordering",
+        "durable draft survived full browser reload"
+      ],
+      "issues": [
+        "After reload, the native-cart UI reported 32 selected rows while the durable draft contained only 2 selected native IDs."
+      ],
+      "unobserved_checks": [
+        "cross-provider switching because Zepto and Blinkit were intentionally disabled"
+      ]
+    },
+    {
+      "id": "7.4",
+      "title": "Payment Approval, Checkout Safety, and Recovery",
+      "status": "partial",
+      "passed_checks": [
+        "UPI opaque identifier policy",
+        "COD fallback policy",
+        "changed cart stops before checkout",
+        "ambiguous outcome checks order history",
+        "unknown outcome blocks retry",
+        "order outcome persistence fixture",
+        "browser displayed only seven provider-returned UPI methods",
+        "browser payment selection and acknowledgement PATCHes succeeded",
+        "browser kept Place order disabled for unresolved intent",
+        "browser reload cleared approval",
+        "no checkout endpoint called and no order placed"
+      ],
+      "issues": [
+        "The final acknowledgement did not enumerate the exact address, products, quantities, payable total, and selected payment method.",
+        "The narrow checkout layout overflowed horizontally instead of stacking sidebar cards."
+      ],
+      "unobserved_checks": [
+        "live 409 pre-order validation and pending/ambiguous recovery because the draft remained blocked and no order was attempted"
+      ]
+    }
+  ],
+  "artifacts": {
+    "report": "report.md",
+    "separate_backend_log": null,
+    "separate_findings_document": null
+  }
+}
