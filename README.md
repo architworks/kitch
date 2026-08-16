@@ -534,8 +534,8 @@ frontend/
 docs/
   vision_and_requirements.md
   ux_user_flows.md
-  current_architecture.md
-  current_ai_agent_architecture.md
+  system_architecture.md
+  ai_agent_architecture.md
   current_technology_stack.md
   test_scenarios.md
   production_test_results.md
@@ -568,15 +568,18 @@ docs/
 - Pantry quantity reconciliation across arbitrary units is intentionally limited.
 - Provider MCP schemas, catalog behavior, auth availability, and production access remain externally controlled.
 - Instamart production remains gated until Swiggy approval and a successful staging soak.
-- Known orchestration issue: compound requests that span multiple specialist agents may currently be routed to only one sub-agent.
+- Current verified orchestration, matching, provider-draft, and candidate-price
+  defects are tracked in `docs/known_issues.md`.
 
 ## More Documentation
 
 Start with these files for deeper context:
 
 - `docs/vision_and_requirements.md`
-- `docs/current_architecture.md`
-- `docs/current_ai_agent_architecture.md`
+- `docs/system_architecture.md` — end-to-end frontend, FastAPI, persistence,
+  provider, and checkout boundaries.
+- `docs/ai_agent_architecture.md` — Gemini/ADK topology, specialist ownership,
+  tools, memory, and commerce-agent safety.
 - `docs/current_technology_stack.md`
 - `docs/ux_user_flows.md`
 - `docs/known_issues.md`

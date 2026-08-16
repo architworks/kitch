@@ -1,9 +1,9 @@
-# Kitch: Current System Design
+# Kitch System Architecture
 
 This document describes the current end-to-end system design: frontend, backend gateway, ADK runtime, persistence, provider adapters, and approval boundaries.
 
 For product intent, read `vision_and_requirements.md`.
-For AI runtime and agent roles, read `current_ai_agent_architecture.md`.
+For AI runtime and agent roles, read `ai_agent_architecture.md`.
 For concrete stack/configuration, read `current_technology_stack.md`.
 
 ---
@@ -16,11 +16,16 @@ The current design separates responsibilities deliberately:
 
 - The frontend renders state and collects explicit user actions.
 - FastAPI owns browser-facing APIs, state hydration, multimodal request orchestration, and provider approval boundaries.
-- ADK agents reason about user intent and call Python tools.
+- The main ADK coordinator team reasons about culinary and household intent and
+  calls Python tools.
+- A separate one-shot Instamart agent performs authorized provider catalogue
+  matching and reversible cart preparation.
 - Python tools perform deterministic side effects.
 - Supabase stores authoritative structured product state.
 - ADK memory stores explicitly ephemeral household food and brand preferences.
-- Provider adapters translate Kitch's native cart into provider carts.
+- The commerce layer translates Kitch's native cart into provider carts through
+  provider-specific execution: a guarded Gemini agent for Instamart and an
+  adapter-driven flow for Zepto.
 
 ```mermaid
 flowchart LR
@@ -30,6 +35,8 @@ flowchart LR
     Coordinator --> Chef[chef_planner]
     Coordinator --> Vision[vision_scanner]
     Coordinator --> RecipeGrocery[recipe_grocery_planner]
+    Coordinator --> ProviderReadTools[Provider status tools]
+    Coordinator --> SyncTool[sync_instamart_cart_tool]
 
     Chef --> Tools[Python Tool Layer]
     Vision --> Tools
@@ -40,12 +47,14 @@ flowchart LR
     Runner --> Sessions[ADK Sessions]
 
     API --> Checkout[GroceryCheckoutService]
+    SyncTool --> Checkout
     Checkout --> InstamartAgent[Gemini Instamart cart agent]
     InstamartAgent --> ToolPolicy[Commerce tool policy]
+    InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
     Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
     Checkout --> InstamartAdapter[InstamartProviderAdapter]
     ZeptoAdapter --> ZeptoMCP[Zepto MCP]
-    InstamartAdapter --> InstamartMCP[Swiggy Instamart /im MCP]
+    InstamartAdapter --> InstamartMCP
 ```
 
 ---
@@ -76,11 +85,19 @@ Household food and brand preferences are stored in ADK memory as flexible text.
 
 **Why:** preferences are naturally conversational and can be fuzzy. A strict schema would prematurely constrain how users express preferences and how agents apply them.
 
-### Provider sync is not agent-owned
+### Provider sync is backend-authorized and provider-specific
 
-Provider sync and order approval sit behind provider-keyed backend HTTP endpoints, `GroceryCheckoutService`, and adapters implementing `GroceryProviderAdapter`.
+All provider sync and order approval sits behind provider-keyed backend HTTP
+endpoints and `GroceryCheckoutService`. Zepto performs matching through its
+adapter. Swiggy Instamart runs a dedicated Gemini cart agent with a restricted
+MCP toolset, then uses `InstamartProviderAdapter` to normalize the exact captured
+provider cart, prices, payment capabilities, and checkout response.
 
-**Why:** provider operations modify real external state. Chat should not be able to place orders. The backend can create review snapshots and require explicit frontend approval before order placement.
+**Why:** provider operations modify real external state. Agentic catalogue
+reasoning is useful for real-world products and pack descriptions, but authority
+must remain deterministic. Chat may explicitly prepare an Instamart cart; it
+cannot select payment or place an order. The backend creates durable review
+snapshots and requires explicit frontend approval before checkout.
 
 ---
 
@@ -163,7 +180,10 @@ Current routes:
 Why the backend owns durable checkout drafts:
 
 - A user must approve the exact provider cart they saw.
-- Order placement should not rerun LLM reasoning or product matching after approval.
+- Final preflight may rerun provider validation and, for Instamart, the guarded
+  matching agent. If the cart, mapping, price, quantity, pack, bill, or payment
+  methods change, the backend returns 409 and requires a new review instead of
+  silently ordering the new result.
 - Confirmation token plus snapshot hash prevents stale or modified reviews from being submitted silently.
 - Persisted operation leases serialize sync, repair, and order operations per household/provider.
 
@@ -171,14 +191,16 @@ Why the backend owns durable checkout drafts:
 
 ## Agent Runtime Duties
 
-Location: `backend/app/agent/core.py`
-
-The ADK runtime contains:
+The main ADK application in `backend/app/agent/core.py` contains:
 
 - `kitch_coordinator`
 - `chef_planner`
 - `vision_scanner`
 - `recipe_grocery_planner`
+
+The provider checkout service separately creates `instamart_cart_agent` through
+`InstamartCartAgentService`. This is a one-shot ADK run, not a coordinator
+sub-agent.
 
 Agents reason over:
 
@@ -193,12 +215,16 @@ Agents reason over:
 - Pantry state.
 - Household preferences.
 
-Agents do not reason over:
+The main coordinator team does not reason over:
 
 - UI layout.
-- Zepto payment UI state.
+- Provider payment UI state.
 - Frontend route state.
 - Final order placement.
+
+The Instamart cart agent reasons only over the scoped native items, selected
+address, ordering preferences, Swiggy history, and the allowlisted `/im`
+catalogue/cart tools. It never receives checkout authority.
 
 Why:
 
@@ -292,21 +318,45 @@ sequenceDiagram
     UI->>API: POST .../{provider}/checkout/sync + address id
     API->>Service: sync native snapshot
     Service->>DB: Read cart; acquire provider/environment lease
-    Service->>Agent: Run Instamart cart agent for explicit Instamart sync
-    Agent->>MCP: Address-scoped iterative search + ordering history
-    Agent->>MCP: Replace complete provider cart
-    Agent->>MCP: Read provider cart and repair once if needed
-    Agent-->>Service: Match reasoning + captured exact MCP results
+    alt Swiggy Instamart
+        Service->>Agent: Run one-shot cart agent
+        Agent->>MCP: Address-scoped iterative search + ordering history
+        Agent->>MCP: Replace complete provider cart
+        Agent->>MCP: Read provider cart and repair once if needed
+        Agent-->>Service: Match reasoning + captured exact MCP results
+        Service->>Adapter: Normalize confirmed cart, bill, and capabilities
+    else Adapter-driven provider such as Zepto
+        Service->>Adapter: Synchronize selected native snapshot
+        Adapter->>MCP: Search, replace cart, and read back
+        MCP-->>Adapter: Confirmed provider response
+    end
     Service-->>API: Confirmed cart + unavailable rows + normalized totals
     Service->>DB: Save durable draft + bill + mappings + token
     API-->>UI: Confirmed checkout draft
     UI->>UI: Close dialog; unlock edits; show review
     UI->>API: PATCH checkout payment/acknowledgement
     UI->>API: POST revalidate after explicit stale-cart refresh
-    API->>Adapter: Validate products; repair and reconcile if necessary
+    API->>Service: Revalidate durable draft
+    alt Swiggy Instamart refresh
+        Service->>Agent: Re-run guarded cart validation and repair
+        Agent->>MCP: Search, replace if needed, and confirm cart
+    else Adapter-driven provider refresh
+        Service->>Adapter: Validate, repair, and reconcile
+    end
     UI->>API: POST place-order after final approval
-    API->>Adapter: Mandatory final revalidation
-    API->>Adapter: place_order(review)
+    API->>Service: Verify token, hash, acknowledgement, payment, and native snapshot
+    alt Swiggy Instamart preflight
+        Service->>Agent: Re-run guarded cart validation
+        Agent->>MCP: Confirm current cart
+    else Adapter-driven provider preflight
+        Service->>Adapter: Revalidate current provider cart
+    end
+    alt Anything changed
+        Service-->>API: Updated draft
+        API-->>UI: HTTP 409; review again
+    else Approved snapshot unchanged
+        Service->>Adapter: checkout(review)
+    end
 ```
 
 Important rules:

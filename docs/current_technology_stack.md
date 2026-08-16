@@ -3,8 +3,8 @@
 This document describes the concrete implementation stack, local development commands, environment variables, persistence schema, deployment direction, and implementation tradeoffs.
 
 For product direction, read `vision_and_requirements.md`.
-For system design, read `current_architecture.md`.
-For AI runtime and agent routing, read `current_ai_agent_architecture.md`.
+For system design, read `system_architecture.md`.
+For AI runtime and agent routing, read `ai_agent_architecture.md`.
 
 ---
 
@@ -17,19 +17,24 @@ Kitch is split into:
 3. Google ADK 2.0 agent runtime.
 4. Supabase persistence.
 5. Native Gemini model runtime.
-6. A provider-neutral commerce layer with Zepto and Swiggy Instamart adapters.
+6. A provider-neutral commerce layer with adapter-driven Zepto behavior and a
+   guarded Gemini Instamart cart agent.
 
 ```mermaid
 flowchart LR
     Browser[Browser] --> Next[Next.js Frontend]
     Next --> FastAPI[FastAPI Backend]
     FastAPI --> ADK[Google ADK 2.0 Runtime]
-    ADK --> LLM[Configured LLM Provider]
+    ADK --> LLM[Configured Gemini Model]
     FastAPI --> Supabase[(Supabase)]
     ADK --> Memory[ADK In-Memory Session and Memory Services]
     FastAPI --> Checkout[GroceryCheckoutService]
-    Checkout --> Zepto[Zepto MCP Adapter]
-    Checkout --> Instamart[Swiggy Instamart /im Adapter]
+    Checkout --> Zepto[ZeptoProviderAdapter]
+    Zepto --> ZeptoMCP[Zepto MCP]
+    Checkout --> InstamartAgent[One-shot Gemini Instamart cart agent]
+    InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
+    Checkout --> InstamartAdapter[InstamartProviderAdapter normalization and checkout]
+    InstamartAdapter --> InstamartMCP
 ```
 
 Why this split:

@@ -925,8 +925,8 @@ Use a short demo that proves system behavior rather than just showing screens.
 ## Supporting Docs
 
 - Product vision: `docs/vision_and_requirements.md`
-- System design: `docs/current_architecture.md`
-- Agent architecture: `docs/current_ai_agent_architecture.md`
+- System design: `docs/system_architecture.md`
+- Agent architecture: `docs/ai_agent_architecture.md`
 - Tech stack: `docs/current_technology_stack.md`
 - Agent test scenarios: `docs/test_scenarios.md`
 - Production verification snapshot: `docs/production_test_results.md`

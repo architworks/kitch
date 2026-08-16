@@ -1,0 +1,135 @@
+{
+  "run": {
+    "started_at": "2026-08-16T17:48:36+05:30",
+    "completed_at": "2026-08-16T18:05:43+05:30",
+    "timezone": "Asia/Kolkata",
+    "environment": "local",
+    "sections": [7, 8],
+    "browser_requested": "chrome_mcp",
+    "browser_available": true,
+    "browser_driver": "chrome_devtools_mcp",
+    "real_order_placed": false,
+    "provider_cart_changed": true
+  },
+  "summary": {
+    "pass": 2,
+    "fail": 3,
+    "partial": 2,
+    "automated_assertions_passed": 28,
+    "frontend_lint": "pass",
+    "frontend_build": "pass"
+  },
+  "scenarios": [
+    {
+      "id": "7.1",
+      "status": "partial",
+      "successful": [
+        "Instamart connected in local environment",
+        "Zepto disabled",
+        "Blinkit coming soon",
+        "14 labeled saved addresses returned",
+        "Chrome showed Instamart selected, Zepto disabled, and Blinkit Coming soon",
+        "Chrome automatically loaded and selected the first saved address"
+      ],
+      "unsuccessful": [
+        "fresh OAuth, reconnect, and disconnect cycle not executed"
+      ]
+    },
+    {
+      "id": "7.2",
+      "status": "fail",
+      "successful": [
+        "Baker's Dozen bread synchronized and confirmed",
+        "confirmed cart exposed image, pack, line price, fees, total, and UPI options",
+        "Chrome rendered the exact bread row and authoritative INR amounts"
+      ],
+      "unsuccessful": [
+        "12-piece egg variant was returned but rejected as ambiguous",
+        "explicit chat sync returned UPDATE_RECIPE_GROCERY instead of UPDATE_PROVIDER_CART",
+        "search-candidate price_minor values were incorrectly scaled",
+        "narrow Chrome viewport had horizontal overflow"
+      ]
+    },
+    {
+      "id": "7.3",
+      "status": "fail",
+      "successful": [
+        "durable draft restored",
+        "explicit revalidation completed",
+        "native drift reset payment and acknowledgement",
+        "Chrome disabled stale payment, acknowledgement, and order controls"
+      ],
+      "unsuccessful": [
+        "deleted native item remained selected in ready provider draft",
+        "draft retained can_place_order true with no blockers",
+        "cross-provider switching unavailable because Zepto and Blinkit were disabled"
+      ]
+    },
+    {
+      "id": "7.4",
+      "status": "partial",
+      "successful": [
+        "invented payment rejected with HTTP 422",
+        "provider-returned UPI option accepted",
+        "ordinary chat refused order placement",
+        "Chrome showed stale-review checkout controls locked",
+        "28 checkout and provider assertions passed",
+        "no order placed"
+      ],
+      "unsuccessful": [
+        "live order preflight intentionally not invoked"
+      ]
+    },
+    {
+      "id": "8.1",
+      "status": "pass",
+      "successful": [
+        "bread preference stored and recalled",
+        "Baker's Dozen product selected and confirmed in Instamart cart"
+      ],
+      "unsuccessful": []
+    },
+    {
+      "id": "8.2",
+      "status": "pass",
+      "successful": [
+        "category exclusion stored",
+        "milk, apples, and carrots included",
+        "cereal and cookies excluded"
+      ],
+      "unsuccessful": []
+    },
+    {
+      "id": "8.3",
+      "status": "fail",
+      "successful": [
+        "Amul butter preference stored and recalled",
+        "Chrome displayed the correct Amul recall response"
+      ],
+      "unsuccessful": [
+        "Instamart butter synchronization received the bread preference",
+        "agent searched Baker's Dozen products instead of Amul butter"
+      ]
+    }
+  ],
+  "final_state": {
+    "native_cart": [
+      {
+        "id": 180,
+        "name": "eggs",
+        "amount": 12,
+        "unit": "piece"
+      }
+    ],
+    "provider_cart_test_item_remaining": "The Baker's Dozen whole wheat bread",
+    "durable_draft_status": "ready",
+    "durable_draft_can_place_order": true,
+    "durable_draft_acknowledged": false,
+    "durable_draft_payment_selected": false
+  },
+  "artifacts": {
+    "report": "report.md",
+    "results": "results.json",
+    "separate_findings_document": null
+  }
+}

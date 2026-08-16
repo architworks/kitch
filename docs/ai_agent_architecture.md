@@ -1,8 +1,12 @@
-# Kitch: Current AI and Agent Architecture
+# Kitch AI Agent Architecture
 
-This document combines the former agent topology and AI architecture docs without condensing their content. It is intentionally detailed so a new developer or coding agent can understand both the conceptual agent team and the concrete ADK runtime shape in one place.
+This is the authoritative description of Kitch's AI implementation: agent
+topology, ADK runtime shape, routing, tools, model boundary, memory, and
+commerce-agent safety.
 
-Product intent lives in `vision_and_requirements.md`. System design and API boundaries live in `current_architecture.md`. Stack and implementation details live in `current_technology_stack.md`.
+Product intent lives in `vision_and_requirements.md`. End-to-end application
+design and API boundaries live in `system_architecture.md`. Stack and
+implementation details live in `current_technology_stack.md`.
 
 ---
 
@@ -14,15 +18,20 @@ This part is scoped to agent roles, routing, tools, memory boundaries, and state
 
 ## Topology Summary
 
-Kitch uses a Google ADK 2.0 hub-and-spoke topology:
+Kitch uses two related Google ADK execution graphs:
 
-- One parent coordinator agent.
-- Three specialist sub-agents.
+- One long-lived parent coordinator with three registered specialist
+  sub-agents.
+- One separate, one-shot Instamart cart agent created by
+  `GroceryCheckoutService` for an authorized synchronization operation. It is
+  not a fourth coordinator sub-agent.
+- Three coordinator commerce tools: two read-only tools and one explicit
+  Instamart cart-sync tool.
 - Python tools for deterministic side effects.
 - Supabase for structured app state.
 - ADK memory for flexible household preferences.
-- A provider-neutral commerce layer with separate Zepto adapter behavior.
-- One dedicated Gemini Instamart cart agent with a guarded `/im` MCP toolset.
+- A provider-neutral commerce layer in which Zepto remains adapter-driven while
+  Instamart catalogue matching and cart preparation are agent-driven.
 
 ```mermaid
 flowchart TD
@@ -39,6 +48,10 @@ flowchart TD
     Coordinator --> Chef
     Coordinator --> Vision
     Coordinator --> RecipeGrocery
+
+    Coordinator --> ListProviders[list_grocery_providers_tool]
+    Coordinator --> CheckoutStatus[get_grocery_checkout_status_tool]
+    Coordinator --> SyncInstamart[sync_instamart_cart_tool]
 
     subgraph ToolLayer[Python Tool Layer]
         GetSchedule[get_meal_schedule_tool]
@@ -98,17 +111,20 @@ flowchart TD
     GetDatetime --> RuntimeContext[Runtime datetime context]
 
     API --> Checkout[GroceryCheckoutService]
+    SyncInstamart --> Checkout
     Checkout --> InstamartAgent[instamart_cart_agent]
     InstamartAgent --> CommercePolicy[CommerceToolPolicy]
-    Checkout --> ProviderAdapters[Backend Provider Adapters]
-    ProviderAdapters --> Zepto[Zepto MCP]
-    ProviderAdapters --> Instamart[Swiggy Instamart /im MCP]
+    InstamartAgent --> Instamart[Swiggy Instamart /im MCP]
+    Checkout --> InstamartAdapter[InstamartProviderAdapter]
+    InstamartAdapter --> Instamart
+    Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
+    ZeptoAdapter --> Zepto[Zepto MCP]
 ```
 
 Provider sync is intentionally outside the `recipe_grocery_planner`. The
-dedicated Instamart cart agent handles provider product reasoning only after an
-explicit sync request. The backend owns authority, durable review, payment, and
-order approval boundaries.
+dedicated Instamart cart agent handles provider product reasoning during an
+authorized initial sync, explicit refresh, or mandatory UI order preflight. The
+backend owns authority, durable review, payment, and order approval boundaries.
 
 ---
 
@@ -144,11 +160,22 @@ Responsibilities:
 
 Tools:
 
-- None.
+- `list_grocery_providers_tool` — reads provider descriptors and connection
+  state.
+- `get_grocery_checkout_status_tool` — reads one provider's durable checkout
+  status.
+- `sync_instamart_cart_tool` — invokes the same guarded Instamart sync service
+  used by the Groceries UI, but only for an explicit move/sync/refresh request.
 
-Why no tools:
+Why the coordinator has a narrowly scoped write tool:
 
-- The coordinator should not perform side effects. It should choose the correct specialist. This reduces accidental writes and keeps responsibilities clear.
+- Provider sync is an explicit conversational intent rather than ordinary
+  grocery planning.
+- The tool can replace a reversible Instamart cart, but cannot select payment or
+  call checkout.
+- `GroceryCheckoutService`, `CommerceToolPolicy`, operation leases, and exact
+  MCP-result capture remain authoritative; the coordinator cannot claim success
+  from text alone.
 
 State available:
 
@@ -359,8 +386,13 @@ Why checkout remains outside the agent topology:
 
 The coordinator receives read-only provider status plus one explicit
 `sync_instamart_cart_tool`. That tool invokes the same guarded service used by
-the Groceries UI and returns an `UPDATE_PROVIDER_CART` action only after a
-confirmed draft exists. It has no order capability.
+the Groceries UI. FastAPI emits `UPDATE_PROVIDER_CART` only when the durable
+Instamart draft actually changes. It has no order capability.
+
+This is the intended topology. The currently reproducible failure in which an
+explicit Instamart sync request is routed to recipe/native-grocery handling is
+tracked as KI-001 in `known_issues.md`; it is a routing bug, not the designed
+ownership model.
 
 ---
 
@@ -431,7 +463,7 @@ Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway
 flowchart LR
     User[Household Member] --> Frontend[Next.js App]
     Frontend --> API[FastAPI Gateway]
-    API --> Runner[ADK Runner]
+    API --> Runner[Main ADK Runner]
     Runner --> App[ADK App]
     App --> Coordinator[kitch_coordinator]
     Coordinator --> Chef[chef_planner]
@@ -443,7 +475,12 @@ flowchart LR
     Tools --> Supabase[(Supabase)]
     RecipeGrocery --> Memory[ADK Memory Service]
     Runner --> Sessions[ADK Session Service]
-    API --> ProviderAdapters[Backend Provider Adapters]
+    Coordinator --> CommerceTools[Provider status + explicit Instamart sync tools]
+    API --> Checkout[GroceryCheckoutService]
+    CommerceTools --> Checkout
+    Checkout --> InstamartAgent[One-shot instamart_cart_agent]
+    InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
+    Checkout --> ProviderAdapters[Backend Provider Adapters]
 ```
 
 The browser never calls agents directly. It calls FastAPI. FastAPI creates ADK-compatible content, runs the ADK `Runner`, and returns the final response plus state-sync hints.
@@ -473,7 +510,10 @@ Kitch previously explored agent development through Antigravity-oriented workflo
 
 ## ADK Primitives in Use
 
-Location: `backend/app/agent/core.py`
+Locations:
+
+- Main coordinator graph: `backend/app/agent/core.py`
+- One-shot Instamart graph: `backend/app/agent/instamart_cart_agent.py`
 
 Current primitives:
 
@@ -485,6 +525,7 @@ Current primitives:
 - `EventsCompactionConfig`
 - `LlmEventSummarizer`
 - Native ADK `Gemini` model adapter, configured with `KITCH_LLM_MODEL`.
+- `McpToolset` with a five-tool Instamart allowlist for the one-shot cart agent.
 
 Why model configuration is environment-driven:
 
@@ -570,6 +611,45 @@ Why recipe+grocery together:
 
 - Grocery rows should be based on the recipe the user will actually cook.
 - Separate recipe and grocery agents created a risk of mismatched ingredients.
+
+### `instamart_cart_agent`
+
+Separate one-shot commerce specialist. It is instantiated by
+`InstamartCartAgentService` for an authorized sync/revalidation/preflight run;
+it is not registered in `kitch_coordinator.sub_agents`.
+
+Responsibilities:
+
+- Read the backend-scoped native selection and selected address.
+- Read exact household ordering preferences and weaker Swiggy history.
+- Search the address-scoped Instamart catalogue iteratively.
+- Interpret brands, product equivalence, real-world pack wording, requested
+  quantity coverage, excess, and alternatives.
+- Replace the complete Instamart cart once, with at most one repair update.
+- Read the resulting cart and record match reasoning against the exact captured
+  MCP results.
+
+MCP tools:
+
+- `get_addresses`
+- `search_products`
+- `your_go_to_items`
+- `update_cart`
+- `get_cart`
+
+Local tools:
+
+- `read_scoped_native_cart_tool`
+- `search_ordering_preferences_tool`
+- `store_ordering_preference_tool`
+- `record_instamart_cart_result_tool`
+
+Safety boundary:
+
+- Checkout, payment selection, address mutation, cancellation, and unknown
+  mutating tools are absent or denied.
+- The model supplies selection reasoning; the captured final `get_cart` supplies
+  durable product, quantity, price, and bill truth.
 
 ---
 
