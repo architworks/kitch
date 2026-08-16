@@ -302,7 +302,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 self._raise_tool_failure(payment_payload, "get_payment_options")
                 payment_options = self._payment_options(payment_payload)
                 unavailable.extend(reconciliation_failures)
-                status = "success" if len(confirmed) == len(items) and not unavailable else "blocked"
+                status = "success" if confirmed else "blocked"
                 return {
                     **self._base_result(version, selected_address_id),
                     "status": status,
@@ -316,9 +316,13 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                     "payment_options": payment_options,
                     "checkout_context": {"payment_methods": payment_options},
                     "message": (
-                        "The Instamart cart was replaced and confirmed for review."
-                        if status == "success"
-                        else "Instamart did not confirm every selected item and quantity."
+                        f"The Instamart cart was confirmed with {len(confirmed)} available item"
+                        f"{'s' if len(confirmed) != 1 else ''}; {len(unavailable)} selected item"
+                        f"{'s were' if len(unavailable) != 1 else ' was'} not found and will not be ordered."
+                        if confirmed and unavailable
+                        else "The Instamart cart was replaced and confirmed for review."
+                        if confirmed
+                        else "Instamart did not confirm an orderable product for any selected item."
                     ),
                 }
         except ProviderOperationError as exc:
@@ -391,9 +395,25 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         refreshed_cart = refreshed.get("provider_cart") or {}
         if previous_cart.get("stores") != refreshed_cart.get("stores"):
             changes.append({"type": "store_fulfillment_changed"})
+        previous_unavailable = sorted(
+            (
+                str(item.get("name") or ""),
+                str(item.get("reason") or ""),
+            )
+            for item in draft.get("unavailable_items") or []
+        )
+        current_unavailable = sorted(
+            (
+                str(item.get("name") or ""),
+                str(item.get("reason") or ""),
+            )
+            for item in refreshed.get("unavailable_items") or []
+        )
+        if previous_unavailable != current_unavailable:
+            changes.append({"type": "unavailable_items_changed"})
         refreshed["replacements"] = replacements
         refreshed["changes"] = changes
-        refreshed["changed"] = bool(replacements or changes or refreshed.get("unavailable_items"))
+        refreshed["changed"] = bool(replacements or changes)
         return refreshed
 
     async def get_cart(self) -> Dict[str, Any]:

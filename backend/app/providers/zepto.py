@@ -431,7 +431,7 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                 match["add_result"] = update_result if index == 0 else {"status": "batched_update"}
 
         return {
-            "status": "success" if matched_items and not unavailable_items else "blocked",
+            "status": "success" if matched_items else "blocked",
             "provider": "zepto",
             "items": matched_items,
             "unavailable_items": unavailable_items,
@@ -441,9 +441,13 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
             "store_context": store_context,
             "available_tools": list(tools.keys()),
             "message": (
-                f"Synced and confirmed {len(matched_items)} items in the Zepto cart."
-                if matched_items and not unavailable_items
-                else "The Zepto cart could not be confirmed for every selected item."
+                f"Synced and confirmed {len(matched_items)} Zepto cart item"
+                f"{'s' if len(matched_items) != 1 else ''}; {len(unavailable_items)} selected item"
+                f"{'s were' if len(unavailable_items) != 1 else ' was'} not found and will not be ordered."
+                if matched_items and unavailable_items
+                else f"Synced and confirmed {len(matched_items)} items in the Zepto cart."
+                if matched_items
+                else "Zepto did not confirm an orderable product for any selected item."
             ),
         }
 
@@ -650,7 +654,7 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
             )
 
             return {
-                "status": "success" if confirmed_matches and not unavailable_items else "blocked",
+                "status": "success" if confirmed_matches else "blocked",
                 "provider": "zepto",
                 "items": confirmed_matches,
                 "unavailable_items": unavailable_items,

@@ -523,7 +523,8 @@ automated or browser-test order against production.
 - Prerequisite: Apply the multi-provider migration and configure at least one
   test provider. Use an authorized Swiggy local/staging account for Instamart.
 - Prompt/action: Open **Groceries**, inspect provider cards, connect Instamart,
-  switch between Zepto and Instamart, and choose a saved address.
+  switch between Zepto and Instamart, explicitly load saved addresses, and
+  choose one.
 - Provider check: Cards, environment, capabilities, connection state, and API
   actions must come from the backend registry. Blinkit remains visible,
   disabled, labelled **Coming soon**, and issues no request.
@@ -534,7 +535,9 @@ automated or browser-test order against production.
   state fails, a 401 or expired token shows **Reconnect**, and Disconnect
   removes the provider draft without changing the native cart. No token, PKCE
   verifier, OTP, or raw auth response reaches the browser or logs.
-- Address check: Search and cart controls remain locked until a saved address
+- Address check: Page entry and provider switching do not call the provider.
+  Saved addresses load only after the explicit address action. Search, payment,
+  and cart controls remain locked until the user reviews an address and it
   establishes the provider's serviceable store context.
 - Pass criteria: Provider and address state are accurate, isolated by
   provider/environment, and survive reload without leaking credentials.
@@ -559,12 +562,17 @@ automated or browser-test order against production.
   value descending. The financial sidebar shows provider-returned subtotal,
   fees, discounts, and total. A line sum may be labelled **Item subtotal** only;
   it must not become payable total when adjustments are unknown.
+- Partial-cart check: When at least one selected item is confirmed and another
+  is unresolved, clearly separate **ready to order** and **not found** items.
+  Unresolved items are excluded from the provider order but do not block the
+  confirmed partial cart. The user must acknowledge the omitted items as part
+  of the exact review. If no item is confirmed, ordering remains blocked.
 - Loading check: Synchronization retains a blocking progress dialog and disables
   cart, provider, address, quick-action, payment, and order controls. Pending
   native writes finish before the snapshot is taken.
-- Pass criteria: The confirmed provider cart exactly reconciles the selected
-  native intent, repeating sync creates no duplicates, the native cart remains
-  unchanged, and no order is placed.
+- Pass criteria: Every provider-cart row reconciles to selected native intent,
+  every omitted row is disclosed, repeating sync creates no duplicates, the
+  native cart remains unchanged, and no order is placed.
 - Fail criteria: Search alone is reported as success, excluded rows are sent,
   the review fabricates a total, state changes during sync, or provider failure
   produces a completed stage.
@@ -573,23 +581,26 @@ automated or browser-test order against production.
 
 - Prerequisite: Save a successful draft, then make it older than five minutes
   or simulate product, pack, price, quantity, or provider-cart drift.
-- Prompt/action: Reload or refocus Groceries, allow revalidation, then switch
-  provider and back.
+- Prompt/action: Reload and refocus Groceries, switch provider and back, then
+  use the explicit provider-cart refresh action.
 - Expected behavior: The draft survives frontend/backend restart, is isolated
   by provider/environment, and is invalidated if the durable native snapshot
-  changed. Stale items are searched again in the same address context; the
-  complete cart is rebuilt and reconciled after safe replacement.
+  changed. Reload, focus, and provider switching restore state without MCP
+  calls. A draft older than five minutes is visibly stale and payment remains
+  locked. Explicit refresh searches stale items again in the same address
+  context, then rebuilds and reconciles the complete cart after safe replacement.
 - Repair check: Show native item → previous product → replacement product, plus
   price/pack/quantity changes and **Last checked**. Every material change resets
-  payment and acknowledgement. No-alternative rows remain visible and block the
-  complete order.
+  payment and acknowledgement. No-alternative rows remain visible and are
+  excluded from the provider order without blocking the confirmed partial cart.
 - Switching check: Switching preserves the native cart but never carries an
   address, provider cart, payment, acknowledgement, token, or order state to the
-  other provider. Restoring the target draft requires revalidation; there is no
-  implicit provider failover.
+  other provider. Restoring the target draft does not contact the provider;
+  stale state requires explicit refresh and there is no implicit provider failover.
 - Concurrency check: A persisted provider/environment lease serializes sync,
   repair, and ordering across reloads and backend instances.
-- Pass criteria: Repair produces an exact confirmed cart, stale approval cannot
+- Pass criteria: No provider operation starts without explicit refresh or final
+  order approval, repair produces an exact confirmed cart, stale approval cannot
   survive material change, and provider state stays isolated.
 - Fail criteria: Browser-local state reconstructs the draft, manual provider
   drift becomes Kitch intent, unresolved rows disappear, or cross-provider
@@ -603,8 +614,8 @@ automated or browser-test order against production.
   use returned UPI exclusively when present; use COD only when UPI is absent and
   COD is explicitly returned. If neither is available, keep ordering blocked.
 - Approval check: The final acknowledgement names the exact provider, address,
-  products, quantities, payable total, payment method, and multi-store warning.
-  Reload requires a fresh acknowledgement.
+  products, quantities, payable total, payment method, omitted/unavailable
+  native items, and multi-store warning. Reload requires a fresh acknowledgement.
 - Final-validation check: Change the provider cart during the pre-order check.
   The API must return `409` with the updated draft, reset approval, and not call
   checkout. An unchanged fixture may proceed to the mocked/staging boundary.

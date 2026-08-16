@@ -321,8 +321,9 @@ Current backend-owned provider behavior:
 - Zepto and Instamart implement the same `GroceryProviderAdapter` contract.
 - A sync succeeds only after the resulting provider cart is read back and
   reconciled against every selected native row.
-- Drafts older than five minutes are revalidated and repaired outside the chat
-  graph. Material changes reset payment and acknowledgement.
+- Drafts older than five minutes are marked stale outside the chat graph. The
+  user explicitly refreshes and repairs them before payment; material changes
+  reset payment and acknowledgement.
 - A real order requires a provider-returned payment method, explicit frontend
   acknowledgement, and one unchanged final provider check.
 

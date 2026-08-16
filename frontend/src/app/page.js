@@ -725,6 +725,7 @@ export default function Home() {
   const [excludedProviderItemIds, setExcludedProviderItemIds] = useState([]);
   const [isProviderSyncing, setIsProviderSyncing] = useState(false);
   const [providerSyncStage, setProviderSyncStage] = useState("idle");
+  const [providerFreshnessNow, setProviderFreshnessNow] = useState(() => Date.now());
   const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
   const [isCheckingProviderPayment, setIsCheckingProviderPayment] = useState(false);
@@ -747,7 +748,6 @@ export default function Home() {
   const groceryMutationCountRef = useRef(0);
   const providerSyncInFlightRef = useRef(false);
   const providerDraftRestoreInFlightRef = useRef(false);
-  const providerSwitchRevalidationRef = useRef(false);
   const providerSyncTimersRef = useRef([]);
   const providerSyncDialogRef = useRef(null);
   const selectedProvider = useMemo(() => (
@@ -762,6 +762,11 @@ export default function Home() {
       routes: null
     }
   ), [orderingProviders, selectedOrderingProvider]);
+  const selectedProviderLabel = selectedProvider.label;
+  const selectedProviderRevalidateRoute = selectedProvider.routes?.revalidateCart || "";
+  const selectedProviderCheckoutDraftRoute = selectedProvider.routes?.checkoutDraft || "";
+  const providerReviewLastValidatedAt = providerCartReview?.last_validated_at || "";
+  const hasProviderCartReview = Boolean(providerCartReview);
 
   const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
     if (!review) {
@@ -977,12 +982,6 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeTab, syncProviderRegistry]);
-
-  useEffect(() => {
-    if (activeTab !== "groceries" || !selectedProvider.id) return undefined;
-    const timer = window.setTimeout(() => syncProviderAddresses(), 0);
-    return () => window.clearTimeout(timer);
-  }, [activeTab, selectedProvider.id, selectedProvider.state, syncProviderAddresses]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1330,12 +1329,12 @@ export default function Home() {
   };
 
   const revalidateProviderCart = useCallback(async ({ announce = true } = {}) => {
-    if (providerSyncInFlightRef.current || !selectedProvider.routes?.revalidateCart) return null;
+    if (providerSyncInFlightRef.current || !selectedProviderRevalidateRoute) return null;
     providerSyncInFlightRef.current = true;
     setIsProviderSyncing(true);
     startProviderSyncProgress();
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.revalidateCart), {
+      const res = await fetch(apiUrl(selectedProviderRevalidateRoute), {
         method: "POST"
       });
       await requireSuccessfulResponse(res);
@@ -1347,8 +1346,8 @@ export default function Home() {
       await new Promise(resolve => window.setTimeout(resolve, 350));
       if (announce) {
         triggerBannerAlert(data.changed
-          ? `${selectedProvider.label} cart changed and needs another review.`
-          : `${selectedProvider.label} cart availability is up to date.`);
+          ? `${selectedProviderLabel} cart changed and needs another review.`
+          : `${selectedProviderLabel} cart availability is up to date.`);
       }
       return data;
     } catch (e) {
@@ -1358,7 +1357,7 @@ export default function Home() {
       setProviderSyncStage("failed");
       await new Promise(resolve => window.setTimeout(resolve, 500));
       if (announce || changedDraft) {
-        triggerBannerAlert(apiErrorMessage(e, `Could not refresh the ${selectedProvider.label} cart.`));
+        triggerBannerAlert(apiErrorMessage(e, `Could not refresh the ${selectedProviderLabel} cart.`));
       }
       return null;
     } finally {
@@ -1367,26 +1366,32 @@ export default function Home() {
       setIsProviderSyncing(false);
       setProviderSyncStage("idle");
     }
-  }, [applyProviderDraft, clearProviderSyncTimers, selectedProvider, startProviderSyncProgress, triggerBannerAlert]);
+  }, [
+    applyProviderDraft,
+    clearProviderSyncTimers,
+    selectedProviderLabel,
+    selectedProviderRevalidateRoute,
+    startProviderSyncProgress,
+    triggerBannerAlert
+  ]);
 
   const restoreProviderCheckoutDraft = useCallback(async () => {
     if (
       providerDraftRestoreInFlightRef.current
-      || !selectedProvider.routes?.checkoutDraft
+      || !selectedProviderCheckoutDraftRoute
     ) return null;
     providerDraftRestoreInFlightRef.current = true;
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.checkoutDraft));
+      const res = await fetch(apiUrl(selectedProviderCheckoutDraftRoute));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       let review = data.draft || null;
       if (!review || !Array.isArray(review.native_items) || review.native_items.length === 0) {
-        providerSwitchRevalidationRef.current = false;
         return null;
       }
 
       if (review.order_review_acknowledged || review.selected_payment_method_id) {
-        const resetRes = await fetch(apiUrl(selectedProvider.routes.checkoutDraft), {
+        const resetRes = await fetch(apiUrl(selectedProviderCheckoutDraftRoute), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1397,28 +1402,21 @@ export default function Home() {
         await requireSuccessfulResponse(resetRes);
         review = (await resetRes.json()).draft || review;
       }
-      const requiresSwitchRevalidation = providerSwitchRevalidationRef.current;
-      providerSwitchRevalidationRef.current = false;
-      if (requiresSwitchRevalidation) {
-        await revalidateProviderCart({ announce: false });
-        return review;
-      }
-
       applyProviderDraft(review, { resetAcknowledgement: true });
-
-      const validatedAt = Date.parse(review.last_validated_at || "");
-      if (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS) {
-        await revalidateProviderCart({ announce: false });
-      }
       return review;
     } catch (e) {
-      console.error(`Failed to restore ${selectedProvider.label} checkout draft`, e);
-      triggerBannerAlert(apiErrorMessage(e, `Could not restore the ${selectedProvider.label} checkout review.`));
+      console.error(`Failed to restore ${selectedProviderLabel} checkout draft`, e);
+      triggerBannerAlert(apiErrorMessage(e, `Could not restore the ${selectedProviderLabel} checkout review.`));
       return null;
     } finally {
       providerDraftRestoreInFlightRef.current = false;
     }
-  }, [applyProviderDraft, revalidateProviderCart, selectedProvider, triggerBannerAlert]);
+  }, [
+    applyProviderDraft,
+    selectedProviderCheckoutDraftRoute,
+    selectedProviderLabel,
+    triggerBannerAlert
+  ]);
 
   useEffect(() => {
     if (activeTab !== "groceries" || liveStateUser !== activeUser) return undefined;
@@ -1427,21 +1425,21 @@ export default function Home() {
   }, [activeTab, activeUser, liveStateUser, restoreProviderCheckoutDraft]);
 
   useEffect(() => {
-    if (activeTab !== "groceries" || !providerCartReview?.last_validated_at) return undefined;
-    const revalidateIfStale = () => {
-      if (document.visibilityState === "hidden") return;
-      const validatedAt = Date.parse(providerCartReview.last_validated_at || "");
-      if (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS) {
-        revalidateProviderCart({ announce: true });
-      }
-    };
-    window.addEventListener("focus", revalidateIfStale);
-    document.addEventListener("visibilitychange", revalidateIfStale);
+    if (activeTab !== "groceries" || !hasProviderCartReview) return undefined;
+    const validatedAt = Date.parse(providerReviewLastValidatedAt);
+    const now = Date.now();
+    const refreshTimer = window.setTimeout(() => setProviderFreshnessNow(Date.now()), 0);
+    const staleDelay = Number.isFinite(validatedAt)
+      ? Math.max(0, validatedAt + PROVIDER_REVALIDATE_AFTER_MS - now + 50)
+      : 0;
+    const staleTimer = staleDelay > 0
+      ? window.setTimeout(() => setProviderFreshnessNow(Date.now()), staleDelay)
+      : null;
     return () => {
-      window.removeEventListener("focus", revalidateIfStale);
-      document.removeEventListener("visibilitychange", revalidateIfStale);
+      window.clearTimeout(refreshTimer);
+      if (staleTimer) window.clearTimeout(staleTimer);
     };
-  }, [activeTab, providerCartReview?.last_validated_at, revalidateProviderCart]);
+  }, [activeTab, hasProviderCartReview, providerReviewLastValidatedAt]);
 
   const updateProviderReview = async (updates) => {
     if (!providerCartReview?.review_id || !selectedProvider.routes) return null;
@@ -1477,7 +1475,6 @@ export default function Home() {
     if (!provider.enabled || providerSyncInFlightRef.current) return;
     if (provider.id === selectedOrderingProvider) return;
     setSelectedOrderingProvider(provider.id);
-    providerSwitchRevalidationRef.current = true;
     setPreferredOrderingProvider(provider.id);
     setProviderConnectionStatus(null);
     setProviderSavedAddresses(null);
@@ -1962,6 +1959,11 @@ export default function Home() {
         minute: "2-digit"
       }).format(new Date(providerCartReview.last_validated_at))
     : "Not checked yet";
+  const providerLastValidatedAt = Date.parse(providerCartReview?.last_validated_at || "");
+  const providerDraftIsStale = Boolean(providerCartReview) && (
+    !Number.isFinite(providerLastValidatedAt)
+    || providerFreshnessNow - providerLastValidatedAt >= PROVIDER_REVALIDATE_AFTER_MS
+  );
   const providerCartDetails = providerCartReview?.provider_cart || providerCartReview?.result?.provider_cart || providerCartReview?.result || null;
   const providerStoreGroups = Array.isArray(providerCartDetails?.stores) ? providerCartDetails.stores : [];
   const providerMultiStore = Boolean(providerCartDetails?.multi_store || providerStoreGroups.length > 1);
@@ -2000,6 +2002,7 @@ export default function Home() {
   const selectedProviderAddressDisplay = selectedProviderAddressOption
     ? formatProviderAddressParts(selectedProviderAddressOption, `Selected ${selectedProvider.label} address`)
     : null;
+  const providerAddressDetailsReady = Boolean(selectedProviderAddressDisplay);
   const providerPaymentOptions = collectObjectsWithAnyKey(
     providerCartReview?.payment_options || providerCheckoutContext.payment_methods,
     ["payment", "method", "payment_method", "id"]
@@ -2027,9 +2030,11 @@ export default function Home() {
     && Boolean(providerCartReview?.confirmation_token)
     && Boolean(providerCartReview?.snapshot_hash)
     && Boolean(selectedProviderAddress)
+    && providerAddressDetailsReady
     && providerOrderBlockers.length === 0
     && Boolean(selectedProviderPaymentMethod)
     && providerReviewAcknowledged
+    && !providerDraftIsStale
     && !isUpdatingProviderReview;
   const providerStatusLabel = providerCartReview?.store_context?.state === "store_context_ready"
     ? `${selectedProvider.label} store ready`
@@ -3311,31 +3316,43 @@ export default function Home() {
                             <p>{providerStatusDescription}</p>
                           </div>
                         </div>
-                        <label className="provider-sync-address">
+                        <div className="provider-sync-address">
                           <span>Delivery address</span>
-                          <select
-                            aria-label={`${selectedProvider.label} delivery address for cart sync`}
-                            value={selectedProviderAddress}
-                            disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
-                            onChange={(e) => selectProviderSyncAddress(e.target.value)}
-                          >
-                            <option value="">
-                              {isProviderAddressLoading ? `Loading ${selectedProvider.label} addresses...` : "Select delivery address"}
-                            </option>
-                            {providerSavedAddressOptions.map((option, idx) => {
-                              const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                              const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
-                              return (
-                                <option key={`${value}-${idx}`} value={value}>
-                                  {address.detail ? `${address.title} — ${address.detail}` : address.title}
-                                </option>
-                              );
-                            })}
-                          </select>
+                          {providerSavedAddresses === null ? (
+                            <div className="provider-address-loader">
+                              <strong>{selectedProviderAddress ? "Saved checkout address restored" : "Saved addresses are not loaded"}</strong>
+                              <small>Kitch will contact {selectedProvider.label} only when you choose to load its saved addresses.</small>
+                              <button
+                                type="button"
+                                onClick={syncProviderAddresses}
+                                disabled={isProviderSyncing || isProviderAddressLoading}
+                              >
+                                {isProviderAddressLoading ? "Loading addresses…" : `Load ${selectedProvider.label} addresses`}
+                              </button>
+                            </div>
+                          ) : (
+                            <select
+                              aria-label={`${selectedProvider.label} delivery address for cart sync`}
+                              value={selectedProviderAddress}
+                              disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
+                              onChange={(e) => selectProviderSyncAddress(e.target.value)}
+                            >
+                              <option value="">Select delivery address</option>
+                              {providerSavedAddressOptions.map((option, idx) => {
+                                const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                                const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
+                                return (
+                                  <option key={`${value}-${idx}`} value={value}>
+                                    {address.detail ? `${address.title} — ${address.detail}` : address.title}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          )}
                           {providerAddressLoadError && (
                             <small className="provider-address-error">{providerAddressLoadError}</small>
                           )}
-                        </label>
+                        </div>
                       </div>
                     )}
                   </section>
@@ -3391,15 +3408,26 @@ export default function Home() {
                             </div>
                           </header>
 
-                          <div className={`provider-cart-notice ${providerReviewConfirmed ? "success" : "error"}`}>
+                          <div className={`provider-cart-notice ${providerUnavailableItems.length > 0 && providerReviewConfirmed ? "partial" : providerReviewConfirmed ? "success" : "error"}`}>
                             <span aria-hidden="true">{providerReviewConfirmed ? "✓" : "!"}</span>
                             <p>
                               {providerReviewConfirmed
-                                ? `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
+                                ? providerUnavailableItems.length > 0
+                                  ? `${providerMatchedItems.length} selected ${providerMatchedItems.length === 1 ? "item is" : "items are"} ready in ${selectedProvider.label}. ${providerUnavailableItems.length} ${providerUnavailableItems.length === 1 ? "item was" : "items were"} not found and will not be included in this order.`
+                                  : `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
                                 : providerCartReview.message || `${selectedProvider.label} cart synchronization needs attention.`}
-                              {providerUnavailableItems.length > 0 && ` ${providerUnavailableItems.length} selected ${providerUnavailableItems.length === 1 ? "item was" : "items were"} unavailable.`}
+                              {providerDraftIsStale && ` This review is older than five minutes. Refresh it before choosing payment or ordering.`}
                             </p>
-                            <small>Last checked {providerLastChecked}</small>
+                            <div className="provider-cart-notice-actions">
+                              <small>Last checked {providerLastChecked}</small>
+                              <button
+                                type="button"
+                                onClick={() => revalidateProviderCart({ announce: true })}
+                                disabled={isProviderSyncing || isUpdatingProviderReview || isPlacingProviderOrder}
+                              >
+                                {isProviderSyncing ? "Refreshing…" : `Refresh ${selectedProvider.label} cart`}
+                              </button>
+                            </div>
                           </div>
 
                           {(providerReplacements.length > 0 || providerCartChanges.length > 0) && (
@@ -3519,6 +3547,11 @@ export default function Home() {
                               {selectedProviderAddressDisplay.detail && <span>{selectedProviderAddressDisplay.detail}</span>}
                               <small>Changing the address above invalidates this review and requires another transfer.</small>
                             </div>
+                          ) : selectedProviderAddress ? (
+                            <div className="provider-locked-address">
+                              <strong>Saved checkout address</strong>
+                              <small>Load the saved addresses in stage 3 to review the exact delivery address before approval.</small>
+                            </div>
                           ) : (
                             <p>The reviewed cart has no confirmed delivery address. Sync again after selecting one.</p>
                           )}
@@ -3530,7 +3563,7 @@ export default function Home() {
                               Payment method
                               <select
                                 value={selectedProviderPaymentMethod}
-                                disabled={isUpdatingProviderReview || isPlacingProviderOrder}
+                                disabled={!providerAddressDetailsReady || providerDraftIsStale || isUpdatingProviderReview || isPlacingProviderOrder}
                                 onChange={(e) => {
                                   const value = e.target.value;
                                   setSelectedProviderPaymentMethod(value);
@@ -3554,7 +3587,7 @@ export default function Home() {
                           <input
                             type="checkbox"
                             checked={providerReviewAcknowledged}
-                            disabled={isUpdatingProviderReview || isPlacingProviderOrder}
+                            disabled={!providerAddressDetailsReady || providerDraftIsStale || isUpdatingProviderReview || isPlacingProviderOrder}
                             onChange={(e) => {
                               const checked = e.target.checked;
                               setProviderReviewAcknowledged(checked);
@@ -3568,6 +3601,20 @@ export default function Home() {
                           <div className="provider-blocker-list">
                             <strong>Multi-store fulfillment</strong>
                             <span>{selectedProvider.label} split this cart across {providerStoreGroups.length || "multiple"} stores. Review every item and the complete provider bill before approval.</span>
+                          </div>
+                        )}
+
+                        {providerDraftIsStale && (
+                          <div className="provider-stale-review" role="status">
+                            <strong>Refresh required before checkout</strong>
+                            <span>The saved {selectedProvider.label} review remains visible, but Kitch will not use it for payment or ordering until you explicitly refresh it.</span>
+                          </div>
+                        )}
+
+                        {!providerAddressDetailsReady && selectedProviderAddress && (
+                          <div className="provider-stale-review" role="status">
+                            <strong>Review the delivery address before checkout</strong>
+                            <span>Use “Load {selectedProvider.label} addresses” in stage 3. Kitch will not contact the provider until you choose that action.</span>
                           </div>
                         )}
 

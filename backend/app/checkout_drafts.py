@@ -132,13 +132,10 @@ def _order_blockers(
     provider_label: str,
 ) -> List[str]:
     matched_items = result.get("items") or []
-    unavailable_items = result.get("unavailable_items") or []
     checkout_context = result.get("checkout_context") or {}
     blockers: List[str] = []
-    if result.get("status") != "success":
-        blockers.append(f"{provider_label} did not confirm every selected cart item as orderable.")
-    if len(matched_items) != len(native_items) or unavailable_items:
-        blockers.append(f"Every selected native item must have a confirmed orderable {provider_label} product.")
+    if not matched_items:
+        blockers.append(f"{provider_label} did not confirm any selected cart item as orderable.")
     if checkout_context.get("address_error"):
         blockers.append(f"{provider_label} address options could not be read.")
     if checkout_context.get("payment_error"):
@@ -152,6 +149,52 @@ def _order_blockers(
     return list(dict.fromkeys(blockers))
 
 
+def refresh_checkout_eligibility(
+    row: Dict[str, Any],
+    provider_label: str,
+) -> Dict[str, Any]:
+    """Re-derive denormalized review eligibility under the current policy."""
+    if str(row.get("status") or "") not in {"blocked", "ready", "partial", "changed"}:
+        return row
+
+    result = {
+        "items": row.get("matched_items") or [],
+        "unavailable_items": row.get("unavailable_items") or [],
+        "checkout_context": row.get("checkout_context") or {},
+        "store_context": row.get("store_context") or {},
+        "cart_summary": row.get("cart_summary") or {},
+        "payment_options": row.get("payment_options") or [],
+    }
+    blockers = _order_blockers(row.get("native_items") or [], result, provider_label)
+    unavailable_items = result["unavailable_items"]
+    current_status = str(row.get("status") or "")
+    status = (
+        "blocked"
+        if blockers
+        else "changed"
+        if current_status == "changed"
+        else "ready"
+    )
+    confirmation_token = (
+        row.get("confirmation_token") or f"kitch_confirm_{uuid4()}"
+        if not blockers
+        else None
+    )
+    updates = {
+        "can_place_order": not blockers,
+        "order_blockers": blockers,
+        "confirmation_token": confirmation_token,
+        "status": status,
+    }
+    if all(row.get(key) == value for key, value in updates.items()):
+        return row
+    return save_provider_checkout_draft(
+        updates,
+        provider=str(row.get("provider") or ""),
+        provider_environment=str(row.get("provider_environment") or "production"),
+    )
+
+
 def save_initial_draft(
     native_items: List[Dict[str, Any]],
     mapped_items: List[Dict[str, Any]],
@@ -162,13 +205,14 @@ def save_initial_draft(
     provider_label: str,
 ) -> Dict[str, Any]:
     blockers = _order_blockers(native_items, result, provider_label)
+    unavailable_items = result.get("unavailable_items") or []
     payload: Dict[str, Any] = {
         "selected_address_id": selected_address_id,
         "selected_native_item_ids": [str(item.get("id")) for item in native_items if item.get("id") is not None],
         "native_items": native_items,
         "mapped_items": mapped_items,
         "matched_items": result.get("items") or [],
-        "unavailable_items": result.get("unavailable_items") or [],
+        "unavailable_items": unavailable_items,
         "replacements": result.get("replacements") or [],
         "changes": result.get("changes") or [],
         "capability_version": result.get("capability_version") or "",
@@ -206,6 +250,7 @@ def save_revalidated_draft(
     provider_label = str(result.get("provider_label") or provider.replace("_", " ").title())
     blockers = _order_blockers(native_items, result, provider_label)
     changed = bool(result.get("changed"))
+    unavailable_items = result.get("unavailable_items") or []
     replacements = (
         result.get("replacements") or []
         if changed
@@ -222,7 +267,7 @@ def save_revalidated_draft(
         "native_items": native_items,
         "mapped_items": existing.get("mapped_items") or [],
         "matched_items": result.get("items") or [],
-        "unavailable_items": result.get("unavailable_items") or [],
+        "unavailable_items": unavailable_items,
         "replacements": replacements,
         "changes": changes,
         "capability_version": result.get("capability_version") or existing.get("capability_version") or "",
@@ -239,10 +284,16 @@ def save_revalidated_draft(
         "order_blockers": blockers,
         "confirmation_token": (
             f"kitch_confirm_{uuid4()}"
-            if not blockers and changed
+            if not blockers and (changed or not existing.get("confirmation_token"))
             else existing.get("confirmation_token") if not blockers else None
         ),
-        "status": "changed" if changed and not blockers else "ready" if not blockers else "blocked",
+        "status": (
+            "changed"
+            if changed and not blockers
+            else "ready"
+            if not blockers
+            else "blocked"
+        ),
         "last_validated_at": _now_iso(),
     }
     payload["snapshot_hash"] = checkout_snapshot_hash(payload)

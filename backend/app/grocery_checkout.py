@@ -9,6 +9,7 @@ from app.checkout_drafts import (
     draft_row_to_review,
     invalidate_draft_for_native_drift,
     native_snapshot_matches,
+    refresh_checkout_eligibility,
     save_initial_draft,
     save_order_outcome,
     save_revalidated_draft,
@@ -47,10 +48,13 @@ class GroceryCheckoutService:
 
     def draft(self, provider_id: str) -> Dict[str, Any]:
         adapter = self.registry.get(provider_id)
-        environment = adapter.descriptor().environment
+        descriptor = adapter.descriptor()
+        environment = descriptor.environment
         row = get_provider_checkout_draft(provider_id, environment)
         if row and row.get("native_items") and not native_snapshot_matches(row, get_grocery_cart()):
             row = invalidate_draft_for_native_drift(row)
+        if row:
+            row = refresh_checkout_eligibility(row, descriptor.label)
         review = draft_row_to_review(row)
         if review and not review.get("native_items"):
             review = None

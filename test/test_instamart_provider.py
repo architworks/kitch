@@ -8,6 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -301,6 +302,47 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(cart["items"][0]["pack_size"], "200 g")
         self.assertEqual(cart["items"][0]["price_minor"], 11900)
         self.assertEqual(cart["items"][0]["line_total_minor"], 35700)
+
+    def test_unchanged_unavailable_items_do_not_make_every_revalidation_material(self):
+        adapter = self.adapter(FakeInstamartClient())
+        native_item = self.item()
+        match = {
+            "native_item": native_item,
+            "matched_product": {"candidate_id": "spin-1:sku-1"},
+            "cart_item": {
+                "candidate_id": "spin-1:sku-1",
+                "quantity": 1,
+                "price_minor": 9900,
+                "pack_size": "1 L",
+                "store_id": "store-1",
+            },
+        }
+        unavailable = [{
+            "name": "Chia Seeds",
+            "reason": "Instamart did not return one unambiguous orderable variant.",
+        }]
+        result = {
+            "status": "success",
+            "items": [match],
+            "unavailable_items": unavailable,
+            "cart_summary": {"currency": "INR", "total_minor": 9900},
+            "payment_options": [{"id": "upi", "kind": "upi"}],
+            "provider_cart": {"stores": [{"id": "store-1"}]},
+        }
+        adapter.sync_cart = AsyncMock(return_value=result)
+
+        refreshed = asyncio.run(adapter.revalidate_cart({
+            "mapped_items": [native_item],
+            "selected_address_id": "home-1",
+            "matched_items": [match],
+            "unavailable_items": unavailable,
+            "cart_summary": result["cart_summary"],
+            "payment_options": result["payment_options"],
+            "provider_cart": result["provider_cart"],
+        }))
+
+        self.assertFalse(refreshed["changed"])
+        self.assertEqual(refreshed["changes"], [])
 
     def test_search_result_absent_from_confirmed_cart_is_not_success(self):
         client = FakeInstamartClient(cart_items=[])

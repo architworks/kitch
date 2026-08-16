@@ -282,6 +282,7 @@ sequenceDiagram
 
     UI->>API: GET /api/grocery/providers
     API-->>UI: descriptors, capabilities, connection state, routes
+    UI->>UI: User chooses Load saved addresses
     UI->>API: GET /api/grocery/providers/{provider}/addresses
     API->>Adapter: list_addresses()
     Adapter->>MCP: List saved addresses
@@ -300,7 +301,7 @@ sequenceDiagram
     API-->>UI: Confirmed checkout draft
     UI->>UI: Close dialog; unlock edits; show review
     UI->>API: PATCH checkout payment/acknowledgement
-    UI->>API: POST revalidate after five minutes or page focus
+    UI->>API: POST revalidate after explicit stale-cart refresh
     API->>Adapter: Validate products; repair and reconcile if necessary
     UI->>API: POST place-order after final approval
     API->>Adapter: Mandatory final revalidation
@@ -341,9 +342,13 @@ Important rules:
 - The cart summary is included in the review snapshot hash.
 - Drafts are stored in `provider_checkout_drafts` with backend-only RLS and
   survive frontend/backend restarts.
-- Groceries-page entry and focus revalidate drafts older than five minutes.
+- Groceries-page entry restores drafts without provider calls. Drafts older
+  than five minutes are visibly stale and require explicit refresh before
+  payment or approval.
 - Replacements, price changes, pack changes, quantity changes, and cart drift
-  reset payment and acknowledgement. Unresolved native items block the order.
+  reset payment and acknowledgement. Unresolved native items remain in the
+  approval snapshot as explicitly omitted rows; confirmed partial carts may
+  proceed, while carts with no confirmed items remain blocked.
 - The cart-item review occupies the main workflow; subtotal, fees, discount,
   total, and total-source explanation are shown in the right summary sidebar.
 - Provider-cart rows show the provider image, mapped native item, unit price,

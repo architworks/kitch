@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.checkout_drafts import (  # noqa: E402
     checkout_snapshot_hash,
     native_snapshot_matches,
+    refresh_checkout_eligibility,
     save_initial_draft,
     save_revalidated_draft,
 )
@@ -70,7 +71,7 @@ class CheckoutDraftTests(unittest.TestCase):
             "store_context": {"status": "ready", "state": "store_context_ready"},
         }
 
-    def test_initial_draft_is_orderable_only_when_every_native_item_is_confirmed(self):
+    def test_initial_draft_is_orderable_when_confirmed_cart_is_complete(self):
         native_item = self.native_item()
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
@@ -94,7 +95,7 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertTrue(review["can_place_order"])
         self.assertTrue(review["confirmation_token"])
 
-    def test_unresolved_item_blocks_complete_order(self):
+    def test_no_confirmed_items_blocks_order(self):
         native_item = self.native_item()
         result = {
             **self.successful_result(),
@@ -123,6 +124,41 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(review["status"], "blocked")
         self.assertFalse(review["can_place_order"])
         self.assertIsNone(review["confirmation_token"])
+
+    def test_partial_provider_cart_is_orderable_with_unavailable_items_disclosed(self):
+        first_item = self.native_item()
+        second_item = {**self.native_item(), "id": 2, "name": "Chia Seeds"}
+        result = {
+            **self.successful_result(),
+            "status": "blocked",
+            "unavailable_items": [{
+                "name": "Chia Seeds",
+                "reason": "No orderable provider product was found.",
+            }],
+        }
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
+        ):
+            review = save_initial_draft(
+                [first_item, second_item],
+                [first_item, second_item],
+                result,
+                "address-1",
+                "swiggy_instamart",
+                "staging",
+                "Swiggy Instamart",
+            )
+
+        self.assertEqual(review["status"], "ready")
+        self.assertTrue(review["can_place_order"])
+        self.assertTrue(review["confirmation_token"])
+        self.assertEqual(review["unavailable_items"], result["unavailable_items"])
+        self.assertEqual(review["order_blockers"], [])
 
     def test_material_revalidation_change_resets_payment_and_approval(self):
         native_item = self.native_item()
@@ -166,6 +202,70 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertIsNone(review["selected_payment_method_id"])
         self.assertFalse(review["order_review_acknowledged"])
         self.assertNotEqual(review["confirmation_token"], "old-token")
+
+    def test_revalidation_unlocks_a_previously_blocked_partial_draft(self):
+        first_item = self.native_item()
+        second_item = {**self.native_item(), "id": 2, "name": "Chia Seeds"}
+        initial = persisted_row({
+            "selected_address_id": "address-1",
+            "selected_native_item_ids": ["1", "2"],
+            "native_items": [first_item, second_item],
+            "mapped_items": [first_item, second_item],
+            "matched_items": self.successful_result()["items"],
+            "unavailable_items": [{"name": "Chia Seeds"}],
+            "provider_cart": self.successful_result()["provider_cart"],
+            "cart_summary": self.successful_result()["cart_summary"],
+            "checkout_context": self.successful_result()["checkout_context"],
+            "payment_options": self.successful_result()["payment_options"],
+            "store_context": self.successful_result()["store_context"],
+            "can_place_order": False,
+            "order_blockers": ["Every selected native item must have a match."],
+            "confirmation_token": None,
+            "snapshot_hash": "old-hash",
+            "status": "blocked",
+        })
+        result = {
+            **self.successful_result(),
+            "unavailable_items": [{"name": "Chia Seeds"}],
+            "changed": False,
+        }
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ):
+            review, changed = save_revalidated_draft(initial, result)
+
+        self.assertFalse(changed)
+        self.assertEqual(review["status"], "ready")
+        self.assertTrue(review["can_place_order"])
+        self.assertTrue(review["confirmation_token"])
+        self.assertEqual(review["order_blockers"], [])
+
+    def test_restore_rederives_obsolete_partial_cart_blockers(self):
+        initial = persisted_row({
+            "status": "blocked",
+            "native_items": [self.native_item(), {**self.native_item(), "id": 2}],
+            "matched_items": self.successful_result()["items"],
+            "unavailable_items": [{"name": "Chia Seeds"}],
+            "provider_cart": self.successful_result()["provider_cart"],
+            "cart_summary": self.successful_result()["cart_summary"],
+            "checkout_context": self.successful_result()["checkout_context"],
+            "payment_options": self.successful_result()["payment_options"],
+            "store_context": self.successful_result()["store_context"],
+            "can_place_order": False,
+            "order_blockers": ["Every selected native item must have a match."],
+            "confirmation_token": None,
+        })
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ):
+            refreshed = refresh_checkout_eligibility(initial, "Swiggy Instamart")
+
+        self.assertEqual(refreshed["status"], "ready")
+        self.assertTrue(refreshed["can_place_order"])
+        self.assertEqual(refreshed["order_blockers"], [])
+        self.assertTrue(refreshed["confirmation_token"])
 
     def test_native_snapshot_detects_quantity_or_membership_drift(self):
         native_item = self.native_item()
