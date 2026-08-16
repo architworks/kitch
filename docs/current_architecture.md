@@ -282,7 +282,6 @@ sequenceDiagram
 
     UI->>API: GET /api/grocery/providers
     API-->>UI: descriptors, capabilities, connection state, routes
-    UI->>UI: User chooses Load saved addresses
     UI->>API: GET /api/grocery/providers/{provider}/addresses
     API->>Adapter: list_addresses()
     Adapter->>MCP: List saved addresses
@@ -342,9 +341,10 @@ Important rules:
 - The cart summary is included in the review snapshot hash.
 - Drafts are stored in `provider_checkout_drafts` with backend-only RLS and
   survive frontend/backend restarts.
-- Groceries-page entry restores drafts without provider calls. Drafts older
-  than five minutes are visibly stale and require explicit refresh before
-  payment or approval.
+- Groceries-page entry restores drafts and automatically reads saved addresses,
+  but does not search products, mutate carts, or revalidate provider state.
+  Drafts older than five minutes are visibly stale and require explicit refresh
+  before payment or approval.
 - Replacements, price changes, pack changes, quantity changes, and cart drift
   reset payment and acknowledgement. Unresolved native items remain in the
   approval snapshot as explicitly omitted rows; confirmed partial carts may

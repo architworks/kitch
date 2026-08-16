@@ -523,8 +523,8 @@ automated or browser-test order against production.
 - Prerequisite: Apply the multi-provider migration and configure at least one
   test provider. Use an authorized Swiggy local/staging account for Instamart.
 - Prompt/action: Open **Groceries**, inspect provider cards, connect Instamart,
-  switch between Zepto and Instamart, explicitly load saved addresses, and
-  choose one.
+  switch between Zepto and Instamart, confirm saved addresses load automatically,
+  and choose one when needed.
 - Provider check: Cards, environment, capabilities, connection state, and API
   actions must come from the backend registry. Blinkit remains visible,
   disabled, labelled **Coming soon**, and issues no request.
@@ -535,10 +535,11 @@ automated or browser-test order against production.
   state fails, a 401 or expired token shows **Reconnect**, and Disconnect
   removes the provider draft without changing the native cart. No token, PKCE
   verifier, OTP, or raw auth response reaches the browser or logs.
-- Address check: Page entry and provider switching do not call the provider.
-  Saved addresses load only after the explicit address action. Search, payment,
-  and cart controls remain locked until the user reviews an address and it
-  establishes the provider's serviceable store context.
+- Address check: Page entry automatically performs only the read-only saved-
+  address lookup. Preserve the draft address when valid; otherwise select the
+  provider default or first returned address. Product search, cart mutation,
+  and revalidation do not start. Payment and cart controls remain locked until
+  the exact selected address is visible and establishes store context.
 - Pass criteria: Provider and address state are accurate, isolated by
   provider/environment, and survive reload without leaking credentials.
 - Fail criteria: Hardcoded routes determine the card behavior, providers share
@@ -585,18 +586,21 @@ automated or browser-test order against production.
   use the explicit provider-cart refresh action.
 - Expected behavior: The draft survives frontend/backend restart, is isolated
   by provider/environment, and is invalidated if the durable native snapshot
-  changed. Reload, focus, and provider switching restore state without MCP
-  calls. A draft older than five minutes is visibly stale and payment remains
-  locked. Explicit refresh searches stale items again in the same address
-  context, then rebuilds and reconciles the complete cart after safe replacement.
+  changed. Reload and provider switching may perform only read-only address
+  discovery; focus performs no MCP call. None automatically searches products,
+  mutates the cart, or revalidates it. A draft older than five minutes is
+  visibly stale and payment remains locked. Explicit refresh searches stale
+  items again in the same address context, then rebuilds and reconciles the
+  complete cart after safe replacement.
 - Repair check: Show native item → previous product → replacement product, plus
   price/pack/quantity changes and **Last checked**. Every material change resets
   payment and acknowledgement. No-alternative rows remain visible and are
   excluded from the provider order without blocking the confirmed partial cart.
 - Switching check: Switching preserves the native cart but never carries an
   address, provider cart, payment, acknowledgement, token, or order state to the
-  other provider. Restoring the target draft does not contact the provider;
-  stale state requires explicit refresh and there is no implicit provider failover.
+  other provider. Restoring the target draft may load its saved addresses but
+  does not inspect or mutate its cart; stale state requires explicit refresh
+  and there is no implicit provider failover.
 - Concurrency check: A persisted provider/environment lease serializes sync,
   repair, and ordering across reloads and backend instances.
 - Pass criteria: No provider operation starts without explicit refresh or final

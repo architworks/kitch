@@ -446,8 +446,10 @@ Shared behavior:
   native review, provider choice, delivery address, transfer, provider cart
   review, then payment and order. Sidebar cards contain the financial summary
   and cart-maintenance shortcuts.
-- The frontend loads saved provider addresses only after an explicit user
-  action and requires the exact address to be reviewed before sync or payment.
+- The frontend automatically loads the selected provider's read-only saved
+  addresses, preserves the draft address when valid, and otherwise selects the
+  provider-marked default or first provider-returned address. The exact address
+  must be visible before sync or payment.
 - The frontend waits for pending native-cart writes before sync, then locks cart
   editing behind a modal, focus-retaining transfer animation until the provider
   request completes.
@@ -465,9 +467,10 @@ Shared behavior:
   successful only after exact product/store ids and quantities appear in the
   confirmed selected-provider cart.
 - Durable checkout drafts live in Supabase rather than backend process memory.
-- Groceries entry restores the durable draft without contacting the provider.
-  Drafts older than five minutes are marked stale and require an explicit cart
-  refresh before payment or approval.
+- Groceries entry restores the durable draft and may read saved addresses, but
+  never searches products, mutates a provider cart, or revalidates it. Drafts
+  older than five minutes are marked stale and require an explicit cart refresh
+  before payment or approval.
 - Provider product-detail operations validate expected products; unavailable products are
   replaced through a new store-context search and the complete cart is rebuilt
   and reconciled. Unresolved rows remain visible and are excluded from the

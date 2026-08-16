@@ -348,9 +348,10 @@ Example prompts:
 9. The sidebar shows provider-returned subtotal, fees, discounts, and payable
    total. A complete line-price sum may be shown only as `Item subtotal`, never
    as the final payable total when adjustments are unknown.
-10. Returning later restores the provider/environment draft without contacting
-   the provider. After five minutes, Kitch marks it stale and asks the user to
-   explicitly refresh before payment or ordering.
+10. Returning later restores the provider/environment draft and automatically
+   loads read-only saved addresses without refreshing the provider cart. After
+   five minutes, Kitch marks the cart review stale and asks the user to refresh
+   explicitly before payment or ordering.
 11. Replacements and other material changes are highlighted and reset payment
     and approval. Unresolved selected items are prominently listed as omitted;
     the confirmed partial cart can proceed after review.
@@ -377,9 +378,10 @@ Example prompts:
 - Connection, payment, address, capability, and provider failures should surface as safe, provider-scoped states.
 - Editing a native row or selection, changing provider, or changing address
   invalidates the review and locks order placement until a fresh sync.
-- Explicit refresh uses the blocking progress dialog and locks checkout editing
-  until the provider cart has been reconciled. Page entry, browser focus, and
-  provider switching never start a provider operation on their own.
+- Explicit cart refresh uses the blocking progress dialog and locks checkout
+  editing until reconciliation finishes. Page entry and provider switching may
+  read saved addresses, but never search products, mutate a cart, or revalidate
+  it; browser focus starts no provider operation.
 - If final revalidation changes the cart, no order is placed and the user is
   returned to the updated provider cart review.
 

@@ -708,11 +708,14 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             full_text = str(full or "").strip()
             if not label_text and not full_text:
                 continue
-            addresses.append({
+            normalized = {
                 "id": str(address_id),
                 "label": label_text or "Saved address",
                 "address": full_text or label_text,
-            })
+            }
+            if bool(self._first(value, "isDefault", "is_default", "default", "selected")):
+                normalized["is_default"] = True
+            addresses.append(normalized)
         deduped = {address["id"]: address for address in addresses}
         return list(deduped.values())
 

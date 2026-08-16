@@ -48,6 +48,7 @@ class FakeInstamartClient:
             "addressTag": "Home",
             "addressCategory": "HOME",
             "addressLine": "HSR Layout, Bengaluru 560102",
+            "isDefault": True,
             "phoneNumber": "redacted-by-adapter",
         }]]
         names = tools or {
@@ -223,6 +224,7 @@ class InstamartProviderTests(unittest.TestCase):
             "id": "home-1",
             "label": "Home",
             "address": "HSR Layout, Bengaluru 560102",
+            "is_default": True,
         }])
         self.assertEqual(
             next(args for name, args in client.calls if name == "get_addresses"),

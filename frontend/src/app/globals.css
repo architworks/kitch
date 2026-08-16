@@ -3925,40 +3925,6 @@ button {
   font-weight: 750;
 }
 
-.provider-address-loader {
-  display: grid;
-  gap: 7px;
-}
-
-.provider-address-loader strong {
-  color: var(--ink);
-  font-size: 12px;
-}
-
-.provider-address-loader small {
-  color: var(--muted);
-  font-size: var(--checkout-secondary-copy-size);
-  font-weight: var(--checkout-card-copy-weight);
-  line-height: 1.45;
-}
-
-.provider-address-loader button {
-  justify-self: start;
-  min-height: 36px;
-  padding: 0 12px;
-  color: #fff;
-  background: var(--sage-deep);
-  border: 0;
-  border-radius: 10px;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.provider-address-loader button:disabled {
-  cursor: wait;
-  opacity: 0.62;
-}
-
 .provider-address-error {
   color: #9c3d3d;
   font-size: 10px;

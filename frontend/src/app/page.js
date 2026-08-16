@@ -765,6 +765,10 @@ export default function Home() {
   const selectedProviderLabel = selectedProvider.label;
   const selectedProviderRevalidateRoute = selectedProvider.routes?.revalidateCart || "";
   const selectedProviderCheckoutDraftRoute = selectedProvider.routes?.checkoutDraft || "";
+  const selectedProviderAddressesRoute = selectedProvider.routes?.addresses || "";
+  const selectedProviderEnabled = Boolean(selectedProvider.enabled);
+  const selectedProviderRequiresConnection = Boolean(selectedProvider.requires_connection);
+  const selectedProviderRegistryState = selectedProvider.state || "unknown";
   const providerReviewLastValidatedAt = providerCartReview?.last_validated_at || "";
   const hasProviderCartReview = Boolean(providerCartReview);
 
@@ -905,8 +909,8 @@ export default function Home() {
   }, [preferredOrderingProvider]);
 
   const syncProviderAddresses = useCallback(async () => {
-    if (!selectedProvider.enabled || !selectedProvider.routes) return null;
-    if (selectedProvider.requires_connection && selectedProvider.state !== "connected") {
+    if (!selectedProviderEnabled || !selectedProviderAddressesRoute) return null;
+    if (selectedProviderRequiresConnection && selectedProviderRegistryState !== "connected") {
       setProviderSavedAddresses(null);
       setSelectedProviderAddress("");
       return null;
@@ -914,31 +918,46 @@ export default function Home() {
     setIsProviderAddressLoading(true);
     setProviderAddressLoadError("");
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.addresses));
+      const res = await fetch(apiUrl(selectedProviderAddressesRoute));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const addresses = data.addresses || null;
       const options = collectObjectsWithAnyKey(addresses, ["address", "address_line", "addressLine", "id"]);
+      const providerDefault = options.find(option => (
+        option?.is_default === true
+        || option?.isDefault === true
+        || option?.default === true
+        || option?.selected === true
+      )) || options[0];
+      const providerDefaultId = providerDefault
+        ? optionValue(providerDefault, ["id", "address_id", "addressId"], "")
+        : "";
       setProviderSavedAddresses(addresses);
       setSelectedProviderAddress(current => (
         options.some((option, idx) => optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`) === current)
           ? current
-          : ""
+          : providerDefaultId
       ));
       if (options.length === 0) {
-        setProviderAddressLoadError(`${selectedProvider.label} did not return any saved delivery addresses.`);
+        setProviderAddressLoadError(`${selectedProviderLabel} did not return any saved delivery addresses.`);
       }
       return addresses;
     } catch (e) {
-      console.error(`Failed to load ${selectedProvider.label} delivery addresses`, e);
+      console.error(`Failed to load ${selectedProviderLabel} delivery addresses`, e);
       setProviderSavedAddresses(null);
       setSelectedProviderAddress("");
-      setProviderAddressLoadError(e?.message || `Could not load ${selectedProvider.label} delivery addresses.`);
+      setProviderAddressLoadError(e?.message || `Could not load ${selectedProviderLabel} delivery addresses.`);
       return null;
     } finally {
       setIsProviderAddressLoading(false);
     }
-  }, [selectedProvider]);
+  }, [
+    selectedProviderAddressesRoute,
+    selectedProviderEnabled,
+    selectedProviderLabel,
+    selectedProviderRegistryState,
+    selectedProviderRequiresConnection
+  ]);
 
   const syncLiveState = async (userName) => {
     try {
@@ -982,6 +1001,12 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeTab, syncProviderRegistry]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries" || !selectedProviderAddressesRoute) return undefined;
+    const timer = window.setTimeout(() => syncProviderAddresses(), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, selectedProviderAddressesRoute, syncProviderAddresses]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -3316,43 +3341,31 @@ export default function Home() {
                             <p>{providerStatusDescription}</p>
                           </div>
                         </div>
-                        <div className="provider-sync-address">
+                        <label className="provider-sync-address">
                           <span>Delivery address</span>
-                          {providerSavedAddresses === null ? (
-                            <div className="provider-address-loader">
-                              <strong>{selectedProviderAddress ? "Saved checkout address restored" : "Saved addresses are not loaded"}</strong>
-                              <small>Kitch will contact {selectedProvider.label} only when you choose to load its saved addresses.</small>
-                              <button
-                                type="button"
-                                onClick={syncProviderAddresses}
-                                disabled={isProviderSyncing || isProviderAddressLoading}
-                              >
-                                {isProviderAddressLoading ? "Loading addresses…" : `Load ${selectedProvider.label} addresses`}
-                              </button>
-                            </div>
-                          ) : (
-                            <select
-                              aria-label={`${selectedProvider.label} delivery address for cart sync`}
-                              value={selectedProviderAddress}
-                              disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
-                              onChange={(e) => selectProviderSyncAddress(e.target.value)}
-                            >
-                              <option value="">Select delivery address</option>
-                              {providerSavedAddressOptions.map((option, idx) => {
-                                const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
-                                const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
-                                return (
-                                  <option key={`${value}-${idx}`} value={value}>
-                                    {address.detail ? `${address.title} — ${address.detail}` : address.title}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          )}
+                          <select
+                            aria-label={`${selectedProvider.label} delivery address for cart sync`}
+                            value={selectedProviderAddress}
+                            disabled={isProviderSyncing || isProviderAddressLoading || providerSavedAddressOptions.length === 0}
+                            onChange={(e) => selectProviderSyncAddress(e.target.value)}
+                          >
+                            <option value="">
+                              {isProviderAddressLoading ? `Loading ${selectedProvider.label} addresses…` : "Select delivery address"}
+                            </option>
+                            {providerSavedAddressOptions.map((option, idx) => {
+                              const value = optionValue(option, ["id", "address_id", "addressId"], `address-${idx}`);
+                              const address = formatProviderAddressParts(option, `Address ${idx + 1}`);
+                              return (
+                                <option key={`${value}-${idx}`} value={value}>
+                                  {address.detail ? `${address.title} — ${address.detail}` : address.title}
+                                </option>
+                              );
+                            })}
+                          </select>
                           {providerAddressLoadError && (
                             <small className="provider-address-error">{providerAddressLoadError}</small>
                           )}
-                        </div>
+                        </label>
                       </div>
                     )}
                   </section>
@@ -3550,7 +3563,7 @@ export default function Home() {
                           ) : selectedProviderAddress ? (
                             <div className="provider-locked-address">
                               <strong>Saved checkout address</strong>
-                              <small>Load the saved addresses in stage 3 to review the exact delivery address before approval.</small>
+                              <small>Address details are still loading from {selectedProvider.label}.</small>
                             </div>
                           ) : (
                             <p>The reviewed cart has no confirmed delivery address. Sync again after selecting one.</p>
@@ -3614,7 +3627,7 @@ export default function Home() {
                         {!providerAddressDetailsReady && selectedProviderAddress && (
                           <div className="provider-stale-review" role="status">
                             <strong>Review the delivery address before checkout</strong>
-                            <span>Use “Load {selectedProvider.label} addresses” in stage 3. Kitch will not contact the provider until you choose that action.</span>
+                            <span>Kitch is loading the saved {selectedProvider.label} address details. Payment remains locked until the selected address can be shown for review.</span>
                           </div>
                         )}
 
