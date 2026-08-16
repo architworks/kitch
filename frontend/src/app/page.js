@@ -763,6 +763,7 @@ export default function Home() {
     }
   ), [orderingProviders, selectedOrderingProvider]);
   const selectedProviderLabel = selectedProvider.label;
+  const selectedProviderId = selectedProvider.id;
   const selectedProviderRevalidateRoute = selectedProvider.routes?.revalidateCart || "";
   const selectedProviderCheckoutDraftRoute = selectedProvider.routes?.checkoutDraft || "";
   const selectedProviderAddressesRoute = selectedProvider.routes?.addresses || "";
@@ -1415,14 +1416,17 @@ export default function Home() {
         return null;
       }
 
-      if (review.order_review_acknowledged || review.selected_payment_method_id) {
+      if (review.order_review_acknowledged || (
+        review.selected_payment_method_id && selectedProviderId !== "swiggy_instamart"
+      )) {
+        const resetPayload = { order_review_acknowledged: false };
+        if (selectedProviderId !== "swiggy_instamart") {
+          resetPayload.selected_payment_method_id = null;
+        }
         const resetRes = await fetch(apiUrl(selectedProviderCheckoutDraftRoute), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            order_review_acknowledged: false,
-            selected_payment_method_id: null
-          })
+          body: JSON.stringify(resetPayload)
         });
         await requireSuccessfulResponse(resetRes);
         review = (await resetRes.json()).draft || review;
@@ -1439,6 +1443,7 @@ export default function Home() {
   }, [
     applyProviderDraft,
     selectedProviderCheckoutDraftRoute,
+    selectedProviderId,
     selectedProviderLabel,
     triggerBannerAlert
   ]);
@@ -1558,7 +1563,7 @@ export default function Home() {
     setIsPlacingProviderOrder(true);
     try {
       const latestReview = await updateProviderReview({
-        selected_payment_method_id: selectedProviderPaymentMethod || null,
+        selected_payment_method_id: effectiveProviderPaymentMethod || null,
         order_review_acknowledged: true
       }) || providerCartReview;
       const res = await fetch(apiUrl(selectedProvider.routes.placeOrder), {
@@ -2032,6 +2037,24 @@ export default function Home() {
     providerCartReview?.payment_options || providerCheckoutContext.payment_methods,
     ["payment", "method", "payment_method", "id"]
   );
+  const instamartSolePaymentOption = (
+    selectedProvider.id === "swiggy_instamart" && providerPaymentOptions.length === 1
+  ) ? providerPaymentOptions[0] : null;
+  const instamartSolePaymentId = instamartSolePaymentOption
+    ? optionValue(
+      instamartSolePaymentOption,
+      ["id", "payment_method_id", "paymentMethodId", "method"],
+      ""
+    )
+    : "";
+  const instamartSolePaymentLabel = instamartSolePaymentOption
+    ? optionValue(
+      instamartSolePaymentOption,
+      ["label", "name", "payment_method", "paymentMethod", "method", "title"],
+      "Cash on delivery"
+    )
+    : "";
+  const effectiveProviderPaymentMethod = selectedProviderPaymentMethod || instamartSolePaymentId;
   const providerPaymentState = providerCartReview?.payment_state || {};
   const providerPaymentPending = providerCartReview?.status === "payment_pending";
   const providerOrderAmbiguous = providerCartReview?.status === "unknown" || providerCartReview?.ambiguous_order;
@@ -2057,7 +2080,7 @@ export default function Home() {
     && Boolean(selectedProviderAddress)
     && providerAddressDetailsReady
     && providerOrderBlockers.length === 0
-    && Boolean(selectedProviderPaymentMethod)
+    && Boolean(effectiveProviderPaymentMethod)
     && providerReviewAcknowledged
     && !providerDraftIsStale
     && !isUpdatingProviderReview;
@@ -3571,7 +3594,13 @@ export default function Home() {
                         </div>
 
                         <div className="provider-payment-control">
-                          {providerPaymentOptions.length > 0 ? (
+                          {instamartSolePaymentOption ? (
+                            <div className="provider-locked-payment">
+                              <span>Payment method</span>
+                              <strong>{instamartSolePaymentLabel}</strong>
+                              <small>This is the only payment method currently available from Swiggy Instamart.</small>
+                            </div>
+                          ) : providerPaymentOptions.length > 0 ? (
                             <label>
                               Payment method
                               <select

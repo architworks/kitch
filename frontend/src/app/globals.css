@@ -4742,6 +4742,33 @@ button {
   border-radius: 11px;
 }
 
+.provider-locked-payment {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  background: rgba(224, 239, 217, 0.7);
+  border: 1px solid rgba(74, 103, 65, 0.24);
+  border-radius: 11px;
+}
+
+.provider-locked-payment > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.provider-locked-payment strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.provider-locked-payment small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .provider-locked-address strong,
 .provider-locked-address span,
 .provider-locked-address small {

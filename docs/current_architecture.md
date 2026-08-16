@@ -365,6 +365,10 @@ Important rules:
 - Instamart calls `get_payment_options` for the fresh cart. UPI is exclusive
   when returned; its opaque app ID is echoed unchanged, or the documented QR
   flag is used. COD is offered only when UPI is absent and Cash is returned.
+- When Instamart returns exactly one supported payment method, Kitch records it
+  automatically and presents it as a fixed checkout detail. Multiple Instamart
+  methods still require a choice. Zepto retains its independent multi-option
+  payment selector and is not affected by this Instamart-specific behavior.
 - Checkout timeouts are not blindly retried. Order history is checked first;
   unresolved duplicate risk is persisted as an ambiguous `unknown` outcome.
 

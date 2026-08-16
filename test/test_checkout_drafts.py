@@ -94,6 +94,57 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(review["status"], "ready")
         self.assertTrue(review["can_place_order"])
         self.assertTrue(review["confirmation_token"])
+        self.assertIsNone(review["selected_payment_method_id"])
+
+    def test_instamart_automatically_selects_its_sole_payment_method(self):
+        native_item = self.native_item()
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
+        ):
+            review = save_initial_draft(
+                [native_item],
+                [native_item],
+                self.successful_result(),
+                "address-1",
+                "swiggy_instamart",
+                "staging",
+                "Swiggy Instamart",
+            )
+
+        self.assertEqual(review["selected_payment_method_id"], "cod")
+        self.assertEqual(review["selected_payment_method"], {"id": "cod", "kind": "cod"})
+
+    def test_instamart_does_not_autoselect_when_multiple_methods_exist(self):
+        native_item = self.native_item()
+        result = self.successful_result()
+        result["payment_options"] = [
+            {"id": "upi", "kind": "upi"},
+            {"id": "cod", "kind": "cod"},
+        ]
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
+        ):
+            review = save_initial_draft(
+                [native_item],
+                [native_item],
+                result,
+                "address-1",
+                "swiggy_instamart",
+                "staging",
+                "Swiggy Instamart",
+            )
+
+        self.assertIsNone(review["selected_payment_method_id"])
 
     def test_no_confirmed_items_blocks_order(self):
         native_item = self.native_item()
@@ -202,6 +253,39 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertIsNone(review["selected_payment_method_id"])
         self.assertFalse(review["order_review_acknowledged"])
         self.assertNotEqual(review["confirmation_token"], "old-token")
+
+    def test_instamart_revalidation_keeps_its_sole_current_method_selected(self):
+        native_item = self.native_item()
+        initial = persisted_row({
+            "provider": "swiggy_instamart",
+            "provider_environment": "staging",
+            "selected_address_id": "address-1",
+            "selected_native_item_ids": ["1"],
+            "native_items": [native_item],
+            "mapped_items": [native_item],
+            "matched_items": self.successful_result()["items"],
+            "payment_options": self.successful_result()["payment_options"],
+            "selected_payment_method_id": "cod",
+            "selected_payment_method": {"id": "cod", "kind": "cod"},
+            "order_review_acknowledged": True,
+            "can_place_order": True,
+            "confirmation_token": "old-token",
+            "status": "ready",
+        })
+        changed_result = {
+            **self.successful_result(),
+            "changed": True,
+            "changes": [{"type": "price_changed"}],
+        }
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ):
+            review, changed = save_revalidated_draft(initial, changed_result)
+
+        self.assertTrue(changed)
+        self.assertEqual(review["selected_payment_method_id"], "cod")
+        self.assertFalse(review["order_review_acknowledged"])
 
     def test_revalidation_unlocks_a_previously_blocked_partial_draft(self):
         first_item = self.native_item()

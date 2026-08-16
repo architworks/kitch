@@ -149,6 +149,20 @@ def _order_blockers(
     return list(dict.fromkeys(blockers))
 
 
+def _default_payment_selection(
+    provider: str,
+    payment_options: List[Dict[str, Any]],
+) -> tuple[str | None, Dict[str, Any] | None]:
+    """Select Instamart's sole current method without changing other providers."""
+    if provider != "swiggy_instamart" or len(payment_options) != 1:
+        return None, None
+    option = payment_options[0]
+    option_id = option.get("id")
+    if option_id is None:
+        return None, None
+    return str(option_id), option
+
+
 def refresh_checkout_eligibility(
     row: Dict[str, Any],
     provider_label: str,
@@ -206,6 +220,15 @@ def save_initial_draft(
 ) -> Dict[str, Any]:
     blockers = _order_blockers(native_items, result, provider_label)
     unavailable_items = result.get("unavailable_items") or []
+    payment_options = (
+        result.get("payment_options")
+        or (result.get("checkout_context") or {}).get("payment_methods")
+        or []
+    )
+    selected_payment_id, selected_payment = _default_payment_selection(
+        provider,
+        payment_options,
+    )
     payload: Dict[str, Any] = {
         "selected_address_id": selected_address_id,
         "selected_native_item_ids": [str(item.get("id")) for item in native_items if item.get("id") is not None],
@@ -220,9 +243,9 @@ def save_initial_draft(
         "cart_summary": result.get("cart_summary") or {},
         "checkout_context": result.get("checkout_context") or {},
         "store_context": result.get("store_context") or {},
-        "payment_options": result.get("payment_options") or (result.get("checkout_context") or {}).get("payment_methods") or [],
-        "selected_payment_method_id": None,
-        "selected_payment_method": None,
+        "payment_options": payment_options,
+        "selected_payment_method_id": selected_payment_id,
+        "selected_payment_method": selected_payment,
         "payment_state": {},
         "order_review_acknowledged": False,
         "can_place_order": not blockers,
@@ -251,6 +274,15 @@ def save_revalidated_draft(
     blockers = _order_blockers(native_items, result, provider_label)
     changed = bool(result.get("changed"))
     unavailable_items = result.get("unavailable_items") or []
+    payment_options = (
+        result.get("payment_options")
+        or (result.get("checkout_context") or {}).get("payment_methods")
+        or []
+    )
+    default_payment_id, default_payment = _default_payment_selection(
+        provider,
+        payment_options,
+    )
     replacements = (
         result.get("replacements") or []
         if changed
@@ -275,9 +307,19 @@ def save_revalidated_draft(
         "cart_summary": result.get("cart_summary") or {},
         "checkout_context": result.get("checkout_context") or {},
         "store_context": result.get("store_context") or {},
-        "payment_options": result.get("payment_options") or (result.get("checkout_context") or {}).get("payment_methods") or [],
-        "selected_payment_method_id": None if changed else existing.get("selected_payment_method_id"),
-        "selected_payment_method": None if changed else existing.get("selected_payment_method"),
+        "payment_options": payment_options,
+        "selected_payment_method_id": (
+            default_payment_id
+            if default_payment_id
+            else None if changed
+            else existing.get("selected_payment_method_id")
+        ),
+        "selected_payment_method": (
+            default_payment
+            if default_payment
+            else None if changed
+            else existing.get("selected_payment_method")
+        ),
         "payment_state": {} if changed else existing.get("payment_state") or {},
         "order_review_acknowledged": False if changed else bool(existing.get("order_review_acknowledged")),
         "can_place_order": not blockers,

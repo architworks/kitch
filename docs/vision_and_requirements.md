@@ -199,6 +199,7 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-055 | Discover and validate provider MCP capabilities, and degrade only that provider when required schemas are absent. | External schema drift must not corrupt calls or make core Kitch unavailable. |
 | REQ-056 | Encrypt provider tokens and PKCE verifiers, reject OAuth replay/expiry, and never expose provider credentials or sensitive raw payloads. | Household commerce credentials require a backend-only security boundary. |
 | REQ-057 | Offer only fresh provider-returned payment methods; prefer Instamart UPI and allow COD only when UPI is absent and COD is returned. | Kitch must never invent or submit a stale payment choice. |
+| REQ-057A | Automatically select and display Instamart's sole provider-returned payment method as read-only; show a selector only when Instamart returns multiple supported methods. Keep Zepto payment selection independent. | A one-option dropdown adds no meaningful consent, while provider-specific behavior must not reduce Zepto's supported choices. |
 | REQ-058 | Persist pending, partial, and ambiguous order outcomes and prevent blind checkout retry. | A timeout must not create duplicate-order risk. |
 | REQ-059 | Provider switching preserves the native cart but isolates address, draft, payment, approval, and order state by provider/environment. | Provider-specific checkout state must never leak across integrations. |
 
