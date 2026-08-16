@@ -134,18 +134,23 @@ class FakeInstamartClient:
                 items = [{
                     "spinId": "spin-1",
                     "skuId": "sku-1",
-                    "name": "Milk",
+                    "itemName": "Milk",
                     "quantity": 1,
-                    "sellingPrice": 99,
-                    "packSize": "1 L",
+                    "discountedFinalPrice": 99,
+                    "itemVariant": "1 L",
                 }]
             return {
                 "success": True,
                 "data": {
                     "items": items,
-                    "itemTotal": 99,
-                    "grandTotal": 104,
-                    "fees": [{"label": "Delivery fee", "amount": 5}],
+                    "cartTotalAmount": "₹104",
+                    "billBreakdown": {
+                        "lineItems": [
+                            {"label": "Item Total", "value": "₹99.00"},
+                            {"label": "Delivery fee", "value": "₹5.00"},
+                        ],
+                        "toPay": {"label": "To Pay", "value": "₹104"},
+                    },
                     "availablePaymentMethods": ["UPI", "COD"],
                 },
             }
@@ -249,7 +254,21 @@ class InstamartProviderTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["provider"], "swiggy_instamart")
+        self.assertEqual(result["cart_summary"]["subtotal_minor"], 9900)
         self.assertEqual(result["cart_summary"]["total_minor"], 10400)
+        self.assertEqual(result["items"][0]["cart_item"], {
+            "candidate_id": "spin-1:sku-1",
+            "spin_id": "spin-1",
+            "sku_id": "sku-1",
+            "name": "Milk",
+            "quantity": 1,
+            "price_minor": 9900,
+            "line_total_minor": 9900,
+            "pack_size": "1 L",
+            "image_url": None,
+            "store_id": None,
+            "store_name": None,
+        })
         self.assertEqual(
             [option["id"] for option in result["payment_options"]],
             ["com.google.android.apps.nbu.paisa.user", "PayWithQR"],
@@ -263,6 +282,25 @@ class InstamartProviderTests(unittest.TestCase):
             [name for name, _ in client.calls].index("update_cart"),
             [name for name, _ in client.calls].index("get_cart"),
         )
+
+    def test_live_cart_price_is_unit_price_and_subtotal_uses_quantity(self):
+        adapter = self.adapter(FakeInstamartClient())
+
+        cart = adapter._normalize_cart({
+            "items": [{
+                "spinId": "spin-1",
+                "skuId": "sku-1",
+                "itemName": "Cheese",
+                "itemVariant": "200 g",
+                "quantity": 3,
+                "discountedFinalPrice": 119,
+            }],
+        })
+
+        self.assertEqual(cart["items"][0]["name"], "Cheese")
+        self.assertEqual(cart["items"][0]["pack_size"], "200 g")
+        self.assertEqual(cart["items"][0]["price_minor"], 11900)
+        self.assertEqual(cart["items"][0]["line_total_minor"], 35700)
 
     def test_search_result_absent_from_confirmed_cart_is_not_success(self):
         client = FakeInstamartClient(cart_items=[])

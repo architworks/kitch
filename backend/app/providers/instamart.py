@@ -718,7 +718,13 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                     sku_id = self._first(merged, "skuId", "sku_id")
                     if not spin_id or not sku_id:
                         continue
-                    pack_size = str(self._first(merged, "packSize", "quantityDescription", "unit") or "")
+                    pack_size = str(self._first(
+                        merged,
+                        "packSize",
+                        "itemVariant",
+                        "quantityDescription",
+                        "unit",
+                    ) or "")
                     requested_quantity = self._requested_pack_quantity(native_item, pack_size)
                     if requested_quantity is None:
                         continue
@@ -747,10 +753,22 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                             "candidate_id": f"{spin_id}:{sku_id}",
                             "spin_id": str(spin_id),
                             "sku_id": str(sku_id),
-                            "name": str(self._first(merged, "name", "title", "productName") or "Instamart product"),
+                            "name": str(self._first(
+                                merged,
+                                "name",
+                                "itemName",
+                                "title",
+                                "productName",
+                            ) or "Instamart product"),
                             "brand": str(self._first(merged, "brand", "brandName") or ""),
                             "pack_size": pack_size,
-                            "price_minor": self._minor(self._first(merged, "sellingPrice", "price", "discountedPrice")),
+                            "price_minor": self._minor(self._first(
+                                merged,
+                                "sellingPrice",
+                                "price",
+                                "discountedPrice",
+                                "discountedFinalPrice",
+                            )),
                             "image_url": self._first(merged, "imageUrl", "image_url", "thumbnail"),
                             "available": available,
                             "available_quantity": quantity,
@@ -805,15 +823,49 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             quantity = self._first(value, "quantity", "qty", "count")
             if not spin_id or not sku_id or quantity is None:
                 continue
+            normalized_quantity = int(quantity)
+            price_minor = self._minor(self._first(
+                value,
+                "sellingPrice",
+                "price",
+                "discountedPrice",
+                "discountedFinalPrice",
+                "finalPrice",
+                "itemPrice",
+                "unitPrice",
+            ))
+            line_total_minor = self._minor(self._first(
+                value,
+                "lineTotal",
+                "line_total",
+                "itemSubtotal",
+                "item_subtotal",
+                "totalPrice",
+            ))
+            if line_total_minor is None and price_minor is not None:
+                line_total_minor = price_minor * normalized_quantity
             lines.append(
                 {
                     "candidate_id": f"{spin_id}:{sku_id}",
                     "spin_id": str(spin_id),
                     "sku_id": str(sku_id),
-                    "name": str(self._first(value, "name", "title", "productName") or "Instamart product"),
-                    "quantity": int(quantity),
-                    "price_minor": self._minor(self._first(value, "sellingPrice", "price", "discountedPrice")),
-                    "pack_size": str(self._first(value, "packSize", "quantityDescription", "unit") or ""),
+                    "name": str(self._first(
+                        value,
+                        "name",
+                        "itemName",
+                        "title",
+                        "productName",
+                    ) or "Instamart product"),
+                    "quantity": normalized_quantity,
+                    "price_minor": price_minor,
+                    "line_total_minor": line_total_minor,
+                    "pack_size": str(self._first(
+                        value,
+                        "packSize",
+                        "itemVariant",
+                        "quantityDescription",
+                        "unit",
+                    ) or ""),
                     "image_url": self._first(value, "imageUrl", "image_url", "thumbnail"),
                     "store_id": self._first(value, "storeId", "store_id", "merchantId", "merchant_id"),
                     "store_name": self._first(value, "storeName", "store_name", "merchantName", "merchant_name"),
@@ -880,13 +932,26 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         matches: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         objects = self._all_objects(payload)
-        total = self._first_minor(objects, "total", "grandTotal", "grand_total", "cartTotal", "toPay")
+        total = self._first_minor(
+            objects,
+            "total",
+            "grandTotal",
+            "grand_total",
+            "cartTotal",
+            "cartTotalAmount",
+            "toPay",
+        )
         subtotal = self._first_minor(objects, "subtotal", "itemTotal", "item_total", "itemsTotal")
         discount = self._first_minor(objects, "discount", "discountAmount", "totalDiscount")
         fees = []
         for value in objects:
             label = self._first(value, "label", "name", "title")
             amount = self._first(value, "amount", "value", "fee")
+            normalized_label = str(label or "").strip().lower()
+            if subtotal is None and normalized_label in {"item total", "items total", "subtotal"}:
+                subtotal = self._minor(amount)
+            if discount is None and "discount" in normalized_label:
+                discount = self._minor(amount)
             if label and amount is not None and any(word in str(label).lower() for word in ("fee", "charge", "handling", "delivery", "tax")):
                 minor = self._minor(amount)
                 if minor is not None:

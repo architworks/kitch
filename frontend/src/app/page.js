@@ -526,18 +526,29 @@ const providerPriceToMinor = (value) => {
 const getProviderCartLineData = (match) => {
   const product = match?.matched_product || {};
   const cartItem = match?.cart_item || {};
-  const rawPrice = providerValue([cartItem, product], ["price", "sellingPrice", "selling_price", "discountedPrice"]);
+  // Checkout pricing must come from the confirmed provider cart. Search-match
+  // prices can be stale and are not proof of what the provider actually added.
+  const normalizedPriceMinor = providerValue([cartItem], ["price_minor"]);
+  const normalizedLineTotalMinor = providerValue([cartItem], ["line_total_minor"]);
+  const rawPrice = providerValue([cartItem], ["price", "sellingPrice", "selling_price", "discountedPrice"]);
   const rawQuantity = providerValue([cartItem, match?.add_result, product], ["quantity", "qty", "count"]);
-  const priceMinor = providerPriceToMinor(rawPrice);
+  const parsedNormalizedPrice = Number(normalizedPriceMinor);
+  const priceMinor = normalizedPriceMinor !== "" && Number.isFinite(parsedNormalizedPrice)
+    ? Math.round(parsedNormalizedPrice)
+    : providerPriceToMinor(rawPrice);
   const parsedQuantity = Number(rawQuantity);
   const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+  const parsedNormalizedLineTotal = Number(normalizedLineTotalMinor);
+  const subtotalMinor = normalizedLineTotalMinor !== "" && Number.isFinite(parsedNormalizedLineTotal)
+    ? Math.round(parsedNormalizedLineTotal)
+    : priceMinor === null ? null : Math.round(priceMinor * quantity);
 
   return {
     priceMinor,
     quantity,
-    subtotalMinor: priceMinor === null ? null : Math.round(priceMinor * quantity),
-    packSize: providerValue([cartItem, product], ["packSize", "pack_size", "unit", "unitOfQuantity", "unit_of_quantity", "quantityUnit"]),
-    imageUrl: providerValue([cartItem, product], ["imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"])
+    subtotalMinor,
+    packSize: providerValue([cartItem, product], ["pack_size", "packSize", "unit", "unitOfQuantity", "unit_of_quantity", "quantityUnit"]),
+    imageUrl: providerValue([cartItem, product], ["image_url", "imageUrl", "thumbnailUrl", "thumbnail_url"])
   };
 };
 
@@ -3424,7 +3435,7 @@ export default function Home() {
                               {providerCartRows.map(({ match, index, imageUrl, priceMinor, quantity, packSize, subtotalMinor }) => {
                                 const product = match.matched_product || {};
                                 const native = match.native_item || {};
-                                const productName = product.name || product.title || product.product_name || match.cart_item?.name || `${selectedProvider.label} cart item`;
+                                const productName = match.cart_item?.name || product.name || product.title || product.product_name || `${selectedProvider.label} cart item`;
                                 return (
                                   <div key={`${native.id || native.name || index}-provider-match`} className="provider-product-row" role="row">
                                     <div className="provider-product-item" role="cell">
