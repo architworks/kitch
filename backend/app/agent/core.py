@@ -44,6 +44,7 @@ from .tools import (
     update_household_settings_tool,
 )
 from .structured_models import PhotoAnalysis, PantryReconciliation
+from .tool_error_policy import recover_unknown_tool_error
 from google.adk.agents.callback_context import CallbackContext
 from typing import Optional
 
@@ -151,7 +152,9 @@ chef_planner = LlmAgent(
         update_dated_meals_tool,
         remove_future_meals_tool,
         get_current_datetime
-    ]
+    ],
+    mode="task",
+    on_tool_error_callback=recover_unknown_tool_error,
 )
 
 vision_scanner = LlmAgent(
@@ -171,7 +174,7 @@ vision_scanner = LlmAgent(
     ),
     tools=[],
     output_schema=PhotoAnalysis,
-    mode="single_turn",
+    mode="chat",
     include_contents="none",
 )
 
@@ -189,6 +192,8 @@ nutrition_tracker = LlmAgent(
     ),
     tools=[log_macros_tool, get_macro_diary_tool, update_nutrition_entry_tool,
            delete_nutrition_entry_tool, clear_nutrition_day_tool, get_current_datetime],
+    mode="task",
+    on_tool_error_callback=recover_unknown_tool_error,
 )
 
 pantry_reconciliation_agent = LlmAgent(
@@ -200,7 +205,7 @@ pantry_reconciliation_agent = LlmAgent(
         "equivalent real-world units only when defensible, allow partial coverage, and return exactly "
         "one allocation per supplied cart ID. Never invent IDs. purchase_amount is always nonnegative."
     ),
-    tools=[], output_schema=PantryReconciliation, mode="single_turn", include_contents="none",
+    tools=[], output_schema=PantryReconciliation, mode="chat", include_contents="none",
 )
 
 recipe_grocery_planner = LlmAgent(
@@ -229,7 +234,7 @@ recipe_grocery_planner = LlmAgent(
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
         "6. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
         "7. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
-        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
+        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
         "9. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
         "10. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
         "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
@@ -253,7 +258,9 @@ recipe_grocery_planner = LlmAgent(
         reconcile_native_cart_with_pantry_tool,
         sync_provider_cart_tool,
         get_current_datetime
-    ]
+    ],
+    mode="task",
+    on_tool_error_callback=recover_unknown_tool_error,
 )
 
 # 4. Construct the Central Coordinator Agent (Parent Orchestrator Hub)
@@ -287,6 +294,7 @@ kitch_coordinator = LlmAgent(
         "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to nutrition_tracker for logging.\n"
         "6. All recipes, pantry, native grocery cart, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
         "7. Household settings (diet, household size, calorie target, timezone) may be changed with update_household_settings_tool. Provider authentication and default-provider selection remain UI-only.\n"
+        "   When one message combines a household-setting change with specialist work, call update_household_settings_tool first and require status=success, then invoke the relevant specialist task. Never delegate the whole mixed request before persisting the setting, and never claim the setting changed from the requested intent alone.\n"
         "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
         "10. Never ask 'which agent should I use' — just figure it out from context.\n"
@@ -298,6 +306,7 @@ kitch_coordinator = LlmAgent(
         get_grocery_checkout_status_tool,
         update_household_settings_tool,
     ],
+    on_tool_error_callback=recover_unknown_tool_error,
     before_agent_callback=inject_datetime_callback
 )
 
@@ -321,8 +330,9 @@ runner = Runner(
     memory_service=memory_service
 )
 
-# Image classification and pantry reconciliation are intentionally one-shot.
-# They share the Gemini model but never inherit chat history or mutation tools.
+# Image classification and pantry reconciliation are logically one-shot. ADK
+# requires root LlmAgents to use chat mode, so isolation comes from a unique
+# session per invocation plus include_contents="none", not single_turn mode.
 vision_session_service = InMemorySessionService()
 vision_runner = Runner(
     app_name="kitch_vision", agent=vision_scanner,

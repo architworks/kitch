@@ -18,6 +18,7 @@ from app.agent_confirmation import (  # noqa: E402
 )
 from app import pantry_service  # noqa: E402
 from app.pantry_service import _propose_inventory, PantryReconciliationError  # noqa: E402
+from app.agent.tool_error_policy import recover_unknown_tool_error  # noqa: E402
 
 
 class PantryProposalTests(unittest.TestCase):
@@ -72,6 +73,18 @@ class DestructiveConfirmationTests(unittest.IsolatedAsyncioTestCase):
             end_confirmation_scope(token)
 
 
+class PantryToolInputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_quantity_bearing_mutation_rejects_missing_amount_before_service(self):
+        with patch("app.pantry_service.mutate_pantry") as mutate:
+            result = await tools.patch_pantry_tool(
+                [{"action": "set", "name": "Eggs", "unit": "piece"}],
+                expected_revision=3,
+            )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("requires", result["message"])
+        mutate.assert_not_called()
+
+
 class PantryTransactionBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_pantry_mutation_does_not_read_or_reconcile_cart(self):
         with (
@@ -124,6 +137,35 @@ class CheckedInSchemaContractTests(unittest.TestCase):
         vision = core.split("vision_scanner =", 1)[1].split("nutrition_tracker =", 1)[0]
         self.assertIn("tools=[]", vision)
         self.assertIn("output_schema=PhotoAnalysis", vision)
+        self.assertIn('mode="chat"', vision)
+
+    def test_specialists_are_task_scoped_and_one_shot_runners_use_valid_root_mode(self):
+        core = (ROOT / "backend/app/agent/core.py").read_text()
+        chef = core.split("chef_planner =", 1)[1].split("vision_scanner =", 1)[0]
+        nutrition = core.split("nutrition_tracker =", 1)[1].split("pantry_reconciliation_agent =", 1)[0]
+        recipe = core.split("recipe_grocery_planner =", 1)[1].split("kitch_coordinator =", 1)[0]
+        reconciliation = core.split("pantry_reconciliation_agent =", 1)[1].split("recipe_grocery_planner =", 1)[0]
+        self.assertIn('mode="task"', chef)
+        self.assertIn('mode="task"', nutrition)
+        self.assertIn('mode="task"', recipe)
+        self.assertIn('mode="chat"', reconciliation)
+
+
+class ToolErrorPolicyTests(unittest.TestCase):
+    def test_unknown_tool_returns_reflection_without_masking_real_errors(self):
+        unknown = type("Tool", (), {"name": "invented_tool", "description": "Tool not found"})()
+        response = recover_unknown_tool_error(
+            tool=unknown, args={}, tool_context=None,
+            error=ValueError("Tool 'invented_tool' not found"),
+        )
+        self.assertEqual(response["code"], "unknown_tool")
+        self.assertIn("exact registered tool name", response["message"])
+
+        real_tool = type("Tool", (), {"name": "save", "description": "Save"})()
+        self.assertIsNone(recover_unknown_tool_error(
+            tool=real_tool, args={}, tool_context=None,
+            error=RuntimeError("database unavailable"),
+        ))
 
 
 if __name__ == "__main__":

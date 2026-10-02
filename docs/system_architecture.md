@@ -34,9 +34,9 @@ flowchart LR
     Browser[Browser / Next.js UI] -->|HTTP| API[FastAPI Gateway]
     API -->|runner.run_async| Runner[ADK Runner]
     Runner --> Coordinator[kitch_coordinator]
-    Coordinator --> Chef[chef_planner]
-    Coordinator --> RecipeGrocery[recipe_grocery_planner]
-    Coordinator --> Nutrition[nutrition_tracker]
+    Coordinator -->|task invocation| Chef[chef_planner]
+    Coordinator -->|task invocation| RecipeGrocery[recipe_grocery_planner]
+    Coordinator -->|task invocation| Nutrition[nutrition_tracker]
     Coordinator --> ProviderReadTools[Provider status tools]
     API --> Vision[one-shot vision_scanner]
     Vision -->|meal| Nutrition
@@ -223,8 +223,16 @@ The main ADK application in `backend/app/agent/core.py` contains:
 - `recipe_grocery_planner`
 - `nutrition_tracker`
 
+The coordinator is the root chat agent. The three domain specialists use ADK
+`task` mode, so each user turn is routed afresh by the coordinator rather than
+resuming whichever specialist handled the previous turn. This also lets mixed
+requests persist coordinator-owned household settings before invoking a domain
+task.
+
 FastAPI invokes `vision_scanner` and `pantry_reconciliation_mode` in isolated,
-one-shot ADK runners. Neither has mutation tools.
+logically one-shot ADK runners. ADK root agents must use `chat` mode, so these
+runs use a unique session per operation and exclude prior contents. Neither
+agent has mutation tools.
 
 The provider checkout service separately creates `instamart_cart_agent` through
 `InstamartCartAgentService`. This is an operation-scoped ADK run, not a

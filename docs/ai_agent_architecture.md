@@ -13,9 +13,9 @@ flowchart TB
         Chef[AGENT: chef_planner]
         Recipe[AGENT: recipe_grocery_planner]
         Nutrition[AGENT: nutrition_tracker]
-        Coordinator --> Chef
-        Coordinator --> Recipe
-        Coordinator --> Nutrition
+        Coordinator -->|bounded task| Chef
+        Coordinator -->|bounded task| Recipe
+        Coordinator -->|bounded task| Nutrition
     end
     MainRunner --> Coordinator
     Coordinator --> Settings[TOOL: household settings]
@@ -44,9 +44,11 @@ flowchart TB
 
 Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and services are ordinary Python. Supabase is durable structured state. ADK memory is intentionally process-local flexible text until the Vertex AI memory migration.
 
-`vision_scanner` is a real agent but not a conversational sub-agent. It is one-shot so image classification does not inherit chat assumptions and cannot mutate state. It returns exactly `meal`, `pantry`, or `ambiguous`, structured observations, and no confidence score. Camera and Gallery are only upload mechanisms.
+The three domain specialists run in ADK `task` mode. Every new household chat turn therefore begins at `kitch_coordinator`; a previous specialist cannot retain routing control over the next message. The coordinator can complete its own household-setting operation and then invoke the appropriate specialist in the same turn.
 
-`pantry_reconciliation_mode` is a one-shot structured mode used only after an explicit request to update the native cart from pantry state. It reasons about real-world coverage; the backend validates exact cart IDs and nonnegative quantities before committing the cart changes.
+`vision_scanner` is a real agent but not a conversational sub-agent. It is logically one-shot so image classification does not inherit chat assumptions and cannot mutate state. ADK requires a root `LlmAgent` to use `chat` mode, so isolation is provided by a unique session for every upload plus `include_contents="none"`. It returns exactly `meal`, `pantry`, or `ambiguous`, structured observations, and no confidence score. Camera and Gallery are only upload mechanisms.
+
+`pantry_reconciliation_mode` uses the same isolated-runner pattern and is invoked only after an explicit request to update the native cart from pantry state. It reasons about real-world coverage; the backend validates exact cart IDs and nonnegative quantities before committing the cart changes.
 
 ## Capability matrix
 

@@ -151,7 +151,11 @@ Current agent team:
 - `recipe_grocery_planner`
 - `nutrition_tracker`
 
-One-shot structured agents:
+The coordinator is the long-lived chat root. These three specialists run as
+bounded ADK task agents so every new household message returns through central
+routing instead of remaining attached to a previous specialist.
+
+Logically one-shot structured agents (isolated root runs):
 
 - `vision_scanner`
 - `pantry_reconciliation_mode`

@@ -310,6 +310,51 @@ const getRecipeCardTitle = (recipe, fallback = "Recipe details pending") => {
   return recipe.title || recipe.name || recipe.recipeName || recipe.recipe_name || fallback;
 };
 
+const formatRecipeScopeLabel = (scope, fallback = "Recipe plan") => {
+  if (!scope) return fallback;
+  if (typeof scope === "string" || typeof scope === "number") {
+    return String(scope).trim() || fallback;
+  }
+  if (Array.isArray(scope)) {
+    const labels = scope
+      .map(item => formatRecipeScopeLabel(item, ""))
+      .filter(Boolean);
+    return labels.join(" · ") || fallback;
+  }
+  if (typeof scope !== "object") return fallback;
+
+  const mealSlot = String(scope.mealSlot || scope.meal_slot || "").toLowerCase();
+  const slotLabel = MEAL_SLOT_LABELS[mealSlot] || "";
+  const dateValue = scope.date || scope.plan_date || scope.planDate || "";
+  const dateLabel = dateValue
+    ? formatPlanDate(String(dateValue), { weekday: "long", month: "short", day: "numeric" })
+    : String(scope.day || scope.weekday || "").trim();
+  const rangeLabel = [scope.start_date || scope.startDate, scope.end_date || scope.endDate]
+    .filter(Boolean)
+    .map(value => formatPlanDate(String(value), { month: "short", day: "numeric" }))
+    .join("–");
+  return [slotLabel, dateLabel || rangeLabel].filter(Boolean).join(" · ") || fallback;
+};
+
+const formatRelativeCheckedTime = (value, now = new Date()) => {
+  if (!value) return "Unknown update time";
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "Unknown update time";
+  const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - timestamp.getTime()) / 1000));
+  if (elapsedSeconds < 60) return "just now";
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hr${elapsedHours === 1 ? "" : "s"} ago`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays} day${elapsedDays === 1 ? "" : "s"} ago`;
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: timestamp.getFullYear() === now.getFullYear() ? undefined : "numeric"
+  }).format(timestamp);
+};
+
 const normalizeList = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -2070,7 +2115,10 @@ export default function Home() {
   ).filter(ingredient => getIngredientName(ingredient));
   const activeRecipeSteps = getRecipeSteps(activeRecipeCard);
   const recipePlanScope = latestRecipeGroceryPlan?.scope || {};
-  const recipePlanLabel = latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || activeRecipeCard?.scope || "Recipe plan";
+  const recipePlanLabel = formatRecipeScopeLabel(
+    latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || activeRecipeCard?.scope,
+    "Recipe plan"
+  );
   const recipeServings = activeRecipeCard?.servings || activeRecipeCard?.serves || latestRecipeGroceryPlan?.householdSize || householdSize;
   const recipeCookTime = activeRecipeCard?.cookTime || activeRecipeCard?.cook_time || activeRecipeCard?.time || "";
   const recipeCalories = activeRecipeCard?.calories || activeRecipeCard?.caloriesPerServing || activeRecipeCard?.calories_per_serving || "";

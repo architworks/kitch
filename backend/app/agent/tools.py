@@ -1,6 +1,7 @@
 # Kitch: Core ADK 2.0 Custom Tools
 
 import json as _json
+import math
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
 from app.household_config import DEFAULT_ACTIVE_USER
@@ -476,6 +477,23 @@ async def patch_pantry_tool(
   parsed = _ensure_dict(changes)
   if not isinstance(parsed, list) or not parsed:
     return {"status": "error", "message": "changes must be a non-empty list"}
+  for change in parsed:
+    if not isinstance(change, dict):
+      return {"status": "error", "message": "each pantry change must be an object"}
+    action = str(change.get("action") or "").strip().lower()
+    if action in {"add", "set", "adjust"}:
+      amount = change.get("amount")
+      if amount is None or isinstance(amount, bool):
+        return {
+          "status": "error",
+          "message": f"Pantry {action} requires the observed or requested quantity in amount. No change was saved.",
+        }
+      try:
+        numeric_amount = float(amount)
+      except (TypeError, ValueError):
+        return {"status": "error", "message": f"Pantry {action} amount must be numeric. No change was saved."}
+      if not math.isfinite(numeric_amount):
+        return {"status": "error", "message": f"Pantry {action} amount must be finite. No change was saved."}
   result = await mutate_pantry(expected_revision=expected_revision, mode="patch", items=parsed)
   return {"status": "success", **result}
 
