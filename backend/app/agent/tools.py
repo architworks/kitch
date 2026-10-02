@@ -471,13 +471,23 @@ async def patch_pantry_tool(
   changes: List[Dict[str, Any]], expected_revision: int,
   user_name: str = DEFAULT_ACTIVE_USER,
 ) -> Dict[str, Any]:
-  """Atomically add, set, adjust, or remove pantry rows and reconcile the native cart."""
+  """Atomically add, set, adjust, or remove pantry rows without changing the native cart."""
   from app.pantry_service import mutate_pantry
   parsed = _ensure_dict(changes)
   if not isinstance(parsed, list) or not parsed:
     return {"status": "error", "message": "changes must be a non-empty list"}
   result = await mutate_pantry(expected_revision=expected_revision, mode="patch", items=parsed)
   return {"status": "success", **result}
+
+
+async def reconcile_native_cart_with_pantry_tool(
+  expected_revision: int,
+  user_name: str = DEFAULT_ACTIVE_USER,
+) -> Dict[str, Any]:
+  """Explicitly recalculate native purchase quantities from the current pantry."""
+  from app.pantry_service import reconcile_native_cart_with_pantry
+  result = await reconcile_native_cart_with_pantry(expected_revision=expected_revision)
+  return {"status": "success", **result, "ui_action": "UPDATE_GROCERY_CART"}
 
 
 async def replace_pantry_tool(

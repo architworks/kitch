@@ -1690,12 +1690,36 @@ export default function Home() {
         body: JSON.stringify({ expected_revision: pantryRevision, changes }),
       });
       await requireSuccessfulResponse(res);
-      await syncLiveState(activeUser);
-      invalidateProviderReview();
+      const data = await res.json();
+      setPantryStock(Array.isArray(data.pantry) ? data.pantry : []);
+      setPantryRevision(Number(data.revision || pantryRevision));
+      setPantryReviewedAt(data.reviewed_at || pantryReviewedAt);
       return true;
     } catch (error) {
       triggerBannerAlert(apiErrorMessage(error, "The pantry change could not be saved."));
       return false;
+    }
+  };
+
+  const reconcileCartWithPantry = async () => {
+    try {
+      const res = await fetch(apiUrl("/api/grocery-cart/reconcile-pantry"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_revision: pantryRevision }),
+      });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      const confirmedItems = Array.isArray(data.grocery_cart) ? data.grocery_cart : [];
+      confirmedGroceryItemsRef.current = confirmedItems;
+      setCustomGroceryItems(confirmedItems);
+      if (data.provider_review_invalidated) invalidateProviderReview();
+      triggerBannerAlert(
+        data.provider_review_invalidated
+          ? "Native cart updated from the pantry. The previous provider review was cleared."
+          : "Native cart checked against the pantry. No purchase quantities changed."
+      );
+    } catch (error) {
+      triggerBannerAlert(apiErrorMessage(error, "The native cart could not be updated from the pantry."));
     }
   };
 
@@ -1708,7 +1732,7 @@ export default function Home() {
 
   const markPantryEmpty = () => setConfirmationDialog({
     title: "Mark the pantry empty?",
-    message: `This will remove all ${pantryStock.length} pantry item(s), recalculate purchase quantities, and invalidate any provider review.`,
+    message: `This will remove all ${pantryStock.length} pantry item(s). The native cart will not change unless you explicitly update it from the pantry.`,
     confirmLabel: "Mark empty",
     onConfirm: async () => {
       const res = await fetch(apiUrl("/api/pantry"), {
@@ -1716,8 +1740,10 @@ export default function Home() {
         body: JSON.stringify({ expected_revision: pantryRevision, items: [], confirmed: true }),
       });
       await requireSuccessfulResponse(res);
-      await syncLiveState(activeUser);
-      invalidateProviderReview();
+      const data = await res.json();
+      setPantryStock(Array.isArray(data.pantry) ? data.pantry : []);
+      setPantryRevision(Number(data.revision || pantryRevision));
+      setPantryReviewedAt(data.reviewed_at || pantryReviewedAt);
       triggerBannerAlert("Pantry marked empty.");
     },
   });
@@ -3407,7 +3433,10 @@ export default function Home() {
                                   : "Review recommended · This pantry has not been fully reviewed yet."}
                               </p>
                             </div>
-                            <button type="button" className="danger-outline" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
+                            <div className="pantry-manager-actions">
+                              <button type="button" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}>Update cart from pantry</button>
+                              <button type="button" className="danger-outline" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
+                            </div>
                           </div>
                           {pantryStock.length === 0 ? (
                             <div className="native-cart-empty"><strong>The pantry is empty.</strong><p>Add an item below or upload a pantry photo.</p></div>

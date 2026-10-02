@@ -46,7 +46,7 @@ Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and services
 
 `vision_scanner` is a real agent but not a conversational sub-agent. It is one-shot so image classification does not inherit chat assumptions and cannot mutate state. It returns exactly `meal`, `pantry`, or `ambiguous`, structured observations, and no confidence score. Camera and Gallery are only upload mechanisms.
 
-`pantry_reconciliation_mode` is a one-shot structured mode used by the Recipe/Grocery domain before a pantry transaction. It reasons about real-world coverage; the backend validates exact cart IDs and nonnegative quantities before commit.
+`pantry_reconciliation_mode` is a one-shot structured mode used only after an explicit request to update the native cart from pantry state. It reasons about real-world coverage; the backend validates exact cart IDs and nonnegative quantities before committing the cart changes.
 
 ## Capability matrix
 
@@ -69,8 +69,9 @@ Pantry is shared household state. Recipe/Grocery Planner reads rows, `pantry_rev
 - `replace_pantry_tool` creates a pending destructive action; an empty replacement means an empty pantry.
 - Current-inventory photos use `set`; explicitly newly purchased stock uses `add`.
 - Full replacement updates `pantry_reviewed_at`; incremental edits do not claim a full review.
-- Reconciliation calculates each native row’s `purchase_amount`, `purchase_unit`, and `pantry_allocation`.
-- The database locks the revision, mutates pantry and cart allocation together, increments the revision, and invalidates provider reviews. Failures roll back everything.
+- Pantry mutations never recalculate or otherwise change the native cart.
+- `reconcile_native_cart_with_pantry_tool` runs only on an explicit user request. It calculates each native row’s `purchase_amount`, `purchase_unit`, and `pantry_allocation` against the current pantry.
+- Cart reconciliation is its own revision-checked transaction. It invalidates provider reviews only when purchase intent actually changes.
 
 The retired `already_stocked` and `stock_note` snapshots must not return.
 

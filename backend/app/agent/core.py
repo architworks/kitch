@@ -21,6 +21,7 @@ from .tools import (
     get_pantry_state_tool,
     patch_pantry_tool,
     replace_pantry_tool,
+    reconcile_native_cart_with_pantry_tool,
     log_macros_tool,
     get_macro_diary_tool,
     update_nutrition_entry_tool,
@@ -228,7 +229,7 @@ recipe_grocery_planner = LlmAgent(
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
         "6. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
         "7. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
-        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool.\n"
+        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
         "9. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
         "10. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
         "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
@@ -249,6 +250,7 @@ recipe_grocery_planner = LlmAgent(
         get_pantry_state_tool,
         patch_pantry_tool,
         replace_pantry_tool,
+        reconcile_native_cart_with_pantry_tool,
         sync_provider_cart_tool,
         get_current_datetime
     ]

@@ -1,4 +1,4 @@
-"""Application service for revisioned pantry changes and cart reconciliation."""
+"""Application services for independent pantry changes and explicit cart reconciliation."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from google.genai.types import Content, Part
 from app.agent.structured_models import PantryReconciliation
 from app.supabase_client import (
     apply_pantry_inventory_change,
+    apply_pantry_cart_reconciliation,
     get_grocery_cart,
     get_pantry_state,
 )
@@ -44,13 +45,7 @@ def _propose_inventory(
         )), None)
         if action == "add":
             if target:
-                requested_unit = str(operation.get("unit") or target.get("unit") or "piece")
-                if requested_unit.casefold() != str(target.get("unit") or "piece").casefold():
-                    raise PantryReconciliationError(
-                        "Pantry add cannot combine incompatible units; convert the quantity first"
-                    )
                 target["amount"] = float(target.get("amount") or 0) + float(operation.get("amount") or 0)
-                target["unit"] = requested_unit
             else:
                 inventory.append({"name": operation.get("name"), "amount": float(operation.get("amount") or 0), "unit": operation.get("unit") or "piece"})
         elif action == "set":
@@ -61,10 +56,6 @@ def _propose_inventory(
             else:
                 raise PantryReconciliationError("Pantry set referenced an item that no longer exists")
         elif action == "adjust" and target:
-            if operation.get("unit") and str(operation["unit"]).casefold() != str(target.get("unit") or "piece").casefold():
-                raise PantryReconciliationError(
-                    "Pantry adjustment cannot combine incompatible units; convert the quantity first"
-                )
             target["amount"] = max(0, float(target.get("amount") or 0) + float(operation.get("amount") or 0))
         elif action in {"remove", "delete"} and target:
             inventory.remove(target)
@@ -142,10 +133,20 @@ async def mutate_pantry(
     state = get_pantry_state()
     if int(expected_revision) != int(state["revision"]):
         raise PantryReconciliationError("Pantry revision conflict; refresh and try again")
-    cart = get_grocery_cart()
-    proposed = _propose_inventory(state["items"], mode, items)
-    allocations = await _reconcile_with_agent(proposed, cart)
+    _propose_inventory(state["items"], mode, items)
     return apply_pantry_inventory_change(
         expected_revision=expected_revision, mode=mode, items=items,
+    )
+
+
+async def reconcile_native_cart_with_pantry(*, expected_revision: int) -> dict[str, Any]:
+    """Explicitly recalculate native purchase intent from the current pantry."""
+    state = get_pantry_state()
+    if int(expected_revision) != int(state["revision"]):
+        raise PantryReconciliationError("Pantry revision conflict; refresh and try again")
+    cart = get_grocery_cart()
+    allocations = await _reconcile_with_agent(state["items"], cart)
+    return apply_pantry_cart_reconciliation(
+        expected_revision=expected_revision,
         cart_reconciliation=allocations,
     )

@@ -1,5 +1,6 @@
--- Kitch head-chef capabilities: revisioned pantry state, purchase intent,
--- pending destructive actions, and editable domain records.
+-- Kitch head-chef capabilities: independently revisioned pantry state,
+-- explicitly reconciled purchase intent, pending destructive actions,
+-- and editable domain records.
 
 ALTER TABLE public.profiles
     ADD COLUMN IF NOT EXISTS pantry_revision BIGINT NOT NULL DEFAULT 0,
@@ -103,12 +104,13 @@ GRANT EXECUTE ON FUNCTION public.claim_pending_agent_action(uuid, uuid) TO servi
 -- Existing reviews were produced from the retired grocery snapshot fields.
 DELETE FROM public.provider_checkout_drafts;
 
+DROP FUNCTION IF EXISTS public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB, JSONB);
+
 CREATE OR REPLACE FUNCTION public.apply_pantry_inventory_change(
     p_profile_id UUID,
     p_expected_revision BIGINT,
     p_mode TEXT,
-    p_items JSONB,
-    p_cart_reconciliation JSONB DEFAULT '[]'::jsonb
+    p_items JSONB
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -125,14 +127,12 @@ DECLARE
     item_amount NUMERIC;
     operation TEXT;
     saved_pantry JSONB;
-    saved_cart JSONB;
 BEGIN
     IF p_mode NOT IN ('patch', 'replace') THEN
         RAISE EXCEPTION 'pantry mode must be patch or replace' USING ERRCODE = '22023';
     END IF;
-    IF jsonb_typeof(COALESCE(p_items, '[]'::jsonb)) <> 'array'
-       OR jsonb_typeof(COALESCE(p_cart_reconciliation, '[]'::jsonb)) <> 'array' THEN
-        RAISE EXCEPTION 'pantry items and cart reconciliation must be arrays' USING ERRCODE = '22023';
+    IF jsonb_typeof(COALESCE(p_items, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'pantry items must be an array' USING ERRCODE = '22023';
     END IF;
 
     SELECT pantry_revision, pantry_reviewed_at INTO current_revision, current_reviewed_at
@@ -145,12 +145,6 @@ BEGIN
     IF current_revision <> p_expected_revision THEN
         RAISE EXCEPTION 'pantry revision conflict' USING ERRCODE = '40001';
     END IF;
-    PERFORM 1 FROM public.grocery_cart_items WHERE profile_id = p_profile_id FOR UPDATE;
-    IF (SELECT count(*) FROM public.grocery_cart_items WHERE profile_id = p_profile_id)
-       <> jsonb_array_length(COALESCE(p_cart_reconciliation, '[]'::jsonb)) THEN
-        RAISE EXCEPTION 'native cart changed during pantry reconciliation' USING ERRCODE = '40001';
-    END IF;
-
     IF p_mode = 'replace' THEN
         DELETE FROM public.pantry_stock WHERE profile_id = p_profile_id;
         FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(p_items, '[]'::jsonb)) LOOP
@@ -183,17 +177,10 @@ BEGIN
                 IF item_name IS NULL OR item_amount <= 0 THEN
                     RAISE EXCEPTION 'add requires a name and positive amount' USING ERRCODE = '22023';
                 END IF;
-                IF EXISTS (
-                    SELECT 1 FROM public.pantry_stock
-                    WHERE profile_id = p_profile_id AND lower(ingredient_name) = lower(item_name)
-                      AND lower(unit) <> lower(item_unit)
-                ) THEN
-                    RAISE EXCEPTION 'pantry add requires a compatible unit' USING ERRCODE = '22023';
-                END IF;
                 UPDATE public.pantry_stock SET amount = amount + item_amount,
                     updated_at = now()
-                WHERE profile_id = p_profile_id AND lower(ingredient_name) = lower(item_name)
-                  AND lower(unit) = lower(item_unit);
+                WHERE profile_id = p_profile_id
+                  AND (id = item_id OR (item_id IS NULL AND lower(ingredient_name) = lower(item_name)));
                 IF NOT FOUND THEN
                     INSERT INTO public.pantry_stock(profile_id, ingredient_name, amount, unit, updated_at)
                     VALUES (p_profile_id, item_name, item_amount, item_unit, now());
@@ -203,11 +190,9 @@ BEGIN
                 IF operation = 'adjust' THEN
                     UPDATE public.pantry_stock SET
                         amount = GREATEST(0, amount + item_amount),
-                        unit = COALESCE(NULLIF(btrim(item->>'unit'), ''), unit),
                         updated_at = now()
                     WHERE profile_id = p_profile_id
-                      AND (id = item_id OR (item_id IS NULL AND lower(ingredient_name) = lower(item_name)))
-                      AND (NOT (item ? 'unit') OR lower(unit) = lower(item_unit));
+                      AND (id = item_id OR (item_id IS NULL AND lower(ingredient_name) = lower(item_name)));
                     IF NOT FOUND THEN
                         RAISE EXCEPTION 'pantry adjust referenced an unknown row' USING ERRCODE = '22023';
                     END IF;
@@ -243,12 +228,63 @@ BEGIN
         END LOOP;
     END IF;
 
+    UPDATE public.profiles SET
+        pantry_revision = pantry_revision + 1,
+        pantry_reviewed_at = CASE WHEN p_mode = 'replace' THEN now() ELSE pantry_reviewed_at END
+    WHERE id = p_profile_id;
+
+    SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.ingredient_name), '[]'::jsonb)
+    INTO saved_pantry FROM public.pantry_stock p WHERE p.profile_id = p_profile_id;
+    RETURN jsonb_build_object(
+        'revision', current_revision + 1,
+        'reviewed_at', CASE WHEN p_mode = 'replace' THEN now() ELSE current_reviewed_at END,
+        'pantry', saved_pantry
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB)
+    TO service_role;
+
+CREATE OR REPLACE FUNCTION public.apply_pantry_cart_reconciliation(
+    p_profile_id UUID,
+    p_expected_revision BIGINT,
+    p_cart_reconciliation JSONB
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE
+    current_revision BIGINT;
+    item JSONB;
+    saved_cart JSONB;
+    intent_changed BOOLEAN := false;
+    existing_purchase_amount NUMERIC;
+    existing_purchase_unit TEXT;
+    next_purchase_amount NUMERIC;
+    next_purchase_unit TEXT;
+    next_allocation JSONB;
+BEGIN
+    IF jsonb_typeof(COALESCE(p_cart_reconciliation, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'cart reconciliation must be an array' USING ERRCODE = '22023';
+    END IF;
+    SELECT pantry_revision INTO current_revision FROM public.profiles
+    WHERE id = p_profile_id FOR SHARE;
+    IF current_revision IS NULL THEN
+        RAISE EXCEPTION 'household profile is missing' USING ERRCODE = '22023';
+    END IF;
+    IF current_revision <> p_expected_revision THEN
+        RAISE EXCEPTION 'pantry revision conflict' USING ERRCODE = '40001';
+    END IF;
+    PERFORM 1 FROM public.grocery_cart_items WHERE profile_id = p_profile_id FOR UPDATE;
+    IF (SELECT count(*) FROM public.grocery_cart_items WHERE profile_id = p_profile_id)
+       <> jsonb_array_length(COALESCE(p_cart_reconciliation, '[]'::jsonb)) THEN
+        RAISE EXCEPTION 'native cart changed during pantry reconciliation' USING ERRCODE = '40001';
+    END IF;
     FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(p_cart_reconciliation, '[]'::jsonb)) LOOP
-        UPDATE public.grocery_cart_items SET
-            purchase_amount = (item->>'purchase_amount')::numeric,
-            purchase_unit = COALESCE(NULLIF(item->>'purchase_unit', ''), unit),
-            pantry_allocation = COALESCE(item->'pantry_allocation', '{}'::jsonb),
-            updated_at = now()
+        SELECT purchase_amount, purchase_unit
+        INTO existing_purchase_amount, existing_purchase_unit
+        FROM public.grocery_cart_items
         WHERE profile_id = p_profile_id AND id = (item->>'id')::bigint
           AND lower(ingredient_name) = lower(item->>'required_name')
           AND amount = (item->>'required_amount')::numeric
@@ -256,32 +292,34 @@ BEGIN
         IF NOT FOUND THEN
             RAISE EXCEPTION 'cart reconciliation referenced an unknown row' USING ERRCODE = '22023';
         END IF;
+        next_purchase_amount := (item->>'purchase_amount')::numeric;
+        next_purchase_unit := COALESCE(NULLIF(item->>'purchase_unit', ''), item->>'required_unit');
+        next_allocation := COALESCE(item->'pantry_allocation', '{}'::jsonb);
+        intent_changed := intent_changed OR existing_purchase_amount IS DISTINCT FROM next_purchase_amount
+          OR existing_purchase_unit IS DISTINCT FROM next_purchase_unit;
+        UPDATE public.grocery_cart_items SET
+            purchase_amount = next_purchase_amount,
+            purchase_unit = next_purchase_unit,
+            pantry_allocation = next_allocation,
+            updated_at = now()
+        WHERE profile_id = p_profile_id AND id = (item->>'id')::bigint;
     END LOOP;
-
-    UPDATE public.profiles SET
-        pantry_revision = pantry_revision + 1,
-        pantry_reviewed_at = CASE WHEN p_mode = 'replace' THEN now() ELSE pantry_reviewed_at END
-    WHERE id = p_profile_id;
-
-    DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
-
-    SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.ingredient_name), '[]'::jsonb)
-    INTO saved_pantry FROM public.pantry_stock p WHERE p.profile_id = p_profile_id;
+    IF intent_changed THEN
+        DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
+    END IF;
     SELECT COALESCE(jsonb_agg(to_jsonb(c) ORDER BY c.category, c.ingredient_name), '[]'::jsonb)
     INTO saved_cart FROM public.grocery_cart_items c WHERE c.profile_id = p_profile_id;
-
     RETURN jsonb_build_object(
-        'revision', current_revision + 1,
-        'reviewed_at', CASE WHEN p_mode = 'replace' THEN now() ELSE current_reviewed_at END,
-        'pantry', saved_pantry,
+        'pantry_revision', current_revision,
+        'provider_review_invalidated', intent_changed,
         'grocery_cart', saved_cart
     );
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB, JSONB)
+REVOKE ALL ON FUNCTION public.apply_pantry_cart_reconciliation(UUID, BIGINT, JSONB)
     FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB, JSONB)
+GRANT EXECUTE ON FUNCTION public.apply_pantry_cart_reconciliation(UUID, BIGINT, JSONB)
     TO service_role;
 
 CREATE OR REPLACE FUNCTION public.replace_planned_grocery_cart(

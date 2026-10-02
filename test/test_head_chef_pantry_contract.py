@@ -37,12 +37,13 @@ class PantryProposalTests(unittest.TestCase):
         self.assertEqual(added[0]["amount"], 3)
         self.assertEqual(_propose_inventory(added, "patch", [{"action": "remove", "id": 1}]), [])
 
-    def test_add_rejects_incompatible_units_instead_of_relabelling_stock(self):
-        current = [{"id": 1, "name": "Milk", "amount": 1, "unit": "litre"}]
-        with self.assertRaises(PantryReconciliationError):
-            _propose_inventory(current, "patch", [
-                {"action": "add", "name": "Milk", "amount": 500, "unit": "ml"},
-            ])
+    def test_existing_row_add_uses_read_row_and_preserves_its_representation(self):
+        current = [{"id": 1, "name": "Rice", "amount": 2, "unit": "bag"}]
+        proposed = _propose_inventory(current, "patch", [
+            {"action": "add", "id": 1, "name": "Rice", "amount": 1},
+        ])
+        self.assertEqual(proposed[0]["amount"], 3)
+        self.assertEqual(proposed[0]["unit"], "bag")
 
     def test_set_by_new_name_creates_absolute_observation(self):
         proposed = _propose_inventory([], "patch", [
@@ -72,18 +73,33 @@ class DestructiveConfirmationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PantryTransactionBoundaryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_reconciliation_failure_never_calls_transaction_rpc(self):
+    async def test_pantry_mutation_does_not_read_or_reconcile_cart(self):
+        with (
+            patch.object(pantry_service, "get_pantry_state", return_value={"revision": 2, "reviewedAt": None, "items": []}),
+            patch.object(pantry_service, "get_grocery_cart") as read_cart,
+            patch.object(pantry_service, "_reconcile_with_agent") as reconcile,
+            patch.object(pantry_service, "apply_pantry_inventory_change", return_value={"revision": 3, "pantry": []}) as persist,
+        ):
+            await pantry_service.mutate_pantry(
+                expected_revision=2, mode="patch",
+                items=[{"action": "set", "name": "Eggs", "amount": 6, "unit": "piece"}],
+            )
+        read_cart.assert_not_called()
+        reconcile.assert_not_called()
+        persist.assert_called_once_with(
+            expected_revision=2, mode="patch",
+            items=[{"action": "set", "name": "Eggs", "amount": 6, "unit": "piece"}],
+        )
+
+    async def test_explicit_reconciliation_failure_does_not_update_cart(self):
         with (
             patch.object(pantry_service, "get_pantry_state", return_value={"revision": 2, "reviewedAt": None, "items": []}),
             patch.object(pantry_service, "get_grocery_cart", return_value=[{"id": 1, "name": "Eggs", "amount": 6, "unit": "piece"}]),
             patch.object(pantry_service, "_reconcile_with_agent", side_effect=PantryReconciliationError("bad result")),
-            patch.object(pantry_service, "apply_pantry_inventory_change") as persist,
+            patch.object(pantry_service, "apply_pantry_cart_reconciliation") as persist,
         ):
             with self.assertRaises(PantryReconciliationError):
-                await pantry_service.mutate_pantry(
-                    expected_revision=2, mode="patch",
-                    items=[{"action": "set", "name": "Eggs", "amount": 6, "unit": "piece"}],
-                )
+                await pantry_service.reconcile_native_cart_with_pantry(expected_revision=2)
         persist.assert_not_called()
 
 
@@ -94,6 +110,7 @@ class CheckedInSchemaContractTests(unittest.TestCase):
         self.assertIn("pantry_reviewed_at", schema)
         self.assertIn("purchase_amount", schema)
         self.assertIn("pantry_allocation", schema)
+        self.assertIn("apply_pantry_cart_reconciliation", schema)
         self.assertIn("claim_pending_agent_action", schema)
         self.assertIn("'executing'", schema)
         self.assertIn("plan_preexisted boolean", schema)

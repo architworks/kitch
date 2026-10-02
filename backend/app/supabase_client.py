@@ -828,7 +828,6 @@ def apply_pantry_inventory_change(
     expected_revision: int,
     mode: str,
     items: List[Dict[str, Any]],
-    cart_reconciliation: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     data = _execute(
         "apply_pantry_inventory_change",
@@ -840,14 +839,12 @@ def apply_pantry_inventory_change(
                 "p_expected_revision": int(expected_revision),
                 "p_mode": mode,
                 "p_items": items,
-                "p_cart_reconciliation": cart_reconciliation,
             },
         ).execute(),
     )
     if not isinstance(data, dict):
         raise malformed_persistence_response("apply_pantry_inventory_change", "pantry_stock")
     pantry_rows = _coerce_json(data.get("pantry"), [])
-    cart_rows = _coerce_json(data.get("grocery_cart"), [])
     data["pantry"] = [
         {
             "id": row.get("id"), "name": row.get("ingredient_name"),
@@ -856,6 +853,27 @@ def apply_pantry_inventory_change(
         }
         for row in pantry_rows if isinstance(row, dict)
     ]
+    return data
+
+
+def apply_pantry_cart_reconciliation(
+    *, expected_revision: int, cart_reconciliation: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    data = _execute(
+        "apply_pantry_cart_reconciliation",
+        "grocery_cart_items",
+        lambda: supabase.rpc(
+            "apply_pantry_cart_reconciliation",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_expected_revision": int(expected_revision),
+                "p_cart_reconciliation": cart_reconciliation,
+            },
+        ).execute(),
+    )
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("apply_pantry_cart_reconciliation", "grocery_cart_items")
+    cart_rows = _coerce_json(data.get("grocery_cart"), [])
     data["grocery_cart"] = _grocery_rows_to_items(cart_rows)
     return data
 

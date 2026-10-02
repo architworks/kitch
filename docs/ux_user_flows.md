@@ -252,7 +252,7 @@ Example prompts:
 4. A pantry observation routes to Recipe/Grocery Planner. Current inventory is
    set rather than repeatedly accumulated; explicitly new purchases are added.
 5. An ambiguous image changes nothing and offers “Treat as meal” and “Treat as pantry.”
-6. Kitch reconciles native purchase quantities and invalidates stale provider review.
+6. Kitch leaves the native cart unchanged and offers an explicit **Update cart from pantry** action. If invoked, it recalculates purchase quantities and invalidates a provider review only when purchase intent changes.
 
 ### Functional UX Requirements
 

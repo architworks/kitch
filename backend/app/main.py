@@ -58,7 +58,11 @@ from app.supabase_client import (
     remove_future_meal_plan_entries,
     validate_persistence_readiness,
 )
-from app.pantry_service import mutate_pantry, PantryReconciliationError
+from app.pantry_service import (
+    mutate_pantry,
+    reconcile_native_cart_with_pantry,
+    PantryReconciliationError,
+)
 from app.agent_confirmation import (
     begin_confirmation_scope, end_confirmation_scope, requested_confirmation,
 )
@@ -563,6 +567,18 @@ async def replace_pantry_endpoint(payload: Dict[str, Any]):
         result = await mutate_pantry(
             expected_revision=int(payload.get("expected_revision")),
             mode="replace", items=list(payload.get("items") or []),
+        )
+        return {"status": "success", **result}
+    except PantryReconciliationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/grocery-cart/reconcile-pantry")
+async def reconcile_grocery_cart_with_pantry_endpoint(payload: Dict[str, Any]):
+    """Explicitly recalculate native purchase quantities from current pantry state."""
+    try:
+        result = await reconcile_native_cart_with_pantry(
+            expected_revision=int(payload.get("expected_revision")),
         )
         return {"status": "success", **result}
     except PantryReconciliationError as error:

@@ -80,7 +80,7 @@ flowchart TD
     4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
     5. For grocery requests it transactionally saves the artifact and replaces agent-generated `grocery_cart_items`, preserving manual rows. If either part fails, neither new change is committed.
 *   **Provider Boundary**: Recipe/Grocery Planner owns the provider-neutral sync entry point. The Groceries page fetches Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the backend. A dedicated Gemini Instamart cart agent may search and prepare the reversible cart after explicit UI or chat intent. A shared checkout service and commerce policy retain durable revalidation, payment approval, and UI-only ordering authority.
-*   **Pantry Boundary**: Pantry add/set/adjust/remove and full replacement use optimistic revisions. A structured Gemini reconciliation computes remaining purchase intent; one database transaction updates pantry, cart allocations, revision, and provider-review invalidation.
+*   **Pantry Boundary**: Pantry add/set/adjust/remove and full replacement use optimistic revisions and never alter the native cart implicitly. An explicit UI or agent command runs structured Gemini reconciliation in a separate transaction, updating remaining purchase intent and invalidating a provider review only when the cart actually changes.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: `/api/state/{user_name}` returns the authoritative current calendar week and next chronological meal, while `/api/meal-plan` loads navigated weeks.

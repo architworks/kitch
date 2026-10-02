@@ -88,6 +88,20 @@ Before running the scenarios, prepare a consistent household test context.
 - If a provider cart or grocery preview is used, treat it as a preview unless
   the product explicitly completes an approved cart sync.
 
+### Head-Chef Capability Coverage
+
+| Capability | Primary scenarios |
+| --- | --- |
+| Dated meal creation, editing, and removal | 1.1–1.8, 2.1–2.6, 9.1–9.6 |
+| Recipe creation, revision, and deletion | 2A.1–2A.2 |
+| Nutrition logging, correction, deletion, and daily clearing | 3.1–3.4, 4.1, 9.3 |
+| Neutral image classification and routing | 4.1–4.3, 6.2, 6.4 |
+| Pantry inspection and mutation through UI, chat, and images | 6.1–6.4 |
+| Native-cart and provider-cart preparation | 5.1–5.3, 7.1–7.4 |
+| Flexible household preference memory | 1.3, 7.2, 8.1–8.3 |
+| Household settings and domain routing | 1.8, 3.4, 6.3, 7.2 |
+| Destructive-action and order authority boundaries | 2.6, 3.4, 6.3, 7.4 |
+
 ## Meal-Plan Persistence Regression Context
 
 The original production result document included a resolved database conflict
@@ -179,9 +193,9 @@ explicitly requests next week.
 - Observe: Meals should be plausibly keto: eggs, avocado, paneer, chicken,
   fish, tofu, salads, low-carb vegetables, nuts, chia, or similar items. Heavy
   carb staples should not dominate the plan.
-- Persistence and recall check: Confirm the weekly plan is stored and the keto
-  preference is reflected in later meal or grocery requests within the same
-  backend process.
+- Persistence and recall check: Confirm the weekly plan and structured diet
+  profile remain after refresh and backend restart. Free-form food and brand
+  preferences remain separately tested as process-local memory in Section 8.
 - Pass criteria: Complete keto plan is saved and later behavior respects keto.
 - Fail criteria: Incomplete plan, non-keto plan, preference not remembered, or
   old cuisine plan remains.
@@ -236,6 +250,24 @@ explicitly requests next week.
 - Pass criteria: Both phrases resolve to the documented exact ranges and
   failures roll back the complete range.
 - Fail criteria: Off-by-one dates, week projection, or partial persistence.
+
+### Scenario 1.8 - Update Household Settings Without Implicit Overwrites
+
+- Prompt/action: In separate chat turns, change the household size, daily
+  calorie target, diet profile, and household timezone. Then send an unrelated
+  chat message from a browser whose locally displayed settings have not yet
+  refreshed.
+- Expected behavior: Kitch applies only explicitly requested setting changes
+  and uses the confirmed values in later serving, calorie, and calendar
+  behavior. An ordinary chat message must not silently rewrite settings.
+- Isolation check: Provider authentication and the saved ordering-app choice
+  remain unchanged.
+- Persistence check: Refresh and restart the backend. Confirm the explicit
+  settings remain and date interpretation follows the saved household timezone.
+- Pass criteria: Explicit changes persist and influence later behavior without
+  unrelated settings changing.
+- Fail criteria: Kitch only acknowledges the change in text, loses it after
+  restart, overwrites it from stale UI state, or changes provider settings.
 
 ## Section 2: Plan Modification
 
@@ -312,6 +344,27 @@ preserve the rest of the weekly schedule.
 - Pass criteria: All requested edits succeed together or all roll back.
 - Fail criteria: Partial persistence or unrelated changes.
 
+### Scenario 2.6 - Remove Future Meal Slots, Dates, and Ranges
+
+- Prerequisite: Save distinct meals across several future dates and record the
+  plan before testing.
+- Prompt/action: Remove one future meal slot, then one explicitly named future
+  date, and finally request removal across a future date range.
+- Expected behavior: Only the requested scope is removed. Kitch states the
+  exact affected dates and slots, and empty dated rows disappear instead of
+  rendering blank meal placeholders.
+- Broad-removal check: For a range or otherwise broad request, verify the user
+  understands the scope before it is applied. Treat confirmation as a product
+  safeguard rather than requiring one rigid dialog or interaction pattern.
+- Boundary check: Ask Kitch to remove or change a past meal. It must explain
+  that past plans cannot be modified and leave persisted state unchanged.
+- Persistence check: Refresh and compare all unrelated dates and slots with the
+  recorded baseline.
+- Pass criteria: The intended future scope is removed, its exact dates are
+  communicated, and unrelated or past state remains unchanged.
+- Fail criteria: The wrong date or slot is removed, broad deletion is
+  surprising or unclear, past state changes, or unrelated plans are lost.
+
 ## Section 2A: Recipe Management
 
 These scenarios verify that users can request full cooking details for a
@@ -351,6 +404,27 @@ prompt, and the persisted recipe rendered in the Recipes page.
 - Persistence-failure criteria: A storage failure must return HTTP 503 and the
   frontend must preserve the last confirmed recipe and cart state without
   showing a success banner.
+
+### Scenario 2A.2 - Revise and Delete a Saved Recipe
+
+- Prerequisite: Save two recipe artifacts. Let the first populate linked
+  recipe-generated grocery rows, and add a separate manual native-cart row.
+- Prompt/action: Ask Kitch to revise the first recipe's ingredients and steps,
+  including an ingredient change that affects its grocery requirements. Then
+  explicitly ask to delete that recipe.
+- Expected behavior: The revision updates the existing recipe rather than
+  creating a duplicate. Only grocery rows belonging to that recipe change.
+- Isolation check: The manual cart row, the second recipe, and its linked rows
+  remain unchanged. If purchase intent changes, any outdated provider review
+  is cleared before checkout can continue.
+- Persistence check: Refresh after revision and deletion. Confirm stable recipe
+  identity during revision and complete removal after deletion.
+- Failure check: Simulate a persistence failure and confirm a recipe change is
+  not left partially applied to either the recipe or its grocery rows.
+- Pass criteria: Revision and deletion affect only the intended recipe and its
+  linked grocery state.
+- Fail criteria: A duplicate recipe is created, unrelated or manual rows are
+  replaced, linked rows become orphaned, or only part of a revision persists.
 
 ## Section 3: Macro Logging via Text Message
 
@@ -400,8 +474,13 @@ entries with reasonable calorie and macro estimates.
 - Expected behavior: Correction updates the same row; single deletion executes
   directly; clearing the day shows an exact-impact confirmation first.
 - Isolation check: Another household member's diary remains unchanged.
-- Pass criteria: Structured state, totals, and UI refresh match each confirmed
-  mutation; cancellation changes nothing.
+- Persistence check: Refresh after each operation and confirm the corrected
+  entry, daily totals, and other household member's diary remain consistent.
+- Pass criteria: Correction does not create a duplicate, deletion affects only
+  the intended entry, clearing happens only after the user accepts its stated
+  impact, and cancellation changes nothing.
+- Fail criteria: The wrong entry or person changes, totals disagree with the
+  diary, or a cancelled clear still removes data.
 
 ## Section 4: Macro Logging via Image
 
@@ -537,25 +616,57 @@ recommending items already stocked.
 ### Scenario 6.3 - Inspect, Edit, Remove, and Empty Pantry
 
 - Prompt/action: Open the Pantry tab, inspect all rows and timestamps, add one
-  item, set and decrement quantities, remove one row, then choose **Mark pantry
-  empty** and cancel once before confirming.
-- Expected behavior: Every successful edit refreshes pantry and native purchase
-  quantities. Single-row removal is direct. Emptying shows exact impact and
-  marks the pantry fully reviewed only after confirmation.
+  item, set and decrement quantities, and remove one row. Repeat equivalent
+  updates through chat, then choose **Mark pantry empty** and cancel once before
+  confirming.
+- Expected behavior: Every successful edit refreshes pantry without silently
+  changing native purchase quantities. UI and chat operate on the same shared inventory. Single-row
+  removal is direct. Emptying shows its impact and marks the pantry fully
+  reviewed only after confirmation; partial edits do not claim a full review.
+- Read-before-update check: Establish a known existing quantity, then ask Kitch
+  to add, reduce, or otherwise update that item. The resulting total must
+  reflect the previously stored row, demonstrating that the agent considered
+  current pantry state rather than treating the request as an isolated value.
+- Semantic interpretation check: Express compatible quantities in different
+  natural forms across the existing row and the requested change. Judge the
+  resulting inventory by whether its meaning and total are correct, not by the
+  spelling, abbreviation, or display unit chosen by the agent.
 - Concurrency check: Repeat a mutation with a stale revision and require HTTP
-  409 with no partial pantry/cart change.
+  409 with no partial pantry change.
 - Pass criteria: The UI never shows only a count, cancellation changes nothing,
-  and confirmed replacement survives refresh.
+  chat and UI agree on the resulting inventory, and confirmed replacement
+  survives refresh.
+- Fail criteria: Kitch ignores existing stock, produces an incoherent total,
+  changes the wrong row, loses confirmed state after refresh, or applies a
+  cancelled replacement.
 
-### Scenario 6.4 - Photo Semantics and Atomic Reconciliation
+### Scenario 6.4 - Photo Semantics and Explicit Cart Reconciliation
 
 - Prompt/action: Upload the same current-inventory pantry photo twice, then an
   explicitly described purchase photo.
 - Expected behavior: Current inventory uses absolute `set` semantics and does
-  not accumulate twice; purchase uses `add`. Required native amounts remain
-  stable while `purchaseAmount`, `purchaseUnit`, and `pantryAllocation` change.
-- Rollback check: Force reconciliation failure and confirm pantry, native cart,
-  revision, and provider review all remain unchanged.
+  not accumulate twice; purchase observations increase stock. The native cart
+  remains unchanged until the tester explicitly chooses **Update cart from pantry**
+  or asks Kitch to recalculate it.
+- Functional reconciliation check: Include full and partial pantry coverage.
+  Confirm the native cart communicates what is required, what the pantry
+  covers, and what remains to buy in quantities a user can understand. Do not
+  require a particular internal representation or unit notation.
+- Separation check: After changing pantry state, confirm native purchase
+  quantities and provider review remain untouched. Then explicitly reconcile
+  and confirm fully covered items are excluded while partially covered items
+  retain only what remains to buy.
+- Provider check: Explicit reconciliation invalidates an outdated provider
+  review only when the resulting purchase intent changes.
+- Rollback check: Force explicit reconciliation failure and confirm the native
+  cart and provider review remain unchanged; the already-confirmed pantry edit
+  remains intact.
+- Pass criteria: Repeated observations do not accumulate unintentionally,
+  no implicit cart update occurs, explicit remaining purchase quantities are
+  functionally correct, and failure does not leave partial cart changes.
+- Fail criteria: The same observed stock is counted twice, purchase quantities
+  change without an explicit command, ignore pantry coverage after explicit
+  reconciliation, or a failed reconciliation partially persists.
 
 ## Section 7: Ordering App Integration
 
@@ -893,9 +1004,9 @@ Future runs should continue to report against them.
   visible in the Recipes page without changing the native grocery cart.
 - Grocery lists are generated from the active meal plan and account for pantry
   stock.
-- Selected native grocery rows can be reviewed in Zepto without sending
-  excluded or pantry-covered items, duplicating retries, mutating native cart
-  state, or bypassing final-order approval.
+- Selected native grocery rows can be reviewed in the chosen ordering app
+  without sending excluded or pantry-covered items, duplicating retries,
+  mutating native cart state, or bypassing final-order approval.
 - Brand and category preferences are remembered and applied to later grocery or
   delivery-preparation flows.
 - Relative-date questions resolve to the correct day in the configured

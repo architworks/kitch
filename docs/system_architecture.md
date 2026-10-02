@@ -174,8 +174,9 @@ Current routes:
 | `GET /api/state/{user_name}` | Returns dashboard state, including the authoritative current calendar-week meal plan and next chronological meal. |
 | `GET /api/meal-plan?week_start=YYYY-MM-DD` | Returns one Monday-Sunday planning window with all seven exact dates, including empty days. |
 | `GET /api/pantry` | Returns pantry rows, optimistic revision, and full-review timestamp. |
-| `PATCH /api/pantry` | Applies atomic add/set/adjust/remove operations and reconciles native purchase quantities. |
+| `PATCH /api/pantry` | Applies atomic add/set/adjust/remove operations without changing the native cart. |
 | `PUT /api/pantry` | Confirmed complete pantry replacement; an empty list marks it empty. |
+| `POST /api/grocery-cart/reconcile-pantry` | Explicitly recalculates native purchase quantities from the current pantry. |
 | `PATCH /api/household/profile` | Persists diet, household size, calorie target, timezone, and UI-selected provider. |
 | `PATCH/DELETE /api/diary/{user}/entries/{id}` | Corrects or deletes one nutrition entry. |
 | `POST /api/diary/clear/{user}` | Confirmed clearing of one household-calendar diary day. |
@@ -299,8 +300,9 @@ Important modeling decisions:
   transaction or rolls back completely.
 - Native rows store required amount/unit separately from positive provider-export
   `purchase_amount`/`purchase_unit` and structured `pantry_allocation`.
-- Pantry mutation and cart reconciliation share one revision-checked transaction;
-  provider drafts are invalidated whenever purchase intent changes.
+- Pantry mutation and cart reconciliation are separate explicit operations.
+  Reconciliation uses the current pantry revision and invalidates provider drafts
+  only when native purchase intent actually changes.
 
 Why this model:
 
