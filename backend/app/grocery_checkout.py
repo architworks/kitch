@@ -26,6 +26,7 @@ from app.supabase_client import (
     apply_native_grocery_cart_changes,
     claim_provider_checkout_operation,
     get_grocery_cart,
+    get_household_profile,
     get_provider_checkout_draft,
     release_provider_checkout_operation,
     save_provider_checkout_draft,
@@ -97,8 +98,15 @@ class GroceryCheckoutService:
                 )
             cart_items = get_grocery_cart()
             export_items = [
-                item for item in cart_items
-                if not item.get("alreadyStocked")
+                {
+                    **item,
+                    "requiredAmount": float(item.get("amount") or 0),
+                    "requiredUnit": item.get("unit") or "piece",
+                    "amount": float(item.get("purchaseAmount") or 0),
+                    "unit": item.get("purchaseUnit") or item.get("unit") or "piece",
+                }
+                for item in cart_items
+                if float(item.get("purchaseAmount") or 0) > 0
                 and (not selected_ids or str(item.get("id")) in selected_ids)
             ]
             if not export_items:
@@ -160,7 +168,7 @@ class GroceryCheckoutService:
                     "provider_cart_changed": False,
                     "review": None,
                     "message": (
-                        "The native Kitch cart was updated, but the Instamart "
+                        f"The native Kitch cart was updated, but the {descriptor.label} "
                         f"cart was not synchronized: {error.message}"
                     ),
                 }
@@ -426,13 +434,27 @@ class GroceryCheckoutService:
     async def sync_from_chat(
         self,
         *,
+        provider_id: str = "",
         cart_item_ids: List[str] | None = None,
         selected_address_id: str = "",
         user_instruction: str = "",
         native_cart_changes: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
-        """Explicit chat-only Instamart synchronization with safe address fallback."""
-        provider_id = "swiggy_instamart"
+        """Synchronize an explicitly requested or UI-preferred provider cart."""
+        provider_id = str(provider_id or "").strip().lower().replace(" ", "_")
+        provider_id = {
+            "swiggy": "swiggy_instamart", "instamart": "swiggy_instamart",
+            "swiggy_instamart": "swiggy_instamart", "zepto": "zepto",
+        }.get(provider_id, provider_id)
+        if not provider_id:
+            provider_id = str(get_household_profile().get("preferred_grocery_provider") or "").strip()
+        if provider_id not in {"zepto", "swiggy_instamart"}:
+            raise ProviderOperationError(
+                provider=provider_id or "unselected", operation="chat_sync_cart",
+                code="provider_selection_required",
+                message="Select and connect an ordering app in Groceries before synchronizing from chat.",
+                status_code=422,
+            )
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
         address_id = str(selected_address_id or "").strip()
@@ -457,7 +479,7 @@ class GroceryCheckoutService:
                     provider=provider_id,
                     operation="chat_sync_cart",
                     code="provider_address_required",
-                    message="Connect Swiggy and add a saved delivery address before moving the cart from chat.",
+                    message=f"Connect {adapter.descriptor().label} and add a saved delivery address before moving the cart from chat.",
                     status_code=422,
                 )
             if selected:

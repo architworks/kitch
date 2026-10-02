@@ -171,27 +171,29 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-021 | Grocery requests generate recipe cards and ingredient rows for only the requested scope. | Avoids pushing the full weekly plan through recipe generation when the user asked about tonight or tomorrow only. |
 | REQ-022 | Grocery requests update native cart rows derived from the same recipe artifact. | Keeps recipes and groceries consistent. |
 | REQ-023 | New agent grocery plans replace prior agent-generated cart rows but preserve manual rows. | Lets the user add household staples manually without losing them every time the agent replans groceries. |
-| REQ-024 | Pantry-covered rows remain visible but disabled/muted and excluded from provider sync. | Users should see why something was not ordered instead of wondering whether it was forgotten. |
+| REQ-024 | Native rows keep required amount separate from remaining positive purchase amount and structured pantry allocation. | Partial coverage and later pantry edits must not depend on stale booleans. |
 | REQ-025 | Fridge-photo grocery requests update pantry first, then plan groceries against the updated pantry. | Prevents reordering things the user just showed Kitch they already have. |
 | REQ-026 | A recipe artifact and its agent-generated cart replacement commit together or not at all. | Prevents a recipe history entry from claiming a cart change that did not persist. |
 | REQ-027 | When durable storage is unavailable, preserve confirmed UI state and explain that nothing was saved. | Users must not be misled by optimistic changes or agent prose. |
 | REQ-027A | Explicit standalone grocery chat requests can add, update, or remove `source=manual` native-cart rows without a recipe artifact. | Lets the native cart connect recipe planning with ordinary household shopping intent. |
-| REQ-027B | Explicit Instamart chat requests and the Groceries UI use the same operation-scoped cart agent and confirmed-cart workflow. | Keeps chat flexible without duplicating provider logic or weakening checkout controls. |
-| REQ-027C | A combined standalone native mutation plus Instamart sync reuses the existing coordinator sync bridge. | Prevents coordinator tool proliferation while preserving a direct conversational workflow. |
+| REQ-027B | Explicit provider chat requests and the Groceries UI use the same guarded confirmed-cart workflow. | Keeps chat flexible without duplicating provider logic or weakening checkout controls. |
+| REQ-027C | Provider synchronization belongs to Recipe/Grocery Planner through one provider-neutral tool; the coordinator only routes. | Prevents coordinator tool proliferation while preserving direct conversational workflow. |
 
 ### Pantry and vision requirements
 
 | ID | Requirement | Why |
 | :--- | :--- | :--- |
-| REQ-030 | Plate photos log macros to the active user's diary. | Photo logging should reduce manual macro tracking friction. |
-| REQ-031 | Fridge photos update shared pantry stock. | Pantry is a physical household resource. |
-| REQ-032 | Photo uploads may include text. | Users often attach a photo and then explain context; submitting immediately on image attach removed that option. |
+| REQ-030 | Vision Scanner classifies every image as exactly meal, pantry, or ambiguous before mutation. | Upload source does not reveal semantic intent. |
+| REQ-031 | Meal observations route to Nutrition Tracker; pantry observations route to Recipe/Grocery Planner. | Interpretation remains non-mutating while domain owners control state. |
+| REQ-032 | Camera and Gallery accept accompanying text and use the identical classifier. | Acquisition method must not change behavior. |
+| REQ-033 | Ambiguous images persist nothing and retain the browser file for an explicit meal/pantry override. | Uncertainty must not create accidental diary or pantry writes. |
+| REQ-034 | Pantry supports revisioned add/set/adjust/remove and confirmed full replacement, including empty. | Users need transparent, safe inventory maintenance after time passes. |
 
 ### Provider and order requirements
 
 | ID | Requirement | Why |
 | :--- | :--- | :--- |
-| REQ-040 | Keep provider sync behind the backend commerce service. Instamart uses a dedicated MCP cart agent; recipe/grocery planning never receives provider tools. | Provider reasoning can be agentic without coupling native grocery planning to an external cart. |
+| REQ-040 | Keep provider execution behind the backend commerce service while exposing one provider-neutral sync capability to Recipe/Grocery Planner. | Grocery intent can reach a provider agent without exposing payment or checkout. |
 | REQ-041 | Run Zepto and Swiggy Instamart through the same provider contract and provider-keyed API. | Supporting a provider must not introduce provider-specific frontend routes or checkout semantics. |
 | REQ-042 | Before provider sync, show "not synced" rather than fake prices. After sync, prefer the provider's final total; an exact line-item sum is allowed only when no tax, fee, discount, or other adjustment is present. | A simple sum is useful when it is mathematically complete, but must never masquerade as a checkout total when provider adjustments exist. |
 | REQ-043 | Synchronization replaces the complete selected-provider cart after explicit user action. | Replacement avoids ambiguous merges and keeps the native selection authoritative. |

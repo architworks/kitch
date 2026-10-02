@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     daily_calorie_target INTEGER NOT NULL DEFAULT 2000,
     timezone_name TEXT NOT NULL DEFAULT 'Asia/Kolkata',
     preferred_grocery_provider TEXT,
+    pantry_revision BIGINT NOT NULL DEFAULT 0,
+    pantry_reviewed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -79,8 +81,9 @@ CREATE TABLE IF NOT EXISTS public.grocery_cart_items (
     category TEXT NOT NULL DEFAULT 'General',
     source TEXT NOT NULL DEFAULT 'agent' CHECK (source IN ('agent', 'manual')),
     checked BOOLEAN NOT NULL DEFAULT FALSE,
-    already_stocked BOOLEAN NOT NULL DEFAULT FALSE,
-    stock_note TEXT NOT NULL DEFAULT '',
+    purchase_amount NUMERIC(10,2) NOT NULL DEFAULT 1.00 CHECK (purchase_amount >= 0.00),
+    purchase_unit TEXT NOT NULL DEFAULT 'piece',
+    pantry_allocation JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -98,7 +101,8 @@ CREATE TABLE IF NOT EXISTS public.macro_diary (
     carbs_g INTEGER NOT NULL DEFAULT 0 CHECK (carbs_g >= 0),
     fat_g INTEGER NOT NULL DEFAULT 0 CHECK (fat_g >= 0),
     fiber_g INTEGER NOT NULL DEFAULT 0 CHECK (fiber_g >= 0),
-    logged_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    logged_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- 7. Create Durable Provider Checkout Draft Table
@@ -188,6 +192,28 @@ CREATE TABLE IF NOT EXISTS public.provider_oauth_flows (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS public.pending_agent_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    active_user TEXT NOT NULL DEFAULT '',
+    action_type TEXT NOT NULL CHECK (length(btrim(action_type)) > 0),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    impact_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CONSTRAINT pending_agent_actions_status_check
+        CHECK (status IN ('pending', 'executing', 'confirmed', 'cancelled', 'expired', 'failed')),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (now() + interval '10 minutes'),
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.pending_agent_actions
+    DROP CONSTRAINT IF EXISTS pending_agent_actions_status_check;
+ALTER TABLE public.pending_agent_actions
+    ADD CONSTRAINT pending_agent_actions_status_check
+    CHECK (status IN ('pending', 'executing', 'confirmed', 'cancelled', 'expired', 'failed'));
+
 -- --- INDEXING FOR OPTIMAL QUERY PERFORMANCE ---
 CREATE INDEX IF NOT EXISTS idx_meal_plans_profile_date ON public.meal_plans(profile_id, plan_date);
 CREATE INDEX IF NOT EXISTS idx_pantry_stock_profile_id ON public.pantry_stock(profile_id);
@@ -202,6 +228,27 @@ CREATE INDEX IF NOT EXISTS idx_provider_connections_profile_provider
     ON public.provider_connections(profile_id, provider, provider_environment);
 CREATE INDEX IF NOT EXISTS idx_provider_oauth_flows_expiry
     ON public.provider_oauth_flows(expires_at);
+CREATE INDEX IF NOT EXISTS idx_pending_agent_actions_profile_status
+    ON public.pending_agent_actions(profile_id, status, expires_at);
+
+CREATE OR REPLACE FUNCTION public.claim_pending_agent_action(
+    p_profile_id uuid, p_action_id uuid
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE claimed public.pending_agent_actions%ROWTYPE;
+BEGIN
+    UPDATE public.pending_agent_actions SET
+        status = 'executing', updated_at = now()
+    WHERE profile_id = p_profile_id AND id = p_action_id
+      AND status = 'pending' AND expires_at > now()
+    RETURNING * INTO claimed;
+    IF NOT FOUND THEN RETURN NULL; END IF;
+    RETURN to_jsonb(claimed);
+END; $$;
+
+REVOKE ALL ON FUNCTION public.claim_pending_agent_action(uuid, uuid)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_pending_agent_action(uuid, uuid) TO service_role;
 
 -- --- BACKEND-ONLY SECURITY ---
 -- Kitch's browser talks only to FastAPI. The backend uses a Supabase secret
@@ -221,7 +268,8 @@ BEGIN
         'provider_checkout_drafts',
         'provider_connections',
         'provider_oauth_clients',
-        'provider_oauth_flows'
+        'provider_oauth_flows',
+        'pending_agent_actions'
     ]
     LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
@@ -508,12 +556,18 @@ BEGIN
         RAISE EXCEPTION 'p_cart_items must be a JSON array' USING ERRCODE = '22023';
     END IF;
 
-    DELETE FROM public.grocery_cart_items
-    WHERE profile_id = p_profile_id AND source = 'agent';
+    IF p_recipe_grocery_plan_id IS NOT NULL THEN
+        DELETE FROM public.grocery_cart_items
+        WHERE profile_id = p_profile_id AND source = 'agent'
+          AND recipe_grocery_plan_id = p_recipe_grocery_plan_id;
+    ELSE
+        DELETE FROM public.grocery_cart_items
+        WHERE profile_id = p_profile_id AND source = 'agent';
+    END IF;
 
     INSERT INTO public.grocery_cart_items (
         profile_id, recipe_grocery_plan_id, ingredient_name, amount, unit,
-        category, source, checked, already_stocked, stock_note
+        category, source, checked, purchase_amount, purchase_unit, pantry_allocation
     )
     SELECT
         p_profile_id,
@@ -524,22 +578,26 @@ BEGIN
         COALESCE(NULLIF(item.category, ''), 'General'),
         'agent',
         COALESCE(item.checked, FALSE),
-        COALESCE(item.already_stocked, FALSE),
-        COALESCE(item.stock_note, '')
+        COALESCE(item.purchase_amount, item.amount, 1),
+        COALESCE(NULLIF(item.purchase_unit, ''), NULLIF(item.unit, ''), 'piece'),
+        COALESCE(item.pantry_allocation, '{}'::jsonb)
     FROM jsonb_to_recordset(COALESCE(p_cart_items, '[]'::jsonb)) AS item(
         ingredient_name text,
         amount numeric,
         unit text,
         category text,
         checked boolean,
-        already_stocked boolean,
-        stock_note text
+        purchase_amount numeric,
+        purchase_unit text,
+        pantry_allocation jsonb
     );
 
     SELECT COALESCE(jsonb_agg(to_jsonb(cart_row) ORDER BY cart_row.id), '[]'::jsonb)
     INTO saved_cart
     FROM public.grocery_cart_items AS cart_row
     WHERE cart_row.profile_id = p_profile_id;
+
+    DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
 
     RETURN saved_cart;
 END;
@@ -569,10 +627,16 @@ AS $$
 DECLARE
     saved_plan public.recipe_grocery_plans%ROWTYPE;
     saved_cart jsonb;
+    plan_preexisted boolean;
 BEGIN
     IF jsonb_typeof(COALESCE(p_cart_items, '[]'::jsonb)) <> 'array' THEN
         RAISE EXCEPTION 'p_cart_items must be a JSON array' USING ERRCODE = '22023';
     END IF;
+
+    SELECT EXISTS (
+        SELECT 1 FROM public.recipe_grocery_plans
+        WHERE id = p_plan_id AND profile_id = p_profile_id
+    ) INTO plan_preexisted;
 
     INSERT INTO public.recipe_grocery_plans (
         id, profile_id, scope, request_text, recipe_cards, ingredients,
@@ -603,6 +667,10 @@ BEGIN
     RETURNING * INTO saved_plan;
 
     IF p_updates_cart THEN
+        IF NOT plan_preexisted THEN
+            DELETE FROM public.grocery_cart_items
+            WHERE profile_id = p_profile_id AND source = 'agent';
+        END IF;
         saved_cart := public.replace_planned_grocery_cart(
             p_profile_id, p_cart_items, saved_plan.id
         );
@@ -650,7 +718,7 @@ DECLARE
     requested_name text;
     requested_unit text;
     requested_amount numeric;
-    target_id uuid;
+    target_id bigint;
     target_count integer;
 BEGIN
     IF jsonb_typeof(p_changes) <> 'array' OR jsonb_array_length(p_changes) = 0 THEN
@@ -691,7 +759,7 @@ BEGIN
                     USING ERRCODE = '22023';
             END IF;
 
-            SELECT count(*), min(cart.id::text)::uuid
+            SELECT count(*), min(cart.id)
             INTO target_count, target_id
             FROM public.grocery_cart_items cart
             WHERE cart.profile_id = p_profile_id
@@ -704,12 +772,13 @@ BEGIN
             ELSIF target_count = 1 THEN
                 UPDATE public.grocery_cart_items
                 SET amount = amount + requested_amount,
+                    purchase_amount = purchase_amount + requested_amount,
                     updated_at = now()
                 WHERE profile_id = p_profile_id AND id = target_id;
             ELSE
                 INSERT INTO public.grocery_cart_items (
                     profile_id, ingredient_name, amount, unit, category, source,
-                    checked, already_stocked, stock_note
+                    checked, purchase_amount, purchase_unit, pantry_allocation
                 ) VALUES (
                     p_profile_id,
                     requested_name,
@@ -718,11 +787,9 @@ BEGIN
                     COALESCE(NULLIF(btrim(change->>'category'), ''), 'General'),
                     'manual',
                     COALESCE((change->>'checked')::boolean, false),
-                    COALESCE(
-                        (COALESCE(change->>'alreadyStocked', change->>'already_stocked'))::boolean,
-                        false
-                    ),
-                    COALESCE(change->>'stockNote', change->>'stock_note', '')
+                    requested_amount,
+                    requested_unit,
+                    '{}'::jsonb
                 );
             END IF;
 
@@ -731,11 +798,11 @@ BEGIN
                OR NULLIF(btrim(change->>'id'), '') IS NOT NULL THEN
                 BEGIN
                     target_id := COALESCE(
-                        NULLIF(btrim(change->>'item_id'), '')::uuid,
-                        NULLIF(btrim(change->>'id'), '')::uuid
+                        NULLIF(btrim(change->>'item_id'), '')::bigint,
+                        NULLIF(btrim(change->>'id'), '')::bigint
                     );
                 EXCEPTION WHEN invalid_text_representation THEN
-                    RAISE EXCEPTION 'item_id must be a UUID' USING ERRCODE = '22023';
+                    RAISE EXCEPTION 'item_id must be an integer' USING ERRCODE = '22023';
                 END;
                 SELECT count(*) INTO target_count
                 FROM public.grocery_cart_items cart
@@ -745,7 +812,7 @@ BEGIN
                     RAISE EXCEPTION 'item_id or exact item name is required for %', change_action
                         USING ERRCODE = '22023';
                 END IF;
-                SELECT count(*), min(cart.id::text)::uuid
+                SELECT count(*), min(cart.id)
                 INTO target_count, target_id
                 FROM public.grocery_cart_items cart
                 WHERE cart.profile_id = p_profile_id
@@ -798,15 +865,15 @@ BEGIN
                         ELSE category
                     END,
                     checked = CASE WHEN change ? 'checked' THEN (change->>'checked')::boolean ELSE checked END,
-                    already_stocked = CASE
-                        WHEN change ? 'alreadyStocked' THEN (change->>'alreadyStocked')::boolean
-                        WHEN change ? 'already_stocked' THEN (change->>'already_stocked')::boolean
-                        ELSE already_stocked
+                    purchase_amount = CASE
+                        WHEN change ? 'purchase_amount' THEN (change->>'purchase_amount')::numeric
+                        WHEN change ? 'amount' THEN requested_amount
+                        ELSE purchase_amount
                     END,
-                    stock_note = CASE
-                        WHEN change ? 'stockNote' THEN COALESCE(change->>'stockNote', '')
-                        WHEN change ? 'stock_note' THEN COALESCE(change->>'stock_note', '')
-                        ELSE stock_note
+                    purchase_unit = CASE WHEN change ? 'unit' THEN btrim(change->>'unit') ELSE purchase_unit END,
+                    pantry_allocation = CASE
+                        WHEN change ? 'amount' OR change ? 'unit' THEN '{}'::jsonb
+                        ELSE pantry_allocation
                     END,
                     updated_at = now()
                 WHERE profile_id = p_profile_id AND id = target_id;
@@ -816,6 +883,8 @@ BEGIN
                 USING ERRCODE = '22023';
         END IF;
     END LOOP;
+
+    DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
 
     RETURN QUERY
     SELECT cart.*
@@ -829,3 +898,202 @@ REVOKE ALL ON FUNCTION public.apply_native_grocery_cart_changes(uuid, jsonb)
     FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.apply_native_grocery_cart_changes(uuid, jsonb)
     TO service_role;
+
+-- --- TRANSACTIONAL REVISIONED PANTRY + PURCHASE INTENT ---
+CREATE OR REPLACE FUNCTION public.apply_pantry_inventory_change(
+    p_profile_id UUID, p_expected_revision BIGINT, p_mode TEXT,
+    p_items JSONB, p_cart_reconciliation JSONB DEFAULT '[]'::jsonb
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE
+    current_revision BIGINT; current_reviewed_at TIMESTAMPTZ; item JSONB; item_id BIGINT; item_name TEXT;
+    item_unit TEXT; item_amount NUMERIC; operation TEXT;
+    saved_pantry JSONB; saved_cart JSONB;
+BEGIN
+    IF p_mode NOT IN ('patch', 'replace') THEN
+        RAISE EXCEPTION 'pantry mode must be patch or replace' USING ERRCODE = '22023';
+    END IF;
+    IF jsonb_typeof(COALESCE(p_items, '[]'::jsonb)) <> 'array'
+       OR jsonb_typeof(COALESCE(p_cart_reconciliation, '[]'::jsonb)) <> 'array' THEN
+        RAISE EXCEPTION 'pantry items and cart reconciliation must be arrays' USING ERRCODE = '22023';
+    END IF;
+    SELECT pantry_revision, pantry_reviewed_at INTO current_revision, current_reviewed_at FROM public.profiles
+    WHERE id = p_profile_id FOR UPDATE;
+    IF current_revision IS NULL THEN
+        RAISE EXCEPTION 'household profile is missing' USING ERRCODE = '22023';
+    END IF;
+    IF current_revision <> p_expected_revision THEN
+        RAISE EXCEPTION 'pantry revision conflict' USING ERRCODE = '40001';
+    END IF;
+    PERFORM 1 FROM public.grocery_cart_items WHERE profile_id = p_profile_id FOR UPDATE;
+    IF (SELECT count(*) FROM public.grocery_cart_items WHERE profile_id = p_profile_id)
+       <> jsonb_array_length(COALESCE(p_cart_reconciliation, '[]'::jsonb)) THEN
+        RAISE EXCEPTION 'native cart changed during pantry reconciliation' USING ERRCODE = '40001';
+    END IF;
+
+    IF p_mode = 'replace' THEN
+        DELETE FROM public.pantry_stock WHERE profile_id = p_profile_id;
+        FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(p_items, '[]'::jsonb)) LOOP
+            item_name := NULLIF(btrim(item->>'name'), '');
+            item_unit := COALESCE(NULLIF(btrim(item->>'unit'), ''), 'piece');
+            item_amount := COALESCE((item->>'amount')::numeric, 0);
+            IF item_name IS NULL OR item_amount < 0 THEN
+                RAISE EXCEPTION 'replacement items need a name and nonnegative amount' USING ERRCODE = '22023';
+            END IF;
+            IF item_amount > 0 THEN
+                INSERT INTO public.pantry_stock(profile_id, ingredient_name, amount, unit, updated_at)
+                VALUES (p_profile_id, item_name, item_amount, item_unit, now());
+            END IF;
+        END LOOP;
+    ELSE
+        IF jsonb_array_length(p_items) = 0 THEN
+            RAISE EXCEPTION 'patch requires at least one operation' USING ERRCODE = '22023';
+        END IF;
+        FOR item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+            operation := lower(btrim(COALESCE(item->>'action', '')));
+            item_name := NULLIF(btrim(item->>'name'), '');
+            item_unit := COALESCE(NULLIF(btrim(item->>'unit'), ''), 'piece');
+            item_id := NULLIF(item->>'id', '')::bigint;
+            IF operation = 'add' THEN
+                item_amount := COALESCE((item->>'amount')::numeric, 0);
+                IF item_name IS NULL OR item_amount <= 0 THEN
+                    RAISE EXCEPTION 'add requires a name and positive amount' USING ERRCODE = '22023';
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM public.pantry_stock
+                    WHERE profile_id = p_profile_id AND lower(ingredient_name) = lower(item_name)
+                      AND lower(unit) <> lower(item_unit)
+                ) THEN
+                    RAISE EXCEPTION 'pantry add requires a compatible unit' USING ERRCODE = '22023';
+                END IF;
+                UPDATE public.pantry_stock SET amount = amount + item_amount,
+                    updated_at = now()
+                WHERE profile_id = p_profile_id AND lower(ingredient_name) = lower(item_name)
+                  AND lower(unit) = lower(item_unit);
+                IF NOT FOUND THEN
+                    INSERT INTO public.pantry_stock(profile_id, ingredient_name, amount, unit, updated_at)
+                    VALUES (p_profile_id, item_name, item_amount, item_unit, now());
+                END IF;
+            ELSIF operation IN ('set', 'adjust') THEN
+                item_amount := (item->>'amount')::numeric;
+                IF operation = 'set' AND item_amount < 0 THEN
+                    RAISE EXCEPTION 'set amount cannot be negative' USING ERRCODE = '22023';
+                END IF;
+                UPDATE public.pantry_stock SET
+                    ingredient_name = CASE WHEN operation = 'set' THEN COALESCE(item_name, ingredient_name) ELSE ingredient_name END,
+                    amount = CASE WHEN operation = 'adjust' THEN GREATEST(0, amount + item_amount) ELSE item_amount END,
+                    unit = COALESCE(NULLIF(btrim(item->>'unit'), ''), unit), updated_at = now()
+                WHERE profile_id = p_profile_id
+                  AND (id = item_id OR (item_id IS NULL AND lower(ingredient_name) = lower(item_name)))
+                  AND (operation = 'set' OR NOT (item ? 'unit') OR lower(unit) = lower(item_unit));
+                IF NOT FOUND AND operation = 'set' AND item_id IS NULL AND item_name IS NOT NULL AND item_amount > 0 THEN
+                    INSERT INTO public.pantry_stock(profile_id, ingredient_name, amount, unit, updated_at)
+                    VALUES (p_profile_id, item_name, item_amount, item_unit, now());
+                ELSIF NOT FOUND THEN
+                    RAISE EXCEPTION 'pantry operation referenced an unknown row' USING ERRCODE = '22023';
+                END IF;
+                DELETE FROM public.pantry_stock WHERE profile_id = p_profile_id AND amount <= 0;
+            ELSIF operation IN ('remove', 'delete') THEN
+                DELETE FROM public.pantry_stock WHERE profile_id = p_profile_id
+                  AND (id = item_id OR (item_id IS NULL AND lower(ingredient_name) = lower(item_name)));
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION 'pantry remove referenced an unknown row' USING ERRCODE = '22023';
+                END IF;
+            ELSE
+                RAISE EXCEPTION 'unsupported pantry action %', operation USING ERRCODE = '22023';
+            END IF;
+        END LOOP;
+    END IF;
+
+    FOR item IN SELECT * FROM jsonb_array_elements(COALESCE(p_cart_reconciliation, '[]'::jsonb)) LOOP
+        UPDATE public.grocery_cart_items SET
+            purchase_amount = (item->>'purchase_amount')::numeric,
+            purchase_unit = COALESCE(NULLIF(item->>'purchase_unit', ''), unit),
+            pantry_allocation = COALESCE(item->'pantry_allocation', '{}'::jsonb), updated_at = now()
+        WHERE profile_id = p_profile_id AND id = (item->>'id')::bigint
+          AND lower(ingredient_name) = lower(item->>'required_name')
+          AND amount = (item->>'required_amount')::numeric
+          AND lower(unit) = lower(item->>'required_unit');
+        IF NOT FOUND THEN RAISE EXCEPTION 'cart reconciliation referenced an unknown row' USING ERRCODE = '22023'; END IF;
+    END LOOP;
+    UPDATE public.profiles SET pantry_revision = pantry_revision + 1,
+        pantry_reviewed_at = CASE WHEN p_mode = 'replace' THEN now() ELSE pantry_reviewed_at END
+    WHERE id = p_profile_id;
+    DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
+    SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.ingredient_name), '[]'::jsonb)
+    INTO saved_pantry FROM public.pantry_stock p WHERE p.profile_id = p_profile_id;
+    SELECT COALESCE(jsonb_agg(to_jsonb(c) ORDER BY c.category, c.ingredient_name), '[]'::jsonb)
+    INTO saved_cart FROM public.grocery_cart_items c WHERE c.profile_id = p_profile_id;
+    RETURN jsonb_build_object(
+        'revision', current_revision + 1,
+        'reviewed_at', CASE WHEN p_mode = 'replace' THEN now() ELSE current_reviewed_at END,
+        'pantry', saved_pantry,
+        'grocery_cart', saved_cart
+    );
+END; $$;
+
+REVOKE ALL ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB, JSONB)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.apply_pantry_inventory_change(UUID, BIGINT, TEXT, JSONB, JSONB)
+    TO service_role;
+
+CREATE OR REPLACE FUNCTION public.remove_future_meal_plan_entries(
+    p_profile_id uuid, p_operations jsonb
+)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE op jsonb; kind text; start_date date; end_date date; slot text;
+    household_today date; affected jsonb := '[]'::jsonb;
+BEGIN
+    SELECT (now() AT TIME ZONE timezone_name)::date INTO household_today
+    FROM public.profiles WHERE id = p_profile_id;
+    IF jsonb_typeof(p_operations) <> 'array' OR jsonb_array_length(p_operations) = 0 THEN
+        RAISE EXCEPTION 'operations must be a non-empty array' USING ERRCODE = '22023';
+    END IF;
+    FOR op IN SELECT * FROM jsonb_array_elements(p_operations) LOOP
+        kind := lower(btrim(op->>'action'));
+        start_date := (op->>'start_date')::date;
+        end_date := COALESCE(NULLIF(op->>'end_date', '')::date, start_date);
+        IF start_date < household_today OR end_date < start_date THEN
+            RAISE EXCEPTION 'only valid non-past dates may be removed' USING ERRCODE = '22023';
+        END IF;
+        affected := affected || to_jsonb(ARRAY(SELECT generate_series(start_date, end_date, interval '1 day')::date));
+        IF kind = 'slot' THEN
+            IF start_date <> end_date THEN RAISE EXCEPTION 'slot removal targets one date' USING ERRCODE = '22023'; END IF;
+            slot := lower(btrim(op->>'meal_slot'));
+            IF slot NOT IN ('breakfast', 'lunch', 'dinner') THEN RAISE EXCEPTION 'invalid meal slot' USING ERRCODE = '22023'; END IF;
+            UPDATE public.meal_plans SET
+                breakfast_name = CASE WHEN slot = 'breakfast' THEN NULL ELSE breakfast_name END,
+                lunch_name = CASE WHEN slot = 'lunch' THEN NULL ELSE lunch_name END,
+                dinner_name = CASE WHEN slot = 'dinner' THEN NULL ELSE dinner_name END,
+                updated_at = now()
+            WHERE profile_id = p_profile_id AND plan_date = start_date;
+            DELETE FROM public.meal_plans WHERE profile_id = p_profile_id AND plan_date = start_date
+              AND breakfast_name IS NULL AND lunch_name IS NULL AND dinner_name IS NULL;
+        ELSIF kind IN ('date', 'range') THEN
+            DELETE FROM public.meal_plans WHERE profile_id = p_profile_id AND plan_date BETWEEN start_date AND end_date;
+        ELSE RAISE EXCEPTION 'unsupported meal removal action' USING ERRCODE = '22023'; END IF;
+    END LOOP;
+    RETURN jsonb_build_object('affected_dates', (SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements(affected)));
+END; $$;
+
+REVOKE ALL ON FUNCTION public.remove_future_meal_plan_entries(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remove_future_meal_plan_entries(uuid, jsonb) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.delete_recipe_grocery_plan(
+    p_profile_id uuid, p_plan_id uuid
+)
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE deleted_count integer;
+BEGIN
+    DELETE FROM public.grocery_cart_items
+    WHERE profile_id = p_profile_id AND recipe_grocery_plan_id = p_plan_id;
+    DELETE FROM public.recipe_grocery_plans
+    WHERE profile_id = p_profile_id AND id = p_plan_id;
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    IF deleted_count > 0 THEN
+        DELETE FROM public.provider_checkout_drafts WHERE profile_id = p_profile_id;
+    END IF;
+    RETURN deleted_count = 1;
+END; $$;
+REVOKE ALL ON FUNCTION public.delete_recipe_grocery_plan(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_recipe_grocery_plan(uuid, uuid) TO service_role;

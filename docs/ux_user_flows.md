@@ -59,9 +59,9 @@ Common actions should work through short, casual language:
 
 ### Review Before External Order
 
-Provider cart sync and order placement are separate. Chat may guide the user to
-the Groceries workflow, but only explicit UI actions may synchronize a provider
-cart or approve an order.
+Provider cart sync and order placement are separate. Explicit chat or UI action
+may prepare a reversible provider cart. Only the UI may authenticate, choose the
+saved provider default, select payment, approve the final snapshot, or order.
 
 ---
 
@@ -245,17 +245,23 @@ Example prompts:
 ### Expected Experience
 
 1. The user provides items through text, manual entry, or photo.
-2. Kitch extracts item names, amounts, and units where possible.
-3. Kitch updates the shared household pantry.
-4. Kitch confirms what was added, updated, or removed.
-5. Future grocery preparation subtracts available stock.
+2. The Pantry tab shows every row, amount, unit, last update, revision freshness,
+   add/edit/remove controls, and “Mark pantry empty.”
+3. For a photo, Vision Scanner first classifies it as `meal`, `pantry`, or
+   `ambiguous`; Camera and Gallery follow the identical path.
+4. A pantry observation routes to Recipe/Grocery Planner. Current inventory is
+   set rather than repeatedly accumulated; explicitly new purchases are added.
+5. An ambiguous image changes nothing and offers “Treat as meal” and “Treat as pantry.”
+6. Kitch reconciles native purchase quantities and invalidates stale provider review.
 
 ### Functional UX Requirements
 
 - Pantry is shared across the household.
 - Pantry updates should never be personal to only one member.
 - Kitch should handle approximate quantities when exact amounts are unknown.
-- When confidence is low, Kitch should ask for confirmation or mark the estimate clearly.
+- Classification uses explicit states rather than a displayed confidence score.
+- Complete replacement and emptying require an exact-impact confirmation.
+- Incremental edits do not reset the full-review age.
 - Duplicate items should merge or update rather than becoming confusing duplicates.
 - Users should be able to correct pantry mistakes quickly.
 
@@ -348,7 +354,7 @@ Example prompts:
    its environment and uses a household-owned OAuth connection.
 4. The user selects a saved delivery address.
 5. The user starts synchronization from the separate, clearly numbered UI
-   stage, or explicitly requests Instamart synchronization in chat.
+   stage, or explicitly requests synchronization in chat.
 6. Kitch uses the native cart as the source of truth, excluding unselected and
    pantry-covered rows and applying known brand preferences.
 7. Kitch searches only after establishing the selected address context,
@@ -380,10 +386,10 @@ Example prompts:
     not blindly retried while duplicate-order risk remains.
 
 For a combined explicit chat request, Kitch first applies the declared
-standalone native change and then invokes the same Instamart synchronization
+standalone native change and then invokes the same provider synchronization
 path with the resulting complete eligible native cart. It does not bypass
 native intent, add another coordinator tool, or place an order.
-If Instamart is unavailable after the native transaction succeeds, Kitch keeps
+If the provider is unavailable after the native transaction succeeds, Kitch keeps
 the native change, says that the provider cart was not synchronized, and offers
 the existing sync flow for retry; it never collapses that partial outcome into
 provider success.

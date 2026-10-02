@@ -35,7 +35,9 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             "amount": 1.0,
             "unit": "pack",
             "category": "Dairy",
-            "alreadyStocked": False,
+            "purchaseAmount": 1,
+            "purchaseUnit": "pack",
+            "pantryAllocation": {},
         }
         return {
             "id": "draft-1",
@@ -134,7 +136,10 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         agent.synchronize.assert_awaited_once()
         call = agent.synchronize.await_args.kwargs
         self.assertEqual(call["source"], "chat_sync")
-        self.assertEqual(call["native_items"], [native_item])
+        self.assertEqual(call["native_items"][0]["requiredAmount"], native_item["amount"])
+        self.assertEqual(call["native_items"][0]["requiredUnit"], native_item["unit"])
+        self.assertEqual(call["native_items"][0]["amount"], native_item["purchaseAmount"])
+        self.assertEqual(call["native_items"][0]["unit"], native_item["purchaseUnit"])
         self.assertEqual(call["selected_address_id"], "home-1")
         save_draft.assert_called_once()
 
@@ -168,6 +173,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.apply_native_grocery_cart_changes") as mutate,
         ):
             response = await service.sync_from_chat(
+                provider_id="swiggy_instamart",
                 user_instruction="Add chocolate and sync to Instamart",
                 native_cart_changes=changes,
             )

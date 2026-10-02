@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "sb_secret_unit_test_credential_value")
+
+from app.agent import tools  # noqa: E402
+from app.agent_confirmation import (  # noqa: E402
+    begin_confirmation_scope, end_confirmation_scope, requested_confirmation,
+)
+from app import pantry_service  # noqa: E402
+from app.pantry_service import _propose_inventory, PantryReconciliationError  # noqa: E402
+
+
+class PantryProposalTests(unittest.TestCase):
+    def test_set_is_absolute_and_repeated_observation_does_not_accumulate(self):
+        current = [{"id": 1, "name": "Eggs", "amount": 6, "unit": "piece"}]
+        operation = [{"action": "set", "id": 1, "name": "Eggs", "amount": 12, "unit": "piece"}]
+        once = _propose_inventory(current, "patch", operation)
+        twice = _propose_inventory(once, "patch", operation)
+        self.assertEqual(once[0]["amount"], 12)
+        self.assertEqual(twice[0]["amount"], 12)
+
+    def test_add_accumulates_and_remove_deletes(self):
+        current = [{"id": 1, "name": "Milk", "amount": 1, "unit": "litre"}]
+        added = _propose_inventory(current, "patch", [
+            {"action": "add", "id": 1, "name": "Milk", "amount": 2, "unit": "litre"},
+        ])
+        self.assertEqual(added[0]["amount"], 3)
+        self.assertEqual(_propose_inventory(added, "patch", [{"action": "remove", "id": 1}]), [])
+
+    def test_add_rejects_incompatible_units_instead_of_relabelling_stock(self):
+        current = [{"id": 1, "name": "Milk", "amount": 1, "unit": "litre"}]
+        with self.assertRaises(PantryReconciliationError):
+            _propose_inventory(current, "patch", [
+                {"action": "add", "name": "Milk", "amount": 500, "unit": "ml"},
+            ])
+
+    def test_set_by_new_name_creates_absolute_observation(self):
+        proposed = _propose_inventory([], "patch", [
+            {"action": "set", "name": "Paneer", "amount": 1, "unit": "block"},
+        ])
+        self.assertEqual(proposed, [{"name": "Paneer", "amount": 1.0, "unit": "block"}])
+
+    def test_empty_replacement_means_empty_pantry(self):
+        self.assertEqual(_propose_inventory([{"id": 1, "name": "Milk", "amount": 1, "unit": "litre"}], "replace", []), [])
+
+
+class DestructiveConfirmationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_replace_pantry_creates_pending_action_without_mutating(self):
+        token = begin_confirmation_scope()
+        try:
+            pending = {
+                "id": "pending-1",
+                "impact_summary": {"title": "Replace the complete pantry?", "message": "This will mark the pantry empty."},
+            }
+            with patch.object(tools, "db_create_pending_agent_action", return_value=pending) as create:
+                result = await tools.replace_pantry_tool([], 4, "Archit")
+            self.assertEqual(result["status"], "confirmation_required")
+            self.assertEqual(requested_confirmation()["action_id"], "pending-1")
+            create.assert_called_once()
+        finally:
+            end_confirmation_scope(token)
+
+
+class PantryTransactionBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconciliation_failure_never_calls_transaction_rpc(self):
+        with (
+            patch.object(pantry_service, "get_pantry_state", return_value={"revision": 2, "reviewedAt": None, "items": []}),
+            patch.object(pantry_service, "get_grocery_cart", return_value=[{"id": 1, "name": "Eggs", "amount": 6, "unit": "piece"}]),
+            patch.object(pantry_service, "_reconcile_with_agent", side_effect=PantryReconciliationError("bad result")),
+            patch.object(pantry_service, "apply_pantry_inventory_change") as persist,
+        ):
+            with self.assertRaises(PantryReconciliationError):
+                await pantry_service.mutate_pantry(
+                    expected_revision=2, mode="patch",
+                    items=[{"action": "set", "name": "Eggs", "amount": 6, "unit": "piece"}],
+                )
+        persist.assert_not_called()
+
+
+class CheckedInSchemaContractTests(unittest.TestCase):
+    def test_final_schema_uses_revisioned_pantry_and_purchase_allocations(self):
+        schema = (ROOT / "backend/database/supabase_schema.sql").read_text()
+        self.assertIn("pantry_revision BIGINT", schema)
+        self.assertIn("pantry_reviewed_at", schema)
+        self.assertIn("purchase_amount", schema)
+        self.assertIn("pantry_allocation", schema)
+        self.assertIn("claim_pending_agent_action", schema)
+        self.assertIn("'executing'", schema)
+        self.assertIn("plan_preexisted boolean", schema)
+        self.assertIn("recipe_grocery_plan_id = p_recipe_grocery_plan_id", schema)
+        cart_definition = schema.split("CREATE TABLE IF NOT EXISTS public.grocery_cart_items", 1)[1].split(");", 1)[0]
+        self.assertNotIn("already_stocked", cart_definition)
+        self.assertNotIn("stock_note", cart_definition)
+
+    def test_vision_agent_has_no_mutation_tools(self):
+        core = (ROOT / "backend/app/agent/core.py").read_text()
+        vision = core.split("vision_scanner =", 1)[1].split("nutrition_tracker =", 1)[0]
+        self.assertIn("tools=[]", vision)
+        self.assertIn("output_schema=PhotoAnalysis", vision)
+
+
+if __name__ == "__main__":
+    unittest.main()

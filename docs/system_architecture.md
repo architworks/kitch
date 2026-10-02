@@ -16,8 +16,10 @@ The current design separates responsibilities deliberately:
 
 - The frontend renders state and collects explicit user actions.
 - FastAPI owns browser-facing APIs, state hydration, multimodal request orchestration, and provider approval boundaries.
-- The main ADK coordinator team reasons about culinary and household intent and
-  calls Python tools.
+- The main ADK head-chef team routes household settings, dated planning,
+  recipe/grocery/pantry work, and user-specific nutrition to clear owners.
+- A one-shot non-mutating Vision Scanner classifies images before any domain
+  mutation occurs.
 - A separate operation-scoped Instamart agent performs authorized provider catalogue
   matching and reversible cart preparation.
 - Python tools perform deterministic side effects.
@@ -33,13 +35,15 @@ flowchart LR
     API -->|runner.run_async| Runner[ADK Runner]
     Runner --> Coordinator[kitch_coordinator]
     Coordinator --> Chef[chef_planner]
-    Coordinator --> Vision[vision_scanner]
     Coordinator --> RecipeGrocery[recipe_grocery_planner]
+    Coordinator --> Nutrition[nutrition_tracker]
     Coordinator --> ProviderReadTools[Provider status tools]
-    Coordinator --> SyncTool[sync_instamart_cart_tool]
+    API --> Vision[one-shot vision_scanner]
+    Vision -->|meal| Nutrition
+    Vision -->|pantry| RecipeGrocery
 
     Chef --> Tools[Python Tool Layer]
-    Vision --> Tools
+    Nutrition --> Tools
     RecipeGrocery --> Tools
 
     Tools --> Supabase[(Supabase PostgreSQL)]
@@ -47,7 +51,7 @@ flowchart LR
     Runner --> Sessions[ADK Sessions]
 
     API --> Checkout[GroceryCheckoutService]
-    SyncTool --> Checkout
+    RecipeGrocery -->|sync_provider_cart_tool| Checkout
     Checkout --> InstamartAgent[Gemini Instamart cart agent]
     InstamartAgent --> ToolPolicy[Commerce tool policy]
     InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
@@ -107,10 +111,10 @@ request may then project the complete eligible selection through the Instamart
 agent. This keeps external provider carts rebuildable without forcing the user
 to manually visit the native-cart screen before every synchronization.
 
-The coordinator retains one `sync_instamart_cart_tool` bridge. Combined
-add/update/remove-and-sync requests reuse it; no additional composite commerce
-tool or grocery-ordering router agent is introduced. The full accepted and
-rejected topology record is maintained in `ai_agent_architecture.md`.
+Provider synchronization is owned by Recipe/Grocery Planner through one
+provider-neutral bridge. A named provider overrides only the current operation;
+otherwise the UI-selected provider is used. The full accepted and rejected
+topology record is maintained in `ai_agent_architecture.md`.
 
 ---
 
@@ -130,7 +134,8 @@ Current duties:
   backend registry rather than maintaining a frontend route registry.
 - Render individual nutrition state.
 - Render shared calendar-date plan state with navigable Monday-Sunday views.
-- Render pantry/grocery state from backend APIs.
+- Render complete pantry inventory, revision/review age, and native purchase
+  allocations. Support explicit add/edit/remove and confirmed empty replacement.
 - Send text chat turns to `POST /api/chat`.
 - Upload image-plus-text requests to `POST /api/upload-photo`.
 - Use provider-keyed checkout, connection, address, revalidation, payment, and
@@ -165,19 +170,23 @@ Current routes:
 | Route | Duty |
 | :--- | :--- |
 | `POST /api/chat` | Runs a text chat turn through the ADK runner. |
-| `POST /api/upload-photo` | Sends image bytes and optional text to ADK; handles photo-plus-grocery two-step orchestration. |
+| `POST /api/upload-photo` | Classifies an image as meal, pantry, or ambiguous before routing structured observations. |
 | `GET /api/state/{user_name}` | Returns dashboard state, including the authoritative current calendar-week meal plan and next chronological meal. |
 | `GET /api/meal-plan?week_start=YYYY-MM-DD` | Returns one Monday-Sunday planning window with all seven exact dates, including empty days. |
-| `POST /api/pantry/add` | Adds pantry stock manually. |
-| `PATCH /api/household/profile` | Persists shared diet and household-size settings. |
-| `DELETE /api/pantry/remove/{user_name}/{item_name}` | Removes pantry stock manually. |
-| `POST /api/diary/clear/{user_name}` | Clears one user's macro diary. |
+| `GET /api/pantry` | Returns pantry rows, optimistic revision, and full-review timestamp. |
+| `PATCH /api/pantry` | Applies atomic add/set/adjust/remove operations and reconciles native purchase quantities. |
+| `PUT /api/pantry` | Confirmed complete pantry replacement; an empty list marks it empty. |
+| `PATCH /api/household/profile` | Persists diet, household size, calorie target, timezone, and UI-selected provider. |
+| `PATCH/DELETE /api/diary/{user}/entries/{id}` | Corrects or deletes one nutrition entry. |
+| `POST /api/diary/clear/{user}` | Confirmed clearing of one household-calendar diary day. |
+| `POST /api/agent-actions/{id}/confirm|cancel` | Consumes or cancels an expiring destructive action. |
 | `GET /api/grocery/cart` | Returns the shared native household grocery cart. |
 | `POST /api/grocery/cart/items` | Adds a manual native grocery cart row. |
 | `PATCH /api/grocery/cart/items/{id}` | Updates one native grocery cart row. |
 | `DELETE /api/grocery/cart/items/{id}` | Deletes one native grocery cart row. |
 | `DELETE /api/grocery/cart/planned` | Deletes agent-planned cart rows while preserving manual rows. |
 | `GET /api/recipe-grocery/plans` | Lists recent recipe+grocery artifacts. |
+| `PATCH/DELETE /api/recipe-grocery/plans/{id}` | Revises a recipe in place or deletes it with linked planned rows. |
 | `GET /api/recipe-grocery/plans/latest` | Returns the latest recipe+grocery artifact. |
 | `GET /api/recipe-grocery/plans/{id}` | Returns one recipe+grocery artifact. |
 | `GET /api/grocery/providers` | Returns backend-owned provider descriptors, capabilities, environment, routes, and connection state. |
@@ -210,8 +219,11 @@ The main ADK application in `backend/app/agent/core.py` contains:
 
 - `kitch_coordinator`
 - `chef_planner`
-- `vision_scanner`
 - `recipe_grocery_planner`
+- `nutrition_tracker`
+
+FastAPI invokes `vision_scanner` and `pantry_reconciliation_mode` in isolated,
+one-shot ADK runners. Neither has mutation tools.
 
 The provider checkout service separately creates `instamart_cart_agent` through
 `InstamartCartAgentService`. This is an operation-scoped ADK run, not a
@@ -258,7 +270,7 @@ Supabase tables:
 
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
-| `profiles` | Prototype user/shared profile | Stores configured users, timezone, profile defaults, and preferred grocery provider. |
+| `profiles` | Prototype user/shared profile | Stores settings, preferred provider, pantry revision, and full-review time. |
 | `meal_plans` | Shared household | Stores breakfast/lunch/dinner meal names keyed by exact calendar date. |
 | `recipe_grocery_plans` | Shared household | Stores recipe cards, ingredients, pantry notes, request scope, and cart update metadata. |
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
@@ -268,6 +280,7 @@ Supabase tables:
 | `provider_connections` | Shared household | Stores one encrypted household access token and connection status per provider/environment. |
 | `provider_oauth_clients` | Backend configuration | Stores one dynamic OAuth client registration per provider/environment. |
 | `provider_oauth_flows` | Backend transient state | Stores expiring, single-use hashed OAuth state and encrypted PKCE verifier records. |
+| `pending_agent_actions` | Shared household | Stores expiring, single-use confirmation payloads for bulk destructive changes. |
 
 Important modeling decisions:
 
@@ -284,7 +297,10 @@ Important modeling decisions:
 - Standalone chat add/update/remove changes use
   `apply_native_grocery_cart_changes`, so a multi-change request commits as one
   transaction or rolls back completely.
-- `already_stocked=true` rows remain visible but are excluded from provider sync.
+- Native rows store required amount/unit separately from positive provider-export
+  `purchase_amount`/`purchase_unit` and structured `pantry_allocation`.
+- Pantry mutation and cart reconciliation share one revision-checked transaction;
+  provider drafts are invalidated whenever purchase intent changes.
 
 Why this model:
 

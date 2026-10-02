@@ -17,23 +17,32 @@ from .tools import (
     get_meal_schedule_tool,
     replace_meal_plan_range_tool,
     update_dated_meals_tool,
-    get_pantry_stock_tool,
-    add_to_pantry_tool,
+    remove_future_meals_tool,
+    get_pantry_state_tool,
+    patch_pantry_tool,
+    replace_pantry_tool,
     log_macros_tool,
     get_macro_diary_tool,
+    update_nutrition_entry_tool,
+    delete_nutrition_entry_tool,
+    clear_nutrition_day_tool,
     get_grocery_cart_tool,
     modify_native_grocery_cart_tool,
     clear_planned_grocery_cart_tool,
     save_recipe_grocery_plan_tool,
     get_recipe_grocery_plan_tool,
     list_recipe_grocery_plans_tool,
+    update_recipe_grocery_plan_tool,
+    delete_recipe_grocery_plan_tool,
     set_household_food_preference_tool,
     search_household_food_preferences_tool,
     get_current_datetime,
     list_grocery_providers_tool,
     get_grocery_checkout_status_tool,
-    sync_instamart_cart_tool,
+    sync_provider_cart_tool,
+    update_household_settings_tool,
 )
+from .structured_models import PhotoAnalysis, PantryReconciliation
 from google.adk.agents.callback_context import CallbackContext
 from typing import Optional
 
@@ -131,7 +140,7 @@ chef_planner = LlmAgent(
         "4. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
         "5. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
         "6. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
-        "7. Never create, modify, or claim access to a past plan date. Past meal-plan rows are automatically deleted after the household date advances.\n"
+        "7. Use remove_future_meals_tool for explicit future slot/date/range removal. A single slot or date executes directly; bulk or ranges require confirmation. Never create or modify past dates.\n"
         "8. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
         "9. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
     ),
@@ -139,6 +148,7 @@ chef_planner = LlmAgent(
         get_meal_schedule_tool,
         replace_meal_plan_range_tool,
         update_dated_meals_tool,
+        remove_future_meals_tool,
         get_current_datetime
     ]
 )
@@ -147,34 +157,49 @@ vision_scanner = LlmAgent(
     model=configured_llm,
     name="vision_scanner",
     description=(
-        "Handles all requests related to food intake logging and pantry management: "
-        "logging what the user ate (from text descriptions OR photos), estimating calories and macros, "
-        "viewing the macro diary, scanning fridge/pantry contents, and updating pantry stock. "
-        "Route here when the user says things like 'I ate X', 'log my meal', 'update my pantry', "
-        "'how many calories have I eaten today', or uploads food/fridge photos."
+        "A non-mutating image interpreter. Classifies every uploaded image as exactly "
+        "meal, pantry, or ambiguous and returns structured observations."
     ),
     instruction=(
-        "You are Kitch's Food Logger & Pantry Scanner — you track what housemates eat and what's in their fridge.\n\n"
-        "IMPORTANT CONTEXT:\n"
-        "- Current datetime: {current_datetime?}\n"
-        "- Active user: {user:profile_name?}\n"
-        "- Household members: " + HOUSEHOLD_MEMBERS_TEXT + "\n\n"
-        "CRITICAL RULES:\n"
-        "1. When a user describes food they ate (text OR photo), ESTIMATE the calories and macros using your nutritional knowledge, "
-        "   then IMMEDIATELY log them using 'log_macros_tool'. Don't just describe — always LOG.\n"
-        "2. If the user doesn't specify their name, use the active user from session state.\n"
-        "3. For fridge scans (photos or text), identify items and add them to the shared household pantry using 'add_to_pantry_tool'.\n"
-        "4. To check daily progress, use 'get_macro_diary_tool' and summarize totals.\n"
-        "5. Always respond with a clean markdown summary of what was logged.\n"
-        "6. Describe pantry or diary data as saved only after its persistence tool returns a successful result. If persistence fails or has no successful result, explicitly say nothing was saved."
+        "Inspect the image and accompanying text without changing any state. Return exactly one "
+        "classification: meal, pantry, or ambiguous. Do not include a confidence score. For a meal, "
+        "identify the meal and estimate macros. For a pantry image, list observed inventory and mark "
+        "each observation as set for a current-inventory photo or add only when the text clearly says "
+        "these are newly purchased items. When the semantic purpose cannot be determined, return "
+        "ambiguous with one concise clarification question. Never call tools or claim anything was saved."
     ),
-    tools=[
-        add_to_pantry_tool,
-        log_macros_tool,
-        get_pantry_stock_tool,
-        get_macro_diary_tool,
-        get_current_datetime
-    ]
+    tools=[],
+    output_schema=PhotoAnalysis,
+    mode="single_turn",
+    include_contents="none",
+)
+
+nutrition_tracker = LlmAgent(
+    model=configured_llm,
+    name="nutrition_tracker",
+    description="Logs, reads, corrects, and deletes personal nutrition diary entries.",
+    instruction=(
+        "You are Kitch's Nutrition Tracker. Nutrition is user-specific. Log described meals with "
+        "log_macros_tool, read progress with get_macro_diary_tool, correct one entry with "
+        "update_nutrition_entry_tool, and delete one explicitly identified entry with "
+        "delete_nutrition_entry_tool. Use clear_nutrition_day_tool for a whole day; it creates a "
+        "backend confirmation and must not be simulated by repeated deletes. Confirm changes only "
+        "after a successful tool result."
+    ),
+    tools=[log_macros_tool, get_macro_diary_tool, update_nutrition_entry_tool,
+           delete_nutrition_entry_tool, clear_nutrition_day_tool, get_current_datetime],
+)
+
+pantry_reconciliation_agent = LlmAgent(
+    model=configured_llm,
+    name="pantry_reconciliation_mode",
+    description="Structured non-mutating reconciliation mode for pantry coverage and native purchase intent.",
+    instruction=(
+        "Semantically reconcile pantry quantities against native grocery requirements. Understand "
+        "equivalent real-world units only when defensible, allow partial coverage, and return exactly "
+        "one allocation per supplied cart ID. Never invent IDs. purchase_amount is always nonnegative."
+    ),
+    tools=[], output_schema=PantryReconciliation, mode="single_turn", include_contents="none",
 )
 
 recipe_grocery_planner = LlmAgent(
@@ -201,11 +226,11 @@ recipe_grocery_planner = LlmAgent(
         "3. Resolve only a recipe or meal-based request's scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
         "4. For every recipe or recipe-derived grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
-        "6. Recipe-derived grocery/cart/buy wording: call 'get_pantry_stock_tool', generate recipe cards for the requested scope, derive cart rows from the SAME ingredients, mark pantry-covered rows with alreadyStocked=true and a stockNote, then call 'save_recipe_grocery_plan_tool' with update_cart=true. This replaces previous source=agent cart rows and preserves manual rows.\n"
+        "6. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
         "7. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
-        "8. If the user mentions items already at home or just bought, call 'add_to_pantry_tool' for each item first, then plan using the updated pantry.\n"
-        "9. Keep recipe-derived rows connected to their saved recipe+grocery artifact. Standalone user-requested rows are the deliberate exception and remain source=manual.\n"
-        "10. Do not call ordering-provider cart mutation or order-placement tools. Provider cart translation is separate from this agent and happens through the guarded checkout backend.\n"
+        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool.\n"
+        "9. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
+        "10. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
         "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
         "12. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
@@ -217,10 +242,14 @@ recipe_grocery_planner = LlmAgent(
         save_recipe_grocery_plan_tool,
         get_recipe_grocery_plan_tool,
         list_recipe_grocery_plans_tool,
+        update_recipe_grocery_plan_tool,
+        delete_recipe_grocery_plan_tool,
         set_household_food_preference_tool,
         search_household_food_preferences_tool,
-        get_pantry_stock_tool,
-        add_to_pantry_tool,
+        get_pantry_state_tool,
+        patch_pantry_tool,
+        replace_pantry_tool,
+        sync_provider_cart_tool,
         get_current_datetime
     ]
 )
@@ -242,9 +271,8 @@ kitch_coordinator = LlmAgent(
         "YOUR JOB is to understand what the user needs and route to the right specialist:\n\n"
         "→ 'chef_planner': For lightweight meal plan schedules: creating the weekly plan, "
         "  viewing scheduled meals, swapping/changing scheduled meal names, or asking what's currently planned.\n\n"
-        "→ 'vision_scanner': For ANYTHING about food intake logging — whether the user describes "
-        "  food in text ('I ate pasta') OR uploads a photo. Also for pantry/fridge scanning, "
-        "  calorie tracking, and 'how many calories today' questions.\n\n"
+        "→ 'nutrition_tracker': For food intake logging, macro questions, and correcting or deleting nutrition entries.\n\n"
+        "→ 'vision_scanner': Used only by the upload pipeline to classify and interpret images; do not route ordinary text chat to it.\n\n"
         "→ 'recipe_grocery_planner': For detailed recipes, cooking steps, ingredients, "
         "  groceries, shopping lists, 'what do I need to buy', pantry-aware grocery planning, "
         "  standalone add/update/remove requests for the Kitch grocery cart, and household "
@@ -254,19 +282,19 @@ kitch_coordinator = LlmAgent(
         "2. Route naturally — don't tell the user which agent you're using.\n"
         "3. For simple greetings or general chat, respond yourself without routing.\n"
         "4. If unsure, ask a clarifying question rather than guessing wrong.\n"
-        "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to vision_scanner for logging.\n"
-        "6. Explicit Instamart cart intent has priority over ordinary grocery routing. If the user names Instamart and asks to add, change, remove, move, sync, or refresh cart items, ALWAYS call sync_instamart_cart_tool; do not transfer that request to recipe_grocery_planner.\n"
-        "7. For an explicit Instamart request that also adds, changes, or removes native grocery intent, pass those exact changes through native_cart_changes on the SAME sync_instamart_cart_tool call. The tool persists the native change first and then invokes the Instamart cart agent with the resulting complete eligible native cart. Do not create a second coordinator tool or claim either change before the tool succeeds.\n"
-        "8. If the user asks only to add, change, or remove items from the Kitch grocery list/cart and does not request provider synchronization, route to recipe_grocery_planner. If the user is merely planning groceries, also route to recipe_grocery_planner. Never trigger provider synchronization from ordinary grocery wording.\n"
+        "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to nutrition_tracker for logging.\n"
+        "6. All recipes, pantry, native grocery cart, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
+        "7. Household settings (diet, household size, calorie target, timezone) may be changed with update_household_settings_tool. Provider authentication and default-provider selection remain UI-only.\n"
+        "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
         "10. Never ask 'which agent should I use' — just figure it out from context.\n"
         "11. Never claim a durable change succeeded unless the specialist or tool received a successful persistence result. Do not turn a tool error into reassuring success language."
     ),
-    sub_agents=[chef_planner, vision_scanner, recipe_grocery_planner],
+    sub_agents=[chef_planner, recipe_grocery_planner, nutrition_tracker],
     tools=[
         list_grocery_providers_tool,
         get_grocery_checkout_status_tool,
-        sync_instamart_cart_tool,
+        update_household_settings_tool,
     ],
     before_agent_callback=inject_datetime_callback
 )
@@ -289,4 +317,17 @@ runner = Runner(
     app=app_instance,
     session_service=session_service,
     memory_service=memory_service
+)
+
+# Image classification and pantry reconciliation are intentionally one-shot.
+# They share the Gemini model but never inherit chat history or mutation tools.
+vision_session_service = InMemorySessionService()
+vision_runner = Runner(
+    app_name="kitch_vision", agent=vision_scanner,
+    session_service=vision_session_service, auto_create_session=True,
+)
+pantry_reconciliation_session_service = InMemorySessionService()
+pantry_reconciliation_runner = Runner(
+    app_name="kitch_pantry_reconciliation", agent=pantry_reconciliation_agent,
+    session_service=pantry_reconciliation_session_service, auto_create_session=True,
 )

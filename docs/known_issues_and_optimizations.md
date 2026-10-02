@@ -38,9 +38,9 @@ replace flexible memory with deterministic catalogue matching.
 
 Kitch does not currently need an additional `grocery_ordering_agent`, a tree of
 provider sub-agents, or more provider-mutation tools on `kitch_coordinator`.
-Chat-native grocery changes belong to the existing grocery specialist. Provider
-cart projection belongs to the provider agent invoked by the Groceries UI sync
-workflow.
+Chat-native grocery changes and provider-sync intent belong to the existing
+Recipe/Grocery specialist. The guarded service invokes the provider worker for
+either explicit UI or chat synchronization.
 
 Reconsider that conversational hierarchy only when there is demonstrated
 routing complexity from multiple active providers. It must not replace the
@@ -53,70 +53,17 @@ or UI-only checkout.
 
 Chat may add, update, or remove native Kitch cart intent through the existing
 grocery specialist without synchronizing a provider. The Groceries UI sync
-action passes the complete selected native-cart intent to the operation-scoped
-Instamart agent. An explicit chat request to move, sync, refresh, or modify the
-Instamart cart may invoke that same agent through the existing
-`sync_instamart_cart_tool` bridge.
+action passes the complete selected native-cart intent through the guarded
+provider workflow. An explicit chat request to move, sync, refresh, or modify a
+provider cart routes to Recipe/Grocery Planner and its
+`sync_provider_cart_tool`.
 
 This makes the native cart a conduit between recipes, direct chat changes, and
 provider ordering without making its UI a mandatory intermediate screen. The
-single coordinator sync bridge is retained; additional edge-case commerce tools
-are rejected. Final review and checkout remain UI-only.
+provider-neutral specialist bridge is retained; coordinator commerce edge-case
+tools are rejected. Final review and checkout remain UI-only.
 
 ## Known issues
-
-## KI-001: Provider-cart wording is routed and reported inconsistently
-
-- **Status:** Routing fix implemented; functional verification pending
-- **Area:** Coordinator routing / agent orchestration
-- **Reported:** 2026-08-16
-- **Severity:** High
-
-### Summary
-
-The coordinator does not reliably distinguish native-cart mutation from the
-UI-only provider synchronization boundary.
-
-### Reproduction
-
-Ask Kitch:
-
-```text
-Move my grocery list to Instamart.
-```
-
-### Previously observed behavior
-
-Kitch claimed that the native grocery list was updated and returned an
-`UPDATE_RECIPE_GROCERY` action. It did not synchronize the Instamart cart or
-return `UPDATE_PROVIDER_CART`.
-
-### Expected behavior
-
-- A request to add, update, or remove a grocery item should route to the
-  existing grocery specialist and change only the native cart.
-- A request to move or synchronize the complete native cart to Instamart
-  should call the existing `sync_instamart_cart_tool` and reach the Instamart
-  agent.
-- A combined request should apply the standalone native change and then use the
-  same sync bridge; it must not require another coordinator tool.
-
-### Impact
-
-- Explicit user intent is sent to the wrong domain specialist.
-- The response can claim success for an operation that did not occur.
-- The frontend refreshes the wrong product state.
-
-### Resolution criteria
-
-- Standalone item mutations route to the existing native grocery specialist.
-- The coordinator retains one explicit Instamart synchronization bridge and
-  does not accumulate additional provider-specific edge-case tools.
-- Provider success text and `UPDATE_PROVIDER_CART` are emitted only after a
-  confirmed provider-cart result, whether synchronization originated in chat
-  or the UI.
-- Native grocery planning and provider-cart synchronization remain distinct
-  intents.
 
 ## KI-002: Instamart matching fails on valid variants and can apply an unrelated preference
 
@@ -309,55 +256,6 @@ native-drift blocker and restores the ready state.
   an empty blocker list.
 - Resynchronization must use the current native selection before payment and
   acknowledgement can be restored.
-
-## KI-005: Chat standalone native-cart mutation requires functional verification
-
-- **Status:** Fix implemented; functional verification pending
-- **Area:** Chat commerce intent / native-cart authority
-- **Reported:** 2026-08-16
-- **Severity:** Medium
-
-### Summary
-
-The grocery specialist previously required every cart row to come from a recipe
-artifact. It now has a dedicated specialist-owned mutation capability for
-standalone manual native-cart rows. The existing Instamart sync bridge also
-accepts native changes for an explicit combined add/update/remove-and-sync
-request.
-
-### Reproduction
-
-With no matching chocolate row in the native cart, ask Kitch:
-
-```text
-Add one Dairy Milk chocolate to my grocery cart so I can order it from Instamart.
-```
-
-### Implemented execution boundary
-
-`recipe_grocery_planner` calls `modify_native_grocery_cart_tool` for standalone
-native-only requests. `kitch_coordinator` keeps the existing
-`sync_instamart_cart_tool`; for an explicit combined Instamart request, the same
-tool applies the declared native changes before invoking
-`GroceryCheckoutService` and the Instamart agent with the resulting complete
-eligible native cart.
-
-### Expected behavior
-
-Native-only chat requests must report only the native change. Explicit
-Instamart requests may report provider success only after the provider cart is
-confirmed. Checkout remains unavailable from chat.
-
-### Resolution criteria
-
-- Functional chat tests confirm that the existing grocery specialist adds,
-  updates, and removes standalone native rows without fabricating a recipe.
-- Explicit and combined Instamart chat tests reliably use the existing sync
-  bridge without adding another coordinator tool.
-- Chat reports `UPDATE_GROCERY_CART` only after the native write succeeds and
-  explicitly distinguishes native-only from provider synchronization results.
-- Chat and UI synchronization emit `UPDATE_PROVIDER_CART` only after confirmed
-  `update_cart` and `get_cart` results.
 
 ## Deferred optimizations
 

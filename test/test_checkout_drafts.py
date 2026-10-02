@@ -40,7 +40,9 @@ class CheckoutDraftTests(unittest.TestCase):
             "amount": 1.0,
             "unit": "pack",
             "category": "Dairy",
-            "alreadyStocked": False,
+            "purchaseAmount": 1,
+            "purchaseUnit": "pack",
+            "pantryAllocation": {},
         }
 
     def successful_result(self) -> dict:

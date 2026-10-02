@@ -148,8 +148,13 @@ Current agent team:
 
 - `kitch_coordinator`
 - `chef_planner`
-- `vision_scanner`
 - `recipe_grocery_planner`
+- `nutrition_tracker`
+
+One-shot structured agents:
+
+- `vision_scanner`
+- `pantry_reconciliation_mode`
 
 Why ADK:
 
@@ -183,6 +188,8 @@ Current database:
 Schema location:
 
 - `backend/database/supabase_schema.sql`
+- `backend/database/migrations/20261002_head_chef_pantry_management.sql` migrates
+  existing deployments to revisioned pantry state and the final purchase-allocation model.
 
 Current tables:
 
@@ -196,6 +203,7 @@ Current tables:
 - `provider_connections`
 - `provider_oauth_clients`
 - `provider_oauth_flows`
+- `pending_agent_actions`
 
 State ownership:
 
@@ -203,14 +211,17 @@ State ownership:
 - `meal_plans`: shared household schedule keyed by exact `plan_date`, with
   breakfast, lunch, and dinner meal names only.
 - `recipe_grocery_plans`: persisted recipe cards, structured ingredients, pantry considerations, and request scope.
-- `pantry_stock`: shared household pantry/fridge inventory.
-- `grocery_cart_items`: shared native grocery cart, optionally linked to a recipe+grocery artifact.
+- `pantry_stock`: shared inventory with per-row update time; profile revision and
+  full-review time support safe edits and freshness warnings.
+- `grocery_cart_items`: required amount/unit, remaining purchase amount/unit,
+  pantry-allocation detail, source, and optional recipe-artifact link.
 - `macro_diary`: individual macro logs.
 - `provider_checkout_drafts`: environment-scoped mappings, confirmed cart,
   provider bill, approval snapshot, payment/order outcome, repair history, and lease.
 - `provider_connections`: encrypted household provider token and lifecycle state.
 - `provider_oauth_clients`: environment-level dynamic OAuth client registration.
 - `provider_oauth_flows`: expiring one-time PKCE state and verifier records.
+- `pending_agent_actions`: expiring, single-use destructive confirmation payloads.
 
 Why Supabase:
 
@@ -558,10 +569,17 @@ Current image flow:
 - Browser stages image attachments without auto-submitting.
 - User may add accompanying text.
 - Browser uploads file bytes and text to FastAPI.
-- FastAPI creates ADK content with text instructions and an image part.
-- Plate photos route to intake logging.
-- Fridge photos route to pantry updates.
-- If the same fridge upload includes a grocery request, a follow-up recipe+grocery planning turn runs after pantry updates.
+- FastAPI sends identical multimodal input to the non-mutating Vision Scanner,
+  regardless of whether Camera or Gallery supplied it.
+- Vision Scanner returns exactly `meal`, `pantry`, or `ambiguous`, together
+  with structured observations and no confidence score.
+- Meal observations route to Nutrition Tracker; pantry observations route to
+  Recipe/Grocery Planner. Vision Scanner cannot write either domain itself.
+- Ambiguous images persist nothing, remain available in the browser, and let
+  the user explicitly choose **Treat as meal** or **Treat as pantry**.
+- If the same pantry upload includes a grocery request, the recipe/grocery
+  specialist applies the observation and continues against the confirmed
+  pantry state.
 
 Why image attach does not auto-submit:
 

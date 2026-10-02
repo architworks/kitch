@@ -84,9 +84,10 @@ Agent roles:
 
 - `kitch_coordinator`: routes natural language.
 - `chef_planner`: creates and edits weekly meal plans.
-- `vision_scanner`: handles plate macros and fridge/pantry scans.
-- `recipe_grocery_planner`: creates recipe artifacts and recipe-derived or
-  standalone manual native grocery rows.
+- `nutrition_tracker`: owns personal nutrition logging, correction, and deletion.
+- `vision_scanner`: one-shot, non-mutating meal/pantry/ambiguous image classifier.
+- `recipe_grocery_planner`: owns recipes, pantry, native grocery rows,
+  preferences, and provider-cart synchronization.
 - `instamart_cart_agent`: operation-scoped provider worker that prepares and
   confirms the external cart; it is not a long-lived coordinator sub-agent.
 
@@ -102,7 +103,11 @@ Core data flows:
    and writes a manual native row through the same grocery specialist.
 
 3. **Fridge photo flow**
-   User uploads fridge photo with grocery request -> vision scanner updates pantry first -> grocery planner runs against updated pantry -> pantry-covered rows are muted/excluded from provider sync.
+   User uploads fridge photo with grocery request -> non-mutating Vision
+   Scanner classifies and structures observations -> Recipe/Grocery Planner
+   applies the pantry change transactionally -> native purchase quantities are
+   reconciled -> only positive purchase quantities are eligible for provider
+   synchronization. An ambiguous classification writes nothing.
 
 4. **Provider flow**
    User selects native cart rows in the UI or explicitly requests Instamart
@@ -188,7 +193,7 @@ Use this table as the compact version during recording.
 | Execution environment | "The app is split into Next.js frontend, FastAPI backend, ADK agents, Supabase persistence, and a multi-provider commerce layer." | Explains why the system has multiple components and where each responsibility lives. |
 | Context/session management | "ADK Runner uses session state via `InMemorySessionService`; FastAPI and callbacks inject active user, household, date, planning week, and compaction keeps long sessions bounded." | Prevents wrong-person/wrong-date behavior while keeping long conversations manageable. |
 | Memory management | "Supabase stores durable product state; ADK memory stores flexible household preferences." | Separates reliable UI records from fuzzy conversational memory. |
-| Delegation/routing | "A coordinator routes to specialist agents for meal planning, vision/macros/pantry, and recipe/grocery planning." | Keeps prompts and tool access scoped instead of giving every tool to one giant agent. |
+| Delegation/routing | "A coordinator routes schedules to Chef Planner, recipes/pantry/groceries/provider sync to Recipe/Grocery Planner, and personal diary work to Nutrition Tracker. One-shot Vision Scanner only classifies images." | Keeps prompts and tool access scoped instead of giving every tool to one giant agent. |
 | Tools | "Agents call Python tools for deterministic reads/writes like saving meal plans, logging macros, and updating native cart rows." | Converts AI reasoning into auditable state changes. |
 | MCP/provider integration | "Zepto keeps its adapter flow; Instamart has a dedicated MCP cart agent outside the recipe planner, guarded by backend authority." | Enables semantic catalog reasoning without exposing checkout to chat or planning agents. |
 | Guardrails | "Provider ordering is not an agent tool. The user must review a saved snapshot and explicitly approve." | Addresses real-world side effects: money, address, substitutions, delivery. |
@@ -198,7 +203,7 @@ Use this table as the compact version during recording.
 
 > The agent harness is Google ADK running behind a FastAPI gateway. The frontend does not call a model directly. FastAPI receives chat or image requests, prepares active user and household context, injects current date and planning-week context into ADK session state, and then runs the ADK runner. For the prototype, ADK uses `InMemorySessionService`, and the ADK app uses event compaction so long conversations stay bounded.
 
-> The agent graph is a hub-and-spoke topology. The coordinator routes intent to specialists: `chef_planner` for schedules, `vision_scanner` for plate photos, pantry scans, and macro logs, and `recipe_grocery_planner` for recipes, ingredients, groceries, and preferences. That lets each agent have a focused prompt and a scoped tool list.
+> The conversational graph routes schedules to `chef_planner`, recipes/pantry/groceries/provider sync to `recipe_grocery_planner`, and personal diary work to `nutrition_tracker`. A separate one-shot `vision_scanner` classifies images as meal, pantry, or ambiguous without tools, then FastAPI routes its structured observation to the owning specialist.
 
 > Memory is split deliberately. Supabase is the source of truth for meal plans, pantry, recipe artifacts, native cart rows, macro logs, provider connections, and checkout drafts. ADK memory is for flexible preferences like "avoid tofu" or "prefer Amul butter." Tools are the execution layer: agents call Python tools for deterministic state changes. Zepto and Swiggy Instamart are integrated through one backend commerce contract, and the key guardrail is that real order placement is never an agent tool. Kitch can prepare the cart, but final ordering requires a saved review snapshot and explicit UI approval.
 
@@ -319,8 +324,11 @@ Talking point:
 Routing model:
 
 - Meal plans and meal swaps -> `chef_planner`.
-- Plate photos, macro logs, pantry scans -> `vision_scanner`.
-- Recipes, ingredients, groceries, and preferences -> `recipe_grocery_planner`.
+- Text macro logs and diary edits -> `nutrition_tracker`.
+- Image uploads -> one-shot `vision_scanner`, then meal observations route to
+  Nutrition Tracker and pantry observations to Recipe/Grocery Planner.
+- Recipes, ingredients, pantry, groceries, preferences, and explicit provider
+  sync -> `recipe_grocery_planner`.
 
 Why not one giant agent:
 
@@ -336,7 +344,9 @@ Mitigation:
 
 - Agent descriptions are written for natural user language.
 - Test scenarios validate casual prompts like "I ate dal and rice" or "what groceries do we need?"
-- Cross-flow orchestration is handled by FastAPI when needed, such as fridge photo first, grocery planning second.
+- Cross-flow orchestration is handled by FastAPI when needed: classify first,
+  then route immutable observations to the owning specialist. The Vision
+  Scanner itself never mutates pantry or nutrition state.
 
 ---
 
@@ -366,9 +376,9 @@ External/provider integration:
   update the reversible cart, but it cannot call checkout or other consequential
   provider mutations.
 - Native cart rows are mapped into provider search/cart operations.
-- A combined explicit chat request reuses the existing coordinator sync bridge:
-  it applies the declared native change and then invokes the same Instamart
-  agent. No second composite coordinator tool is used.
+- A combined explicit chat request routes to Recipe/Grocery Planner's single
+  provider-neutral sync tool. It applies declared native intent and invokes the
+  provider workflow without adding coordinator commerce edge-case tools.
 - Provider results return actual cart items and unavailable items.
 
 Why this matters:

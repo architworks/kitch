@@ -409,7 +409,7 @@ def native_snapshot_matches(
     current_selected = [
         item
         for item in current_cart
-        if str(item.get("id")) in selected_ids and not item.get("alreadyStocked")
+        if str(item.get("id")) in selected_ids and float(item.get("purchaseAmount") or 0) > 0
     ]
 
     def stable(items: List[Dict[str, Any]]) -> str:
@@ -417,10 +417,12 @@ def native_snapshot_matches(
             {
                 "id": str(item.get("id")),
                 "name": item.get("name"),
-                "amount": item.get("amount"),
-                "unit": item.get("unit"),
+                "requiredAmount": item.get("requiredAmount", item.get("amount")),
+                "requiredUnit": item.get("requiredUnit", item.get("unit")),
+                "purchaseAmount": item.get("purchaseAmount", item.get("amount")),
+                "purchaseUnit": item.get("purchaseUnit", item.get("unit")),
                 "category": item.get("category"),
-                "alreadyStocked": bool(item.get("alreadyStocked")),
+                "pantryAllocation": item.get("pantryAllocation") or {},
             }
             for item in items
         ]

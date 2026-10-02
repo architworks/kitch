@@ -35,18 +35,18 @@ flowchart TD
     Runner --> Parent[Kitch Coordinator Agent<br>General Manager / Triage]
     Parent --> Runner
     
-    %% Multi-Agent Routing & Delegation (3-Spoke Topology)
+    %% Multi-Agent Routing & Delegation
     subgraph Agent_Team [Kitch Collaborative Spoke Team]
         SubChef[Chef Planner Agent<br>Lightweight Meal Scheduler]
-        SubVision[Vision Scanner Agent<br>Multimodal OCR]
-        SubCart[Recipe Grocery Planner Agent<br>Recipes, Ingredients & Native Cart]
+        SubNutrition[Nutrition Tracker Agent<br>Personal diary]
+        SubCart[Recipe Grocery Planner Agent<br>Recipes, Pantry, Native & Provider Carts]
     end
     
     Parent -->|Delegates meal plans| SubChef
     SubChef -->|Returns results| Parent
     
-    Parent -->|Delegates photo snaps| SubVision
-    SubVision -->|Returns logs| Parent
+    Parent -->|Delegates nutrition| SubNutrition
+    SubNutrition -->|Returns diary status| Parent
     
     Parent -->|Delegates recipe and grocery| SubCart
     SubCart -->|Returns recipe plus native cart status| Parent
@@ -54,8 +54,10 @@ flowchart TD
     %% Specialized Spoke Dependencies
     SubChef -->|DB Tools| DB[(Supabase DB<br>meal_plans)]
     
-    SubVision -->|Multimodal Ingestion| LLM[Gemini via Google ADK]
-    SubVision -->|Log Tools| DB[(Supabase DB<br>macro_diary & pantry_stock)]
+    Vision[One-shot Vision Scanner<br>meal / pantry / ambiguous] -->|meal| SubNutrition
+    Vision -->|pantry| SubCart
+    Vision -->|ambiguous| Clarify[No mutation]
+    SubNutrition -->|Diary Tools| DB[(Supabase DB<br>macro_diary)]
     
     SubCart -->|food and brand preferences| MemorySvc
     SubCart -->|Artifact and Cart Tools| RecipeCart[recipe_grocery_plans and grocery_cart_items]
@@ -74,10 +76,11 @@ flowchart TD
 *   **Recipe+Grocery Planning**: The `recipe_grocery_planner` owns detailed recipes, ingredients, pantry-aware grocery planning, and native cart persistence:
     1. It calls `search_household_food_preferences_tool` before recipe or grocery generation.
     2. It calls `get_meal_schedule_tool` with exact ISO date ranges for schedule-based scopes such as tonight, tomorrow, next two days, or the full week.
-    3. It calls `get_pantry_stock_tool` before grocery planning.
+    3. It reads revisioned pantry state before grocery planning or mutation.
     4. It saves a `recipe_grocery_plans` artifact for every recipe/grocery request.
     5. For grocery requests it transactionally saves the artifact and replaces agent-generated `grocery_cart_items`, preserving manual rows. If either part fails, neither new change is committed.
-*   **Provider Boundary**: External-cart translation is not part of the recipe+grocery agent. The Groceries page fetches Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the backend. A dedicated Gemini Instamart cart agent may search and prepare the reversible cart after an explicit UI or chat request. A shared checkout service and server-owned commerce policy retain durable revalidation, payment approval, and UI-only ordering authority.
+*   **Provider Boundary**: Recipe/Grocery Planner owns the provider-neutral sync entry point. The Groceries page fetches Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the backend. A dedicated Gemini Instamart cart agent may search and prepare the reversible cart after explicit UI or chat intent. A shared checkout service and commerce policy retain durable revalidation, payment approval, and UI-only ordering authority.
+*   **Pantry Boundary**: Pantry add/set/adjust/remove and full replacement use optimistic revisions. A structured Gemini reconciliation computes remaining purchase intent; one database transaction updates pantry, cart allocations, revision, and provider-review invalidation.
 
 ### 3. Real-Time Dashboard Sync & Frontend Parity
 *   **State Sync**: `/api/state/{user_name}` returns the authoritative current calendar week and next chronological meal, while `/api/meal-plan` loads navigated weeks.

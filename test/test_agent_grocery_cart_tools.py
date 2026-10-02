@@ -78,7 +78,7 @@ class NativeGroceryCartMutationTests(unittest.TestCase):
         apply.assert_not_called()
 
 
-class InstamartChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
+class ProviderChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_combined_request_mutates_native_cart_before_existing_sync_path(self):
         service = AsyncMock()
         service.sync_from_chat.return_value = {
@@ -102,12 +102,14 @@ class InstamartChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
         }]
 
         with patch.dict(sys.modules, {"app.main": fake_main}):
-            result = await tools.sync_instamart_cart_tool(
+            result = await tools.sync_provider_cart_tool(
                 user_request="Add one Dairy Milk chocolate and sync to Instamart",
+                provider="swiggy_instamart",
                 native_cart_changes=changes,
             )
 
         service.sync_from_chat.assert_awaited_once_with(
+            provider_id="swiggy_instamart",
             cart_item_ids=[],
             selected_address_id="",
             user_instruction="Add one Dairy Milk chocolate and sync to Instamart",
@@ -130,12 +132,14 @@ class InstamartChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
         fake_main.grocery_checkout_service = service
         changes = [{"action": "remove", "name": "milk"}]
         with patch.dict(sys.modules, {"app.main": fake_main}):
-            result = await tools.sync_instamart_cart_tool(
+            result = await tools.sync_provider_cart_tool(
                 user_request="Remove milk and sync to Instamart",
+                provider="swiggy_instamart",
                 native_cart_changes=changes,
             )
 
         service.sync_from_chat.assert_awaited_once_with(
+            provider_id="swiggy_instamart",
             cart_item_ids=[],
             selected_address_id="",
             user_instruction="Remove milk and sync to Instamart",
@@ -147,14 +151,15 @@ class InstamartChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentTopologyContractTests(unittest.TestCase):
-    def test_existing_sync_bridge_is_kept_and_no_second_coordinator_tool_is_added(self):
+    def test_provider_sync_is_owned_by_recipe_grocery_specialist(self):
         core = (ROOT / "backend" / "app" / "agent" / "core.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("sync_instamart_cart_tool", core)
+        self.assertIn("sync_provider_cart_tool", core)
         self.assertIn("modify_native_grocery_cart_tool", core)
-        self.assertNotIn("mutate_native_and_sync", core)
-        self.assertIn("native_cart_changes on the SAME sync_instamart_cart_tool call", core)
+        coordinator = core.split("kitch_coordinator =", 1)[1]
+        self.assertNotIn("sync_provider_cart_tool,", coordinator.split("before_agent_callback", 1)[0])
+        self.assertIn("All recipes, pantry, native grocery cart", coordinator)
 
     def test_atomic_native_cart_migration_is_backend_only(self):
         migration = (

@@ -393,9 +393,20 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: No entry, wrong food item, or added ingredients the user did
   not mention.
 
+### Scenario 3.4 - Correct, Delete, and Clear Nutrition Safely
+
+- Prompt/action: Correct one named diary entry, delete one explicitly identified
+  entry, then request clearing today's diary.
+- Expected behavior: Correction updates the same row; single deletion executes
+  directly; clearing the day shows an exact-impact confirmation first.
+- Isolation check: Another household member's diary remains unchanged.
+- Pass criteria: Structured state, totals, and UI refresh match each confirmed
+  mutation; cancellation changes nothing.
+
 ## Section 4: Macro Logging via Image
 
-These scenarios verify multimodal food and fridge image handling.
+These scenarios verify that Camera and Gallery share one non-mutating classifier
+before the image is routed to Nutrition Tracker or Recipe/Grocery Planner.
 
 ### Scenario 4.1 - Salad Plate Photo
 
@@ -431,6 +442,17 @@ These scenarios verify multimodal food and fridge image handling.
   is incomplete.
 - Fail criteria: Image ignored, no pantry update, or clearly visible items are
   missed without explanation.
+
+### Scenario 4.3 - Neutral Image Classification and Ambiguity
+
+- Prompt/action: Submit the same meal and pantry fixtures once from Camera and
+  once from Gallery, then submit an image whose purpose is genuinely ambiguous.
+- Expected behavior: Acquisition method never changes routing. Meal goes to
+  Nutrition Tracker; pantry goes to Recipe/Grocery Planner. Ambiguous returns
+  exactly that state, persists nothing, retains the file, and offers **Treat as
+  meal** and **Treat as pantry**.
+- Pass criteria: No confidence threshold is shown, no mutation occurs before
+  classification is resolved, and an override uses the retained file once.
 
 ## Section 5: Grocery List Creation
 
@@ -512,6 +534,29 @@ recommending items already stocked.
 - Fail criteria: Image ignored, pantry not updated, or remaining grocery list
   ignores visible stocked items.
 
+### Scenario 6.3 - Inspect, Edit, Remove, and Empty Pantry
+
+- Prompt/action: Open the Pantry tab, inspect all rows and timestamps, add one
+  item, set and decrement quantities, remove one row, then choose **Mark pantry
+  empty** and cancel once before confirming.
+- Expected behavior: Every successful edit refreshes pantry and native purchase
+  quantities. Single-row removal is direct. Emptying shows exact impact and
+  marks the pantry fully reviewed only after confirmation.
+- Concurrency check: Repeat a mutation with a stale revision and require HTTP
+  409 with no partial pantry/cart change.
+- Pass criteria: The UI never shows only a count, cancellation changes nothing,
+  and confirmed replacement survives refresh.
+
+### Scenario 6.4 - Photo Semantics and Atomic Reconciliation
+
+- Prompt/action: Upload the same current-inventory pantry photo twice, then an
+  explicitly described purchase photo.
+- Expected behavior: Current inventory uses absolute `set` semantics and does
+  not accumulate twice; purchase uses `add`. Required native amounts remain
+  stable while `purchaseAmount`, `purchaseUnit`, and `pantryAllocation` change.
+- Rollback check: Force reconciliation failure and confirm pantry, native cart,
+  revision, and provider review all remain unchanged.
+
 ## Section 7: Ordering App Integration
 
 These four scenarios apply the same functional contract to Zepto and Swiggy
@@ -548,11 +593,13 @@ automated or browser-test order against production.
 
 ### Scenario 7.2 - Provider Cart Synchronization and Reconciliation
 
-- Prerequisite: Select at least two eligible native rows, leave another row
-  unselected, and include one pantry-covered row.
+- Prerequisite: Select at least two rows with positive purchase quantities,
+  leave another unselected, and include one fully pantry-allocated row.
 - Prompt/action: Synchronize with each test provider and inspect the review.
   For Instamart, test both **Move cart items to ordering app** and the explicit
-  chat request **Move my grocery list to Instamart**. Ordinary grocery-planning
+  chat request **Move my grocery list to Instamart**. Also omit the provider
+  name and verify the most recently selected UI provider is used without
+  changing that preference. Ordinary grocery-planning
   prompts must update only Kitch's native cart.
 - Standalone chat check: Ask **Add one Dairy Milk chocolate to my grocery
   cart**. Confirm that a manual native row is saved without a fabricated recipe
@@ -560,14 +607,15 @@ automated or browser-test order against production.
 - Combined chat check: Ask **Add one Dairy Milk chocolate and sync my cart to
   Instamart**. Confirm that the same existing coordinator sync bridge first
   persists the standalone native row, then invokes the Instamart agent with the
-  resulting complete eligible native cart. It must not call a second composite
-  coordinator tool or place an order.
+  resulting complete eligible native cart through Recipe/Grocery Planner's one
+  provider-neutral sync tool. It must not call a coordinator commerce edge-case
+  tool or place an order.
 - Partial-result check: Repeat the combined request with provider address or
   synchronization failure. The atomic native change remains confirmed,
   `UPDATE_GROCERY_CART` is returned, the response says Instamart was not
   synchronized, and no `UPDATE_PROVIDER_CART` action or provider success banner
   appears.
-- Expected behavior: Only selected, non-pantry-covered rows are searched in the
+- Expected behavior: Only selected rows with positive purchase quantities are searched in the
   chosen address context. The complete provider cart is replaced and read back.
   Search results absent from the confirmed cart, mismatched quantities, missing
   IDs, ambiguous availability, or insufficient stock remain unresolved.

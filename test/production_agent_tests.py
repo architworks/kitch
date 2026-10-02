@@ -136,12 +136,12 @@ def chat_request(message: str) -> str:
         raise RuntimeError(f"Chat request failed ({res.status_code}): {res.text}")
     return res.json()["text"]
 
-def upload_photo_request(filename: str, is_fridge_scan: bool, img_bytes: bytes) -> str:
+def upload_photo_request(filename: str, message: str, img_bytes: bytes) -> str:
     """Helper to call live FastAPI /api/upload-photo endpoint."""
     files = {"file": (filename, img_bytes, "image/png")}
     data = {
         "active_user": ACTIVE_USER,
-        "is_fridge_scan": "true" if is_fridge_scan else "false"
+        "message": message,
     }
     res = requests.post(f"{BASE_URL}/api/upload-photo", files=files, data=data)
     if res.status_code != 200:
@@ -351,7 +351,7 @@ def run_tests():
     # 4.1 Plate upload
     prompt_4_1 = "Log this salad plate photo"
     try:
-        reply = upload_photo_request("salad_plate.png", is_fridge_scan=False, img_bytes=SOLID_PNG_BYTES)
+        reply = upload_photo_request("salad_plate.png", message=prompt_4_1, img_bytes=SOLID_PNG_BYTES)
         logs = supabase.table("macro_diary").select("*").eq("profile_id", PROFILE_ID).execute()
         salad_log = next((l for l in logs.data if "salad" in l.get("meal_name", "").lower() or "plate" in l.get("meal_name", "").lower() or "image" in l.get("meal_name", "").lower()), None)
         if salad_log:
@@ -364,7 +364,7 @@ def run_tests():
     # 4.2 Fridge scan
     prompt_4_2 = "Update my pantry with this fridge scan"
     try:
-        reply = upload_photo_request("fridge_inside.png", is_fridge_scan=True, img_bytes=SOLID_PNG_BYTES)
+        reply = upload_photo_request("fridge_inside.png", message=prompt_4_2, img_bytes=SOLID_PNG_BYTES)
         pantry = supabase.table("pantry_stock").select("*").eq("profile_id", PROFILE_ID).execute()
         if pantry.data:
             log_test("4.2", prompt_4_2, f"Successfully parsed fridge items and added them to Supabase pantry stock. Found items: {[p.get('ingredient_name') for p in pantry.data]}", "PASS")
@@ -427,7 +427,7 @@ def run_tests():
     # 6.2 Image fridge scan + "What else do I still need to buy?"
     prompt_6_2 = "Log my fridge scan and tell me what else I still need to buy"
     try:
-        reply = upload_photo_request("fridge_scan_subtraction.png", is_fridge_scan=True, img_bytes=SOLID_PNG_BYTES)
+        reply = upload_photo_request("fridge_scan_subtraction.png", message=prompt_6_2, img_bytes=SOLID_PNG_BYTES)
         # Verify fridge contents updated
         pantry = supabase.table("pantry_stock").select("*").eq("profile_id", PROFILE_ID).execute()
         if pantry.data:

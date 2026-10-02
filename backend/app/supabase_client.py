@@ -53,6 +53,8 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "daily_calorie_target",
         "timezone_name",
         "preferred_grocery_provider",
+        "pantry_revision",
+        "pantry_reviewed_at",
         "created_at",
     ),
     "meal_plans": (
@@ -99,8 +101,9 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "category",
         "source",
         "checked",
-        "already_stocked",
-        "stock_note",
+        "purchase_amount",
+        "purchase_unit",
+        "pantry_allocation",
         "created_at",
         "updated_at",
     ),
@@ -114,6 +117,7 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "fat_g",
         "fiber_g",
         "logged_at",
+        "updated_at",
     ),
     "provider_checkout_drafts": (
         "id",
@@ -166,6 +170,11 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "id", "profile_id", "provider", "provider_environment", "state_hash",
         "code_verifier_ciphertext", "client_id", "redirect_uri", "expires_at",
         "used_at", "created_at",
+    ),
+    "pending_agent_actions": (
+        "id", "profile_id", "active_user", "action_type", "payload",
+        "impact_summary", "status", "expires_at", "consumed_at",
+        "created_at", "updated_at",
     ),
 }
 
@@ -259,12 +268,17 @@ def _normalize_grocery_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
         or "General",
         "source": source,
         "checked": _coerce_bool(item.get("checked", False)),
-        "alreadyStocked": _coerce_bool(
-            item.get("alreadyStocked", item.get("already_stocked", False))
+        "purchaseAmount": float(
+            item.get("purchaseAmount", item.get("purchase_amount", amount))
+            if item.get("purchaseAmount", item.get("purchase_amount")) is not None
+            else amount
         ),
-        "stockNote": str(
-            item.get("stockNote") or item.get("stock_note") or ""
-        ).strip(),
+        "purchaseUnit": str(
+            item.get("purchaseUnit") or item.get("purchase_unit") or item.get("unit") or "piece"
+        ).strip() or "piece",
+        "pantryAllocation": _coerce_json(
+            item.get("pantryAllocation", item.get("pantry_allocation", {})), {}
+        ),
         "recipeGroceryPlanId": (
             item.get("recipeGroceryPlanId")
             or item.get("recipe_grocery_plan_id")
@@ -293,8 +307,9 @@ def _grocery_item_to_row(
         "category": item["category"],
         "source": item["source"],
         "checked": item["checked"],
-        "already_stocked": item["alreadyStocked"],
-        "stock_note": item["stockNote"],
+        "purchase_amount": item["purchaseAmount"],
+        "purchase_unit": item["purchaseUnit"],
+        "pantry_allocation": item["pantryAllocation"],
     }
     if profile_id:
         row["profile_id"] = profile_id
@@ -533,6 +548,7 @@ def update_household_profile(
     household_size: int,
     daily_calorie_target: int = 2000,
     preferred_grocery_provider: str | None = None,
+    timezone_name: str | None = None,
 ) -> Dict[str, Any]:
     payload = {
         "id": get_household_profile_id(),
@@ -543,6 +559,11 @@ def update_household_profile(
     }
     if preferred_grocery_provider is not None:
         payload["preferred_grocery_provider"] = preferred_grocery_provider
+    if timezone_name is not None:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(timezone_name)
+        payload["timezone_name"] = timezone_name
     return _confirmed_row(
         "update_household_profile",
         "profiles",
@@ -703,6 +724,18 @@ def apply_meal_plan_edits(edits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [_meal_row_to_day(row) for row in rows]
 
 
+def remove_future_meal_plan_entries(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    data = _execute(
+        "remove_future_meal_plan_entries", "meal_plans",
+        lambda: supabase.rpc("remove_future_meal_plan_entries", {
+            "p_profile_id": get_household_profile_id(), "p_operations": operations,
+        }).execute(),
+    )
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("remove_future_meal_plan_entries", "meal_plans")
+    return data
+
+
 def build_meal_plan_week(week_start: str | date | None = None) -> Dict[str, Any]:
     timezone_name = get_household_timezone()
     context = calendar_context(timezone_name)
@@ -775,71 +808,56 @@ def get_pantry_stock(user_name: str | None = None) -> List[Dict[str, Any]]:
             "name": row["ingredient_name"],
             "amount": float(row["amount"]),
             "unit": row["unit"],
+            "updatedAt": row.get("updated_at"),
         }
         for row in rows
     ]
 
 
-def add_to_pantry(
-    user_name: str | None,
-    name: str,
-    amount: float,
-    unit: str = "piece",
+def get_pantry_state() -> Dict[str, Any]:
+    profile = get_household_profile()
+    return {
+        "revision": int(profile.get("pantry_revision") or 0),
+        "reviewedAt": profile.get("pantry_reviewed_at"),
+        "items": get_pantry_stock(),
+    }
+
+
+def apply_pantry_inventory_change(
+    *,
+    expected_revision: int,
+    mode: str,
+    items: List[Dict[str, Any]],
+    cart_reconciliation: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    profile_id = get_household_profile_id()
-    name_clean = name.strip()
-    existing = next(
-        (
-            item
-            for item in get_pantry_stock()
-            if item["name"].lower() == name_clean.lower()
-        ),
-        None,
-    )
-    if existing:
-        return _confirmed_row(
-            "add_to_pantry",
-            "pantry_stock",
-            lambda: supabase.table("pantry_stock")
-            .update(
-                {
-                    "amount": float(existing["amount"]) + float(amount),
-                    "unit": unit,
-                }
-            )
-            .eq("profile_id", profile_id)
-            .eq("id", existing["id"])
-            .execute(),
-        )
-    return _confirmed_row(
-        "add_to_pantry",
+    data = _execute(
+        "apply_pantry_inventory_change",
         "pantry_stock",
-        lambda: supabase.table("pantry_stock")
-        .insert(
+        lambda: supabase.rpc(
+            "apply_pantry_inventory_change",
             {
-                "profile_id": profile_id,
-                "ingredient_name": name_clean,
-                "amount": amount,
-                "unit": unit,
-            }
-        )
-        .execute(),
+                "p_profile_id": get_household_profile_id(),
+                "p_expected_revision": int(expected_revision),
+                "p_mode": mode,
+                "p_items": items,
+                "p_cart_reconciliation": cart_reconciliation,
+            },
+        ).execute(),
     )
-
-
-def remove_from_pantry(user_name: str | None, name: str) -> bool:
-    profile_id = get_household_profile_id()
-    _execute(
-        "remove_from_pantry",
-        "pantry_stock",
-        lambda: supabase.table("pantry_stock")
-        .delete()
-        .eq("profile_id", profile_id)
-        .eq("ingredient_name", name)
-        .execute(),
-    )
-    remaining = get_pantry_stock()
-    return not any(item["name"] == name for item in remaining)
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("apply_pantry_inventory_change", "pantry_stock")
+    pantry_rows = _coerce_json(data.get("pantry"), [])
+    cart_rows = _coerce_json(data.get("grocery_cart"), [])
+    data["pantry"] = [
+        {
+            "id": row.get("id"), "name": row.get("ingredient_name"),
+            "amount": float(row.get("amount") or 0), "unit": row.get("unit") or "piece",
+            "updatedAt": row.get("updated_at"),
+        }
+        for row in pantry_rows if isinstance(row, dict)
+    ]
+    data["grocery_cart"] = _grocery_rows_to_items(cart_rows)
+    return data
 
 
 # Grocery cart
@@ -946,10 +964,11 @@ def update_grocery_cart_item(
         "category": "category",
         "source": "source",
         "checked": "checked",
-        "alreadyStocked": "already_stocked",
-        "already_stocked": "already_stocked",
-        "stockNote": "stock_note",
-        "stock_note": "stock_note",
+        "purchaseAmount": "purchase_amount",
+        "purchase_amount": "purchase_amount",
+        "purchaseUnit": "purchase_unit",
+        "purchase_unit": "purchase_unit",
+        "pantryAllocation": "pantry_allocation",
     }
     allowed_updates = {
         field_map[key]: value
@@ -958,6 +977,11 @@ def update_grocery_cart_item(
     }
     if not allowed_updates:
         raise ValueError("No supported grocery item fields were provided.")
+    if "amount" in allowed_updates and "purchase_amount" not in allowed_updates:
+        allowed_updates["purchase_amount"] = allowed_updates["amount"]
+        allowed_updates["pantry_allocation"] = {}
+    if "unit" in allowed_updates and "purchase_unit" not in allowed_updates:
+        allowed_updates["purchase_unit"] = allowed_updates["unit"]
     row = _confirmed_row(
         "update_grocery_cart_item",
         "grocery_cart_items",
@@ -1433,6 +1457,35 @@ def list_recipe_grocery_plans(
     return _recipe_rows_to_plans(rows)
 
 
+def update_recipe_grocery_plan(
+    plan_id: str, plan: Dict[str, Any], cart_items: List[Dict[str, Any]] | None = None,
+    update_cart: bool = False,
+) -> Dict[str, Any]:
+    existing = get_recipe_grocery_plan(plan_id)
+    if not existing:
+        raise ValueError("Recipe+grocery plan not found")
+    return save_recipe_grocery_plan(
+        plan={
+            **existing,
+            **plan,
+            "id": plan_id,
+            "createdAt": existing.get("createdAt"),
+            "updatedAt": _now_iso(),
+        },
+        cart_items=cart_items or [], update_cart=update_cart,
+    )
+
+
+def delete_recipe_grocery_plan(plan_id: str) -> bool:
+    data = _execute(
+        "delete_recipe_grocery_plan", "recipe_grocery_plans",
+        lambda: supabase.rpc("delete_recipe_grocery_plan", {
+            "p_profile_id": get_household_profile_id(), "p_plan_id": plan_id,
+        }).execute(),
+    )
+    return data is True
+
+
 def get_latest_recipe_grocery_plan_metadata(
     user_name: str | None = None,
 ) -> Dict[str, Any] | None:
@@ -1506,6 +1559,100 @@ def clear_macro_diary(user_name: str) -> bool:
         .execute(),
     )
     return len(get_macro_diary(user_name)) == 0
+
+
+def clear_macro_diary_day(user_name: str, day: str | date | None = None) -> int:
+    from zoneinfo import ZoneInfo
+
+    timezone_name = get_household_timezone()
+    target = parse_iso_date(day) if day else datetime.now(ZoneInfo(timezone_name)).date()
+    start = datetime.combine(target, datetime.min.time(), tzinfo=ZoneInfo(timezone_name))
+    end = start + timedelta(days=1)
+    rows = _read_rows(
+        "clear_macro_diary_day", "macro_diary",
+        lambda: supabase.table("macro_diary").delete()
+        .eq("profile_id", get_user_id(user_name))
+        .gte("logged_at", start.astimezone(timezone.utc).isoformat())
+        .lt("logged_at", end.astimezone(timezone.utc).isoformat()).execute(),
+    )
+    return len(rows)
+
+
+def update_macro_entry(user_name: str, entry_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "meal_name": "meal_name", "calories": "calories",
+        "protein": "protein_g", "carbs": "carbs_g", "fat": "fat_g", "fiber": "fiber_g",
+    }
+    payload = {column: updates[key] for key, column in allowed.items() if key in updates}
+    if not payload:
+        raise ValueError("At least one nutrition field is required")
+    payload["updated_at"] = _now_iso()
+    return _confirmed_row(
+        "update_macro_entry", "macro_diary",
+        lambda: supabase.table("macro_diary").update(payload)
+        .eq("profile_id", get_user_id(user_name)).eq("id", int(entry_id)).execute(),
+    )
+
+
+def delete_macro_entry(user_name: str, entry_id: int) -> bool:
+    rows = _read_rows(
+        "delete_macro_entry", "macro_diary",
+        lambda: supabase.table("macro_diary").delete()
+        .eq("profile_id", get_user_id(user_name)).eq("id", int(entry_id)).execute(),
+    )
+    return len(rows) == 1
+
+
+def create_pending_agent_action(
+    *, active_user: str, action_type: str, payload: Dict[str, Any], impact_summary: Dict[str, Any]
+) -> Dict[str, Any]:
+    return _confirmed_row(
+        "create_pending_agent_action", "pending_agent_actions",
+        lambda: supabase.table("pending_agent_actions").insert({
+            "profile_id": get_household_profile_id(), "active_user": active_user,
+            "action_type": action_type, "payload": payload,
+            "impact_summary": impact_summary,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+        }).execute(),
+    )
+
+
+def get_pending_agent_action(action_id: str) -> Dict[str, Any] | None:
+    rows = _read_rows(
+        "get_pending_agent_action", "pending_agent_actions",
+        lambda: supabase.table("pending_agent_actions").select("*")
+        .eq("profile_id", get_household_profile_id()).eq("id", action_id).limit(1).execute(),
+    )
+    return rows[0] if rows else None
+
+
+def claim_pending_agent_action(action_id: str) -> Dict[str, Any] | None:
+    data = _execute(
+        "claim_pending_agent_action", "pending_agent_actions",
+        lambda: supabase.rpc("claim_pending_agent_action", {
+            "p_profile_id": get_household_profile_id(), "p_action_id": action_id,
+        }).execute(),
+    )
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise malformed_persistence_response(
+            "claim_pending_agent_action", "pending_agent_actions"
+        )
+    return data
+
+
+def consume_pending_agent_action(action_id: str, status: str) -> Dict[str, Any]:
+    if status not in {"confirmed", "cancelled", "expired", "failed"}:
+        raise ValueError("Invalid pending-action terminal status")
+    expected_status = "executing" if status in {"confirmed", "failed"} else "pending"
+    return _confirmed_row(
+        "consume_pending_agent_action", "pending_agent_actions",
+        lambda: supabase.table("pending_agent_actions").update({
+            "status": status, "consumed_at": _now_iso(), "updated_at": _now_iso(),
+        }).eq("profile_id", get_household_profile_id()).eq("id", action_id)
+        .eq("status", expected_status).execute(),
+    )
 
 
 def validate_persistence_readiness() -> Dict[str, Any]:

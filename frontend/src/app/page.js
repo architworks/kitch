@@ -568,6 +568,8 @@ const getProviderCartLineData = (match) => {
 };
 
 const cartItemKey = (item) => String(item?.id || item?.name || "");
+const cartPurchaseAmount = (item) => Math.max(0, Number(item?.purchaseAmount ?? item?.amount ?? 0));
+const cartPantryAmount = (item) => Math.max(0, Number(item?.pantryAllocation?.allocated_amount ?? 0));
 
 const INITIAL_CHAT = [];
 
@@ -710,6 +712,12 @@ export default function Home() {
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
   const [userProfiles, setUserProfiles] = useState(createUserProfiles);
   const [pantryStock, setPantryStock] = useState([]);
+  const [pantryRevision, setPantryRevision] = useState(0);
+  const [pantryReviewedAt, setPantryReviewedAt] = useState("");
+  const [nativeCartTab, setNativeCartTab] = useState("cart");
+  const [pantryDrafts, setPantryDrafts] = useState({});
+  const [pantryNewItem, setPantryNewItem] = useState({ name: "", amount: 1, unit: "piece" });
+  const [confirmationDialog, setConfirmationDialog] = useState(null);
   const [mealPlan, setMealPlan] = useState({ days: [] });
   const [chatHistory, setChatHistory] = useState([...INITIAL_CHAT]);
   const [visibleChatCount, setVisibleChatCount] = useState(INITIAL_VISIBLE_CHAT_COUNT);
@@ -787,6 +795,8 @@ export default function Home() {
   const selectedProviderRegistryState = selectedProvider.state || "unknown";
   const providerReviewLastValidatedAt = providerCartReview?.last_validated_at || "";
   const hasProviderCartReview = Boolean(providerCartReview);
+  const pantryReviewNeedsAttention = !pantryReviewedAt
+    || providerFreshnessNow - new Date(pantryReviewedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
 
   const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
     if (!review) {
@@ -821,6 +831,10 @@ export default function Home() {
   const applyLiveState = useCallback((userName, data) => {
     if (data.pantry_stock) {
       setPantryStock(data.pantry_stock);
+    }
+    if (data.pantry) {
+      setPantryRevision(Number(data.pantry.revision || 0));
+      setPantryReviewedAt(data.pantry.reviewedAt || "");
     }
     if (data.macro_diary) {
       setUserProfiles(prev => ({
@@ -1118,7 +1132,7 @@ export default function Home() {
 
   // Sync count statistics
   const totalCount = groceryList.length;
-  const providerSelectedCount = groceryList.filter(item => !item.alreadyStocked && !excludedProviderItemIds.includes(cartItemKey(item))).length;
+  const providerSelectedCount = groceryList.filter(item => cartPurchaseAmount(item) > 0 && !excludedProviderItemIds.includes(cartItemKey(item))).length;
 
   // 3. Application operations
   const triggerBannerAlert = useCallback((text) => {
@@ -1192,7 +1206,7 @@ export default function Home() {
   };
 
   const toggleProviderItemSelection = (item) => {
-    if (providerSyncInFlightRef.current || !item || item.alreadyStocked) return;
+    if (providerSyncInFlightRef.current || !item || cartPurchaseAmount(item) <= 0) return;
     const key = cartItemKey(item);
     if (!key) return;
     invalidateProviderReview();
@@ -1284,8 +1298,9 @@ export default function Home() {
       category,
       source: "manual",
       checked: false,
-      alreadyStocked: false,
-      stockNote: ""
+      purchaseAmount: Number(amount) || 1,
+      purchaseUnit: unit || "piece",
+      pantryAllocation: {}
     };
 
     beginGroceryMutation();
@@ -1652,26 +1667,67 @@ export default function Home() {
   };
 
   const resetDailyLogs = async () => {
+    setConfirmationDialog({
+      title: "Clear today's nutrition entries?",
+      message: `This removes every nutrition entry logged today for ${activeUser}.`,
+      confirmLabel: "Clear today",
+      onConfirm: async () => {
+        const res = await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmed: true }),
+        });
+        await requireSuccessfulResponse(res);
+        await syncLiveState(activeUser);
+        triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
+      },
+    });
+  };
+
+  const patchPantry = async (changes) => {
     try {
-      const res = await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
-        method: "POST"
+      const res = await fetch(apiUrl("/api/pantry"), {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_revision: pantryRevision, changes }),
       });
       await requireSuccessfulResponse(res);
-      const data = await fetchLiveState(activeUser);
-      applyLiveState(activeUser, data);
-      triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
-    } catch (e) {
-      console.error("Failed to clear macro logs in DB", e);
-      triggerBannerAlert(apiErrorMessage(e, "Could not clear the plate logs."));
+      await syncLiveState(activeUser);
+      invalidateProviderReview();
+      return true;
+    } catch (error) {
+      triggerBannerAlert(apiErrorMessage(error, "The pantry change could not be saved."));
+      return false;
     }
   };
 
-  const stagePhotoForInput = (file, isFridgeScan) => {
+  const savePantryRow = async (item) => {
+    const draft = pantryDrafts[item.id] || item;
+    const saved = await patchPantry([{ action: "set", id: item.id, name: draft.name,
+      amount: Number(draft.amount), unit: draft.unit || "piece" }]);
+    if (saved) setPantryDrafts(current => { const next = { ...current }; delete next[item.id]; return next; });
+  };
+
+  const markPantryEmpty = () => setConfirmationDialog({
+    title: "Mark the pantry empty?",
+    message: `This will remove all ${pantryStock.length} pantry item(s), recalculate purchase quantities, and invalidate any provider review.`,
+    confirmLabel: "Mark empty",
+    onConfirm: async () => {
+      const res = await fetch(apiUrl("/api/pantry"), {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_revision: pantryRevision, items: [], confirmed: true }),
+      });
+      await requireSuccessfulResponse(res);
+      await syncLiveState(activeUser);
+      invalidateProviderReview();
+      triggerBannerAlert("Pantry marked empty.");
+    },
+  });
+
+  const stagePhotoForInput = (file, source) => {
     if (!file) return;
 
     setPendingPhoto({
       file,
-      isFridgeScan
+      source
     });
     setSmartDockExpanded(true);
   };
@@ -1753,7 +1809,22 @@ export default function Home() {
         } else if (act.type === "UPDATE_PROVIDER_CART") {
           setSelectedOrderingProvider(act.provider || "swiggy_instamart");
           setActiveTab("groceries");
-          triggerBannerAlert("Instamart cart prepared. Review the confirmed products before checkout.");
+          triggerBannerAlert("Provider cart prepared. Review the confirmed products before checkout.");
+        } else if (act.type === "CONFIRM_DESTRUCTIVE_ACTION") {
+          setConfirmationDialog({
+            title: act.impact?.title || "Confirm this change?",
+            message: act.impact?.message || "This action changes shared household state.",
+            confirmLabel: "Confirm",
+            onConfirm: async () => {
+              const confirmRes = await fetch(apiUrl(`/api/agent-actions/${act.action_id}/confirm`), { method: "POST" });
+              await requireSuccessfulResponse(confirmRes);
+              await syncLiveState(activeUser);
+              triggerBannerAlert("Confirmed change completed.");
+            },
+            onCancel: async () => {
+              await fetch(apiUrl(`/api/agent-actions/${act.action_id}/cancel`), { method: "POST" });
+            },
+          });
         }
       }
     } catch (e) {
@@ -1786,7 +1857,7 @@ export default function Home() {
       const photo = pendingPhoto;
       setChatInput("");
       setPendingPhoto(null);
-      handleRealPhotoUpload(photo.file, photo.isFridgeScan, text);
+      handleRealPhotoUpload(photo.file, text);
       return;
     }
 
@@ -1797,29 +1868,31 @@ export default function Home() {
   };
 
   // 5. Real Vision Camera scanning & upload workflow
-  const handleRealPhotoUpload = async (file, isFridgeScan, accompanyingText = "") => {
+  const handleRealPhotoUpload = async (file, accompanyingText = "", classificationOverride = "") => {
     if (!file) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const trimmedText = accompanyingText.trim();
-    const scanLabel = isFridgeScan ? "fridge scan" : "plate photo";
+    const scanLabel = "image";
 
     setSmartDockExpanded(true);
-    setChatHistory(prev => [
-      ...prev,
-      {
-        sender: "user",
-        text: trimmedText
-          ? `📷 *Attached ${scanLabel}: ${file.name}*\n\n${trimmedText}`
-          : `📷 *Attached ${scanLabel}: ${file.name}*`,
-        time
-      }
-    ]);
+    if (!classificationOverride) {
+      setChatHistory(prev => [
+        ...prev,
+        {
+          sender: "user",
+          text: trimmedText
+            ? `📷 *Attached ${scanLabel}: ${file.name}*\n\n${trimmedText}`
+            : `📷 *Attached ${scanLabel}: ${file.name}*`,
+          time
+        }
+      ]);
+    }
 
     // Show live scanning overlay
     setScanningOverlay({
       active: true,
-      title: isFridgeScan ? "Fridge Camera Scanner (Live)" : "Culinary Plate Scanner (Live)",
+      title: "Kitch Vision Scanner",
       steps: [
         "🔍 Establishing connection to Kitch backend...",
         `⚡ Uploading image bytes: ${file.name}...`
@@ -1833,8 +1906,8 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("active_user", activeUser);
-      formData.append("is_fridge_scan", isFridgeScan ? "true" : "false");
       formData.append("message", trimmedText);
+      if (classificationOverride) formData.append("classification_override", classificationOverride);
 
       setScanningOverlay(prev => ({
         ...prev,
@@ -1854,6 +1927,19 @@ export default function Home() {
       }));
 
       const data = await res.json();
+      if (data.status === "needs_clarification") {
+        setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
+        setPendingPhoto({ file, source: "clarification", accompanyingText: trimmedText });
+        setConfirmationDialog({
+          title: data.question || "How should Kitch treat this image?",
+          message: "Nothing has been saved yet.",
+          choices: [
+            { label: "Treat as meal", action: () => handleRealPhotoUpload(file, trimmedText, "meal") },
+            { label: "Treat as pantry", action: () => handleRealPhotoUpload(file, trimmedText, "pantry") },
+          ],
+        });
+        return;
+      }
       
       // Refresh DB state to get OCR ingredients added to pantry or macro plates logged
       await syncLiveState(activeUser);
@@ -1872,7 +1958,8 @@ export default function Home() {
         }
       ]);
 
-      triggerBannerAlert(isFridgeScan ? "Fridge scanned successfully!" : "Plate logged successfully!");
+      setPendingPhoto(null);
+      triggerBannerAlert(data.classification === "pantry" ? "Pantry updated from image." : "Meal logged from image.");
 
     } catch (e) {
       console.error("Real photo upload error", e);
@@ -1936,7 +2023,7 @@ export default function Home() {
 
   // Items checkout checklist
   const checkoutItems = groceryList
-    .filter(item => !item.alreadyStocked && !excludedProviderItemIds.includes(cartItemKey(item)))
+    .filter(item => cartPurchaseAmount(item) > 0 && !excludedProviderItemIds.includes(cartItemKey(item)))
     .map(item => ({
       id: item.id,
       name: item.name,
@@ -1969,7 +2056,7 @@ export default function Home() {
   const recipeCartItems = recipeLinkedCartItems.length > 0 || latestRecipeGroceryPlan?.updatesCart
     ? recipeLinkedCartItems
     : [];
-  const recipeNeededCartItems = recipeCartItems.filter(item => !item.alreadyStocked);
+  const recipeNeededCartItems = recipeCartItems.filter(item => cartPurchaseAmount(item) > 0);
 
   const groupedGroceryCart = groceryList.reduce((groups, item) => {
     const category = item.category || "General";
@@ -1978,9 +2065,9 @@ export default function Home() {
     return groups;
   }, {});
   const groceryCategoryCount = Object.keys(groupedGroceryCart).length;
-  const stockedCount = groceryList.filter(item => item.alreadyStocked).length;
+  const stockedCount = groceryList.filter(item => cartPurchaseAmount(item) <= 0).length;
   const pendingBuyCount = checkoutItems.length;
-  const eligibleBuyCount = groceryList.filter(item => !item.alreadyStocked).length;
+  const eligibleBuyCount = groceryList.filter(item => cartPurchaseAmount(item) > 0).length;
   const providerReviewStatus = providerCartReview?.status;
   const providerMatchedItems = Array.isArray(providerCartReview?.matched_items)
     ? providerCartReview.matched_items
@@ -3101,10 +3188,10 @@ export default function Home() {
                         {recipeCartItems.length === 0 ? (
                           <div className="recipe-empty-note">This recipe has not populated the native grocery cart yet.</div>
                         ) : recipeCartItems.map((item, index) => (
-                          <div key={item.id || `${item.name}-${index}`} className={`ingredient-cart-row ${item.alreadyStocked ? "stocked" : ""}`}>
-                            <span className="ingredient-cart-dot" aria-hidden="true">{item.alreadyStocked ? "✓" : ""}</span>
+                          <div key={item.id || `${item.name}-${index}`} className={`ingredient-cart-row ${cartPurchaseAmount(item) <= 0 ? "stocked" : ""}`}>
+                            <span className="ingredient-cart-dot" aria-hidden="true">{cartPurchaseAmount(item) <= 0 ? "✓" : ""}</span>
                             <strong>{item.name}</strong>
-                            <em>{item.alreadyStocked ? "In pantry" : `${Math.round(item.amount * 100) / 100} ${item.unit}`}</em>
+                            <em>{cartPurchaseAmount(item) <= 0 ? "In pantry" : formatCartQuantity(cartPurchaseAmount(item), item.purchaseUnit || item.unit)}</em>
                           </div>
                         ))}
                       </div>
@@ -3197,12 +3284,13 @@ export default function Home() {
                     >
                       <div className="native-cart-details-inner">
                         <div className="cart-tabs-row">
-                          <button type="button" className="active">My List <span>{totalCount}</span></button>
-                          <button type="button">Pantry <span>{pantryStock.length}</span></button>
+                          <button type="button" className={nativeCartTab === "cart" ? "active" : ""} onClick={() => setNativeCartTab("cart")}>My List <span>{totalCount}</span></button>
+                          <button type="button" className={nativeCartTab === "pantry" ? "active" : ""} onClick={() => setNativeCartTab("pantry")}>Pantry <span>{pantryStock.length}</span></button>
                           <button type="button" disabled>Buy Again</button>
                           <button type="button" disabled>Past Orders</button>
                         </div>
 
+                      {nativeCartTab === "cart" ? <>
                       <div className="native-cart-meta">
                         <strong>{totalCount} items</strong>
                         <span>{groceryCategoryCount} categories</span>
@@ -3231,23 +3319,27 @@ export default function Home() {
 
                             {items.map((item, index) => {
                               const itemAmount = Number(item.amount) || 1;
-                              const haveText = item.alreadyStocked ? formatCartQuantity(item.amount, item.unit) : "0";
-                              const toBuyText = item.alreadyStocked ? "—" : formatCartQuantity(item.amount, item.unit);
-                              const selectedForProvider = !item.alreadyStocked && !excludedProviderItemIds.includes(cartItemKey(item));
+                              const haveText = cartPantryAmount(item) > 0
+                                ? formatCartQuantity(cartPantryAmount(item), item.pantryAllocation?.allocated_unit || item.unit)
+                                : "0";
+                              const toBuyText = cartPurchaseAmount(item) > 0
+                                ? formatCartQuantity(cartPurchaseAmount(item), item.purchaseUnit || item.unit)
+                                : "—";
+                              const selectedForProvider = cartPurchaseAmount(item) > 0 && !excludedProviderItemIds.includes(cartItemKey(item));
                               return (
-                                <div key={item.id || `${item.name}-${index}`} className={`native-cart-row ${!selectedForProvider ? "excluded" : ""} ${item.alreadyStocked ? "stocked" : ""}`}>
+                                <div key={item.id || `${item.name}-${index}`} className={`native-cart-row ${!selectedForProvider ? "excluded" : ""} ${cartPurchaseAmount(item) <= 0 ? "stocked" : ""}`}>
                                   <label className="native-cart-check">
                                     <input
                                       type="checkbox"
                                       aria-label={`Send ${item.name} to ${selectedProvider.label}`}
                                       checked={selectedForProvider}
-                                      disabled={item.alreadyStocked || isProviderSyncing}
+                                      disabled={cartPurchaseAmount(item) <= 0 || isProviderSyncing}
                                       onChange={() => toggleProviderItemSelection(item)}
                                     />
                                   </label>
                                   <div className="native-cart-name">
                                     <strong>{item.name}</strong>
-                                    <span>{item.source === "manual" ? "Manual" : "Recipe planned"}{item.stockNote ? ` · ${item.stockNote}` : ""}</span>
+                                    <span>{item.source === "manual" ? "Manual" : "Recipe planned"}</span>
                                   </div>
                                   <div className="native-cart-quantity">
                                     <button type="button" disabled={isProviderSyncing} onClick={() => updateGroceryCartItemDetails(item, { amount: Math.max(0.1, itemAmount - 1) })}>−</button>
@@ -3304,6 +3396,42 @@ export default function Home() {
                           </select>
                           <button type="button" disabled={isProviderSyncing} onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
                         </div>
+                      </> : (
+                        <div className="pantry-manager">
+                          <div className="pantry-manager-heading">
+                            <div>
+                              <h3>Household pantry</h3>
+                              <p className={pantryReviewNeedsAttention ? "pantry-review-warning" : ""}>
+                                {pantryReviewedAt
+                                  ? `${pantryReviewNeedsAttention ? "Review recommended · " : ""}Last fully reviewed ${formatRelativeCheckedTime(pantryReviewedAt)}`
+                                  : "Review recommended · This pantry has not been fully reviewed yet."}
+                              </p>
+                            </div>
+                            <button type="button" className="danger-outline" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
+                          </div>
+                          {pantryStock.length === 0 ? (
+                            <div className="native-cart-empty"><strong>The pantry is empty.</strong><p>Add an item below or upload a pantry photo.</p></div>
+                          ) : pantryStock.map(item => {
+                            const draft = pantryDrafts[item.id] || item;
+                            return (
+                              <div className="pantry-manager-row" key={item.id}>
+                                <input aria-label={`Pantry item ${item.name}`} value={draft.name} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, name: event.target.value } }))} />
+                                <input aria-label={`Amount of ${item.name}`} type="number" min="0" step="0.1" value={draft.amount} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: event.target.value } }))} />
+                                <input aria-label={`Unit for ${item.name}`} value={draft.unit} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, unit: event.target.value } }))} />
+                                <span>{item.updatedAt ? formatRelativeCheckedTime(item.updatedAt) : "Unknown update time"}</span>
+                                <button type="button" disabled={!pantryDrafts[item.id]} onClick={() => savePantryRow(item)}>Save</button>
+                                <button type="button" aria-label={`Remove ${item.name} from pantry`} onClick={() => patchPantry([{ action: "remove", id: item.id }])}>×</button>
+                              </div>
+                            );
+                          })}
+                          <div className="cart-add-row pantry-add-row">
+                            <input placeholder="Add pantry item..." value={pantryNewItem.name} onChange={event => setPantryNewItem(current => ({ ...current, name: event.target.value }))} />
+                            <input type="number" min="0.1" step="0.1" value={pantryNewItem.amount} onChange={event => setPantryNewItem(current => ({ ...current, amount: event.target.value }))} />
+                            <input value={pantryNewItem.unit} onChange={event => setPantryNewItem(current => ({ ...current, unit: event.target.value }))} />
+                            <button type="button" disabled={!pantryNewItem.name.trim()} onClick={async () => { const saved = await patchPantry([{ action: "add", name: pantryNewItem.name, amount: Number(pantryNewItem.amount), unit: pantryNewItem.unit }]); if (saved) setPantryNewItem({ name: "", amount: 1, unit: "piece" }); }}>Add to pantry</button>
+                          </div>
+                        </div>
+                      )}
                       </div>
                     </div>
                   </section>
@@ -3804,7 +3932,7 @@ export default function Home() {
                       disabled={isProviderSyncing}
                       onClick={() => {
                         invalidateProviderReview();
-                        setExcludedProviderItemIds(groceryList.filter(item => !item.alreadyStocked).map(cartItemKey).filter(Boolean));
+                        setExcludedProviderItemIds(groceryList.filter(item => cartPurchaseAmount(item) > 0).map(cartItemKey).filter(Boolean));
                       }}
                     >
                       Clear {selectedProvider.label} selection
@@ -3860,10 +3988,10 @@ export default function Home() {
           {pendingPhoto && (
             <div className="pending-attachment-chip">
               <span className="pending-attachment-preview" aria-hidden="true">
-                {pendingPhoto.isFridgeScan ? "📷" : "🖼️"}
+                {pendingPhoto.source === "camera" ? "📷" : "🖼️"}
               </span>
               <div>
-                <span>{pendingPhoto.isFridgeScan ? "Fridge scan" : "Plate photo"}</span>
+                <span>{pendingPhoto.source === "camera" ? "Camera" : "Gallery"}</span>
                 <strong>{pendingPhoto.file.name}</strong>
               </div>
               <button type="button" aria-label="Remove selected image" onClick={clearPendingPhoto}>×</button>
@@ -3890,36 +4018,36 @@ export default function Home() {
               <path d="M9 12h4" />
             </svg>
           </button>
-          <label className="input-icon-btn" aria-label="Attach plate image">
+          <label className="input-icon-btn" aria-label="Choose image from gallery">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <rect x="4" y="5" width="16" height="14" rx="2" />
               <circle cx="9" cy="10" r="1.5" />
               <path d="m5 17 5-5 4 4 2-2 3 3" />
             </svg>
             <input
-              name="plate-image-upload"
+              name="gallery-image-upload"
               type="file"
               accept="image/*"
               className="hidden-file-input"
               onChange={(e) => {
-                stagePhotoForInput(e.target.files[0], false);
+                stagePhotoForInput(e.target.files[0], "gallery");
                 e.target.value = "";
               }}
             />
           </label>
-          <label className="input-icon-btn" aria-label="Attach fridge scan image">
+          <label className="input-icon-btn" aria-label="Take a photo with camera">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M7 7.5 8.4 5h7.2L17 7.5h2a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2h2Z" />
               <circle cx="12" cy="13" r="3.25" />
             </svg>
             <input
-              name="camera-fridge-upload"
+              name="camera-image-upload"
               type="file"
               accept="image/*"
               capture="environment"
               className="hidden-file-input"
               onChange={(e) => {
-                stagePhotoForInput(e.target.files[0], true);
+                stagePhotoForInput(e.target.files[0], "camera");
                 e.target.value = "";
               }}
             />
@@ -3927,6 +4055,31 @@ export default function Home() {
           <button type="submit" className="smart-send-btn" disabled={isChatTyping || (!chatInput.trim() && !pendingPhoto)}>↑</button>
         </div>
       </form>
+
+      {confirmationDialog && (
+        <div className="confirmation-backdrop" role="presentation">
+          <section className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+            <h2 id="confirmation-title">{confirmationDialog.title}</h2>
+            <p>{confirmationDialog.message}</p>
+            <div className="confirmation-actions">
+              {confirmationDialog.choices ? confirmationDialog.choices.map(choice => (
+                <button key={choice.label} type="button" onClick={() => { setConfirmationDialog(null); choice.action(); }}>{choice.label}</button>
+              )) : (
+                <button type="button" className="primary" onClick={async () => {
+                  const action = confirmationDialog.onConfirm;
+                  setConfirmationDialog(null);
+                  try { await action(); } catch (error) { triggerBannerAlert(apiErrorMessage(error, "The confirmed change could not be completed.")); }
+                }}>{confirmationDialog.confirmLabel || "Confirm"}</button>
+              )}
+              <button type="button" onClick={async () => {
+                const cancel = confirmationDialog.onCancel;
+                setConfirmationDialog(null);
+                if (cancel) await cancel();
+              }}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* DYNAMIC ALERT BANNER */}
       {alertBanner.show && (

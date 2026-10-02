@@ -11,7 +11,7 @@ from app.supabase_client import (
     get_meal_schedule as db_get_meal_schedule,
     replace_meal_plan_range as db_replace_meal_plan_range,
     get_pantry_stock as db_get_pantry_stock,
-    add_to_pantry as db_add_to_pantry,
+    get_pantry_state as db_get_pantry_state,
     log_macros as db_log_macros,
     get_macro_diary as db_get_macro_diary,
     get_grocery_cart as db_get_grocery_cart,
@@ -20,6 +20,14 @@ from app.supabase_client import (
     save_recipe_grocery_plan as db_save_recipe_grocery_plan,
     get_recipe_grocery_plan as db_get_recipe_grocery_plan,
     list_recipe_grocery_plans as db_list_recipe_grocery_plans,
+    update_macro_entry as db_update_macro_entry,
+    delete_macro_entry as db_delete_macro_entry,
+    update_household_profile as db_update_household_profile,
+    get_household_profile as db_get_household_profile,
+    create_pending_agent_action as db_create_pending_agent_action,
+    remove_future_meal_plan_entries as db_remove_future_meal_plan_entries,
+    update_recipe_grocery_plan as db_update_recipe_grocery_plan,
+    delete_recipe_grocery_plan as db_delete_recipe_grocery_plan,
 )
 from app.checkout_drafts import draft_row_to_review
 from app.providers.registry import provider_registry
@@ -128,6 +136,26 @@ def update_dated_meals_tool(
     "message": f"Successfully updated {len(saved)} dated meal-plan days in durable storage."
   }
 
+
+def remove_future_meals_tool(
+  operations: List[Dict[str, Any]], user_name: str = DEFAULT_ACTIVE_USER,
+) -> Dict[str, Any]:
+  """Remove future meal slots, dates, or ranges; bulk requests require confirmation."""
+  from app.agent_confirmation import record_confirmation
+  parsed = _ensure_dict(operations)
+  if not isinstance(parsed, list) or not parsed:
+    return {"status": "error", "message": "operations must be a non-empty list"}
+  is_bulk = len(parsed) > 1 or any(str(op.get("action") or "").lower() == "range" for op in parsed)
+  if not is_bulk:
+    return {"status": "success", **db_remove_future_meal_plan_entries(parsed)}
+  pending = db_create_pending_agent_action(
+    active_user=user_name, action_type="remove_meal_plans", payload={"operations": parsed},
+    impact_summary={"title": "Remove these planned meals?", "message": f"This removes meals across {len(parsed)} requested scope(s)."},
+  )
+  action = {"type": "CONFIRM_DESTRUCTIVE_ACTION", "action_id": pending["id"], "impact": pending["impact_summary"]}
+  record_confirmation(action)
+  return {"status": "confirmation_required", **action}
+
 # --- Section 2: Supabase Pantry Stock & Logs ---
 def get_pantry_stock_tool(user_name: str = "") -> List[Dict[str, Any]]:
   """
@@ -234,6 +262,20 @@ def list_recipe_grocery_plans_tool(limit: int = 10) -> Dict[str, Any]:
   except (TypeError, ValueError):
     safe_limit = 10
   return {"status": "success", "plans": db_list_recipe_grocery_plans(limit=safe_limit)}
+
+
+def update_recipe_grocery_plan_tool(
+  plan_id: str, plan: Dict[str, Any], cart_items: List[Dict[str, Any]] | None = None,
+  update_cart: bool = False,
+) -> Dict[str, Any]:
+  """Revise an existing recipe artifact in place and update its linked planned rows when requested."""
+  saved = db_update_recipe_grocery_plan(plan_id, _ensure_dict(plan), _ensure_dict(cart_items or []), update_cart)
+  return {"status": "success", "plan": saved}
+
+
+def delete_recipe_grocery_plan_tool(plan_id: str) -> Dict[str, Any]:
+  """Delete one explicitly identified recipe and its linked agent-generated cart rows."""
+  return {"status": "success" if db_delete_recipe_grocery_plan(plan_id) else "not_found"}
 
 def _resolve_memory_service(tool_context: ToolContext = None):
   mem_svc = None
@@ -374,17 +416,17 @@ def get_grocery_checkout_status_tool(provider: str) -> Dict[str, Any]:
     "order_blockers": review.get("order_blockers") or [],
   }
 
-async def sync_instamart_cart_tool(
+async def sync_provider_cart_tool(
   user_request: str,
+  provider: str = "",
   cart_item_ids: List[str] | None = None,
   selected_address_id: str = "",
   native_cart_changes: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
   """
-  Synchronize the native household grocery cart to Swiggy Instamart after an
-  explicit user instruction. For a combined request such as "add chocolate and
-  sync to Instamart," apply native_cart_changes first, then synchronize the
-  complete eligible native cart. This reversible operation can never order.
+  Synchronize the native household grocery cart to an explicitly named
+  provider or the provider most recently selected in the UI. This reversible
+  operation can never authenticate, change the default provider, or order.
   """
   from app.main import grocery_checkout_service
 
@@ -392,26 +434,27 @@ async def sync_instamart_cart_tool(
   if not request:
     return {
       "status": "error",
-      "message": "An explicit user request to synchronize Instamart is required.",
+      "message": "An explicit user request to synchronize an ordering app is required.",
     }
   result = await grocery_checkout_service.sync_from_chat(
+    provider_id=str(provider or "").strip(),
     cart_item_ids=[str(value) for value in (cart_item_ids or [])],
     selected_address_id=str(selected_address_id or ""),
     user_instruction=request,
     native_cart_changes=native_cart_changes or [],
   )
   review = result.get("review") or {}
-  provider_cart_changed = bool(review) and result.get("status") not in {"error", "partial"}
+  provider_cart_changed = bool(review) and result.get("status") != "error"
   return {
     "status": result.get("status"),
-    "provider": "swiggy_instamart",
+    "provider": result.get("provider") or provider,
     "matched_item_count": len(review.get("matched_items") or []),
     "unavailable_items": review.get("unavailable_items") or [],
     "selected_address_id": review.get("selected_address_id"),
     "address_selection": result.get("address_selection"),
     "native_cart_changed": bool(result.get("native_cart_changed")),
     "provider_cart_changed": provider_cart_changed,
-    "message": review.get("message") or result.get("message") or "Instamart cart synchronized.",
+    "message": review.get("message") or result.get("message") or "Provider cart synchronized.",
     "ui_action": (
       "UPDATE_PROVIDER_CART"
       if provider_cart_changed
@@ -419,12 +462,51 @@ async def sync_instamart_cart_tool(
     ),
   }
 
-def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:
-  """
-  Add or update an ingredient in the shared household pantry/fridge stock database on Supabase.
-  """
-  db_add_to_pantry(user_name, ingredient_name, amount, unit)
-  return f"Successfully added {amount} {unit} of '{ingredient_name}' to the shared household pantry stock."
+def get_pantry_state_tool(user_name: str = "") -> Dict[str, Any]:
+  """Read pantry rows, optimistic revision, and full-review timestamp."""
+  return db_get_pantry_state()
+
+
+async def patch_pantry_tool(
+  changes: List[Dict[str, Any]], expected_revision: int,
+  user_name: str = DEFAULT_ACTIVE_USER,
+) -> Dict[str, Any]:
+  """Atomically add, set, adjust, or remove pantry rows and reconcile the native cart."""
+  from app.pantry_service import mutate_pantry
+  parsed = _ensure_dict(changes)
+  if not isinstance(parsed, list) or not parsed:
+    return {"status": "error", "message": "changes must be a non-empty list"}
+  result = await mutate_pantry(expected_revision=expected_revision, mode="patch", items=parsed)
+  return {"status": "success", **result}
+
+
+async def replace_pantry_tool(
+  items: List[Dict[str, Any]], expected_revision: int,
+  user_name: str = DEFAULT_ACTIVE_USER,
+) -> Dict[str, Any]:
+  """Request confirmation for a complete pantry replacement, including empty."""
+  from app.agent_confirmation import record_confirmation
+  parsed = _ensure_dict(items)
+  if not isinstance(parsed, list):
+    return {"status": "error", "message": "items must be a list"}
+  pending = db_create_pending_agent_action(
+    active_user=user_name, action_type="replace_pantry",
+    payload={"expected_revision": expected_revision, "items": parsed},
+    impact_summary={
+      "title": "Replace the complete pantry?",
+      "message": (
+        "This will mark the pantry empty." if not parsed
+        else f"This will replace every pantry row with {len(parsed)} observed item(s)."
+      ),
+      "item_count": len(parsed),
+    },
+  )
+  action = {
+    "type": "CONFIRM_DESTRUCTIVE_ACTION", "action_id": pending["id"],
+    "impact": pending["impact_summary"],
+  }
+  record_confirmation(action)
+  return {"status": "confirmation_required", **action}
 
 def log_macros_tool(
     user_name: str, 
@@ -446,3 +528,47 @@ def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
   Query Supabase to fetch the daily plate log history and macros for a user.
   """
   return db_get_macro_diary(user_name)
+
+
+def update_nutrition_entry_tool(user_name: str, entry_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+  """Correct one explicitly identified nutrition entry."""
+  return {"status": "success", "entry": db_update_macro_entry(user_name, entry_id, _ensure_dict(updates))}
+
+
+def delete_nutrition_entry_tool(user_name: str, entry_id: int) -> Dict[str, Any]:
+  """Delete one explicitly identified nutrition entry."""
+  return {"status": "success" if db_delete_macro_entry(user_name, entry_id) else "not_found"}
+
+
+def clear_nutrition_day_tool(
+  user_name: str, diary_date: str = "",
+) -> Dict[str, Any]:
+  """Request confirmation before clearing all nutrition entries for one day."""
+  from app.agent_confirmation import record_confirmation
+  pending = db_create_pending_agent_action(
+    active_user=user_name, action_type="clear_nutrition_day",
+    payload={"user_name": user_name, "date": diary_date},
+    impact_summary={
+      "title": "Clear this nutrition day?",
+      "message": f"This removes every nutrition entry for {user_name} on {diary_date or 'today'}.",
+    },
+  )
+  action = {"type": "CONFIRM_DESTRUCTIVE_ACTION", "action_id": pending["id"], "impact": pending["impact_summary"]}
+  record_confirmation(action)
+  return {"status": "confirmation_required", **action}
+
+
+def update_household_settings_tool(
+  diet_preference: str = "", household_size: int = 0,
+  daily_calorie_target: int = 0, timezone_name: str = "",
+) -> Dict[str, Any]:
+  """Update household settings; provider selection is intentionally unavailable."""
+  current = db_get_household_profile()
+  profile = db_update_household_profile(
+    diet_preference=diet_preference or current["diet_preference"],
+    household_size=household_size or current["household_size"],
+    daily_calorie_target=daily_calorie_target or current["daily_calorie_target"],
+    preferred_grocery_provider=current.get("preferred_grocery_provider"),
+    timezone_name=timezone_name or current.get("timezone_name"),
+  )
+  return {"status": "success", "profile": profile}
