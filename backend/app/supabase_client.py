@@ -857,6 +857,30 @@ def get_grocery_cart(user_name: str | None = None) -> List[Dict[str, Any]]:
     return _grocery_rows_to_items(rows)
 
 
+def apply_native_grocery_cart_changes(
+    changes: List[Dict[str, Any]],
+    user_name: str | None = None,
+) -> List[Dict[str, Any]]:
+    """Atomically apply explicit standalone native-cart changes."""
+    data = _execute(
+        "apply_native_grocery_cart_changes",
+        "grocery_cart_items",
+        lambda: supabase.rpc(
+            "apply_native_grocery_cart_changes",
+            {
+                "p_profile_id": get_household_profile_id(),
+                "p_changes": changes,
+            },
+        ).execute(),
+    )
+    if not isinstance(data, list):
+        raise malformed_persistence_response(
+            "apply_native_grocery_cart_changes",
+            "grocery_cart_items",
+        )
+    return _grocery_rows_to_items(data)
+
+
 def replace_planned_grocery_cart(
     items: List[Dict[str, Any]],
     user_name: str | None = None,

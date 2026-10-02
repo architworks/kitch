@@ -15,7 +15,7 @@ from app.supabase_client import (
     log_macros as db_log_macros,
     get_macro_diary as db_get_macro_diary,
     get_grocery_cart as db_get_grocery_cart,
-    replace_planned_grocery_cart as db_replace_planned_grocery_cart,
+    apply_native_grocery_cart_changes as db_apply_native_grocery_cart_changes,
     clear_planned_grocery_cart as db_clear_planned_grocery_cart,
     save_recipe_grocery_plan as db_save_recipe_grocery_plan,
     get_recipe_grocery_plan as db_get_recipe_grocery_plan,
@@ -141,25 +141,33 @@ def get_grocery_cart_tool(user_name: str = "") -> List[Dict[str, Any]]:
   """
   return db_get_grocery_cart()
 
-def save_grocery_cart_tool(items: List[Dict[str, Any]], user_name: str = "") -> Dict[str, Any]:
-  """
-  Replace the shared household grocery cart with a structured provider-agnostic list.
-  Call this after compiling groceries so the Pantry/Grocery page updates.
+def modify_native_grocery_cart_tool(
+  changes: List[Dict[str, Any]],
+  user_name: str = "",
+) -> Dict[str, Any]:
+  """Apply explicit standalone item changes to the durable native Kitch cart.
 
-  Args:
-      items: List of grocery item dictionaries. Each item should include name,
-             amount, unit, and category. Optional flags: checked, alreadyStocked.
-      user_name: Ignored for now. Grocery cart is shared by the configured household.
-  """
-  items = _ensure_dict(items)
-  if not isinstance(items, list):
-    return {"status": "error", "message": f"Expected a list of grocery items, got {type(items).__name__}"}
+  This tool is owned by the grocery specialist. It does not generate recipes,
+  search an ordering provider, synchronize a provider cart, or place an order.
 
-  saved = db_replace_planned_grocery_cart(items)
+  Each change requires an action:
+  - add: add the amount to an exact existing name/unit row, or create a manual row.
+  - set/update: set fields on a row resolved by item_id or exact name.
+  - remove/delete: delete a row resolved by item_id or exact name.
+  """
+  parsed = _ensure_dict(changes)
+  if not isinstance(parsed, list) or not parsed:
+    return {"status": "error", "message": "changes must be a non-empty list"}
+
+  if not all(isinstance(change, dict) for change in parsed):
+    return {"status": "error", "message": "Each native-cart change must be an object."}
+  cart = db_apply_native_grocery_cart_changes(parsed)
   return {
     "status": "success",
-    "message": f"Saved {len(saved)} grocery cart items for the shared household.",
-    "items": saved
+    "message": f"Applied {len(parsed)} standalone native-cart change(s) atomically.",
+    "applied_changes": parsed,
+    "grocery_cart": cart,
+    "provider_cart_changed": False,
   }
 
 def clear_planned_grocery_cart_tool(user_name: str = "") -> Dict[str, Any]:
@@ -370,11 +378,13 @@ async def sync_instamart_cart_tool(
   user_request: str,
   cart_item_ids: List[str] | None = None,
   selected_address_id: str = "",
+  native_cart_changes: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
   """
-  Synchronize the existing native household grocery cart to Swiggy Instamart
-  only after an explicit user instruction to move, sync, or refresh it. This
-  reversible cart operation can never place an order.
+  Synchronize the native household grocery cart to Swiggy Instamart after an
+  explicit user instruction. For a combined request such as "add chocolate and
+  sync to Instamart," apply native_cart_changes first, then synchronize the
+  complete eligible native cart. This reversible operation can never order.
   """
   from app.main import grocery_checkout_service
 
@@ -388,8 +398,10 @@ async def sync_instamart_cart_tool(
     cart_item_ids=[str(value) for value in (cart_item_ids or [])],
     selected_address_id=str(selected_address_id or ""),
     user_instruction=request,
+    native_cart_changes=native_cart_changes or [],
   )
   review = result.get("review") or {}
+  provider_cart_changed = bool(review) and result.get("status") not in {"error", "partial"}
   return {
     "status": result.get("status"),
     "provider": "swiggy_instamart",
@@ -397,8 +409,14 @@ async def sync_instamart_cart_tool(
     "unavailable_items": review.get("unavailable_items") or [],
     "selected_address_id": review.get("selected_address_id"),
     "address_selection": result.get("address_selection"),
+    "native_cart_changed": bool(result.get("native_cart_changed")),
+    "provider_cart_changed": provider_cart_changed,
     "message": review.get("message") or result.get("message") or "Instamart cart synchronized.",
-    "ui_action": "UPDATE_PROVIDER_CART",
+    "ui_action": (
+      "UPDATE_PROVIDER_CART"
+      if provider_cart_changed
+      else "UPDATE_GROCERY_CART" if result.get("native_cart_changed") else None
+    ),
   }
 
 def add_to_pantry_tool(user_name: str = DEFAULT_ACTIVE_USER, ingredient_name: str = "", amount: float = 1, unit: str = "piece") -> str:

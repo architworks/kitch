@@ -22,6 +22,7 @@ from .tools import (
     log_macros_tool,
     get_macro_diary_tool,
     get_grocery_cart_tool,
+    modify_native_grocery_cart_tool,
     clear_planned_grocery_cart_tool,
     save_recipe_grocery_plan_tool,
     get_recipe_grocery_plan_tool,
@@ -181,7 +182,8 @@ recipe_grocery_planner = LlmAgent(
     name="recipe_grocery_planner",
     description=(
         "Handles detailed recipes, ingredients, pantry-aware grocery planning, "
-        "native household grocery cart persistence, and household food preferences. "
+        "standalone native grocery-cart edits, native household grocery cart "
+        "persistence, and household food preferences. "
         "Route here when the user asks for a recipe, cooking steps, ingredients, "
         "what they need for a dish or scheduled meal, grocery planning, shopping lists, "
         "or food preferences like avoiding tofu or preferring high-protein dinners."
@@ -194,21 +196,23 @@ recipe_grocery_planner = LlmAgent(
         "- Household members: " + HOUSEHOLD_MEMBERS_TEXT + " (" + HOUSEHOLD_SIZE_TEXT + " people)\n"
         "- Household size: {app:household_size?}\n\n"
         "CRITICAL RULES:\n"
-        "1. Before generating recipes or groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
+        "1. Before generating recipes or recipe-derived groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
         "2. If the user states a new household food preference or exclusion (for example 'we prefer not to use tofu', 'avoid mushrooms', or 'prefer high protein dinners'), call 'set_household_food_preference_tool' to store it in explicitly ephemeral process-local ADK memory. If the same message also asks for a recipe or groceries, store the preference first, then continue. Never describe this memory as durable.\n"
-        "3. Resolve only the user's requested scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
-        "4. For every recipe or grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
+        "3. Resolve only a recipe or meal-based request's scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
+        "4. For every recipe or recipe-derived grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
         "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
-        "6. Grocery/cart/buy/order wording: call 'get_pantry_stock_tool', generate recipe cards for the requested scope, derive cart rows from the SAME ingredients, mark pantry-covered rows with alreadyStocked=true and a stockNote, then call 'save_recipe_grocery_plan_tool' with update_cart=true. This replaces previous source=agent cart rows and preserves manual rows.\n"
-        "7. If the user mentions items already at home or just bought, call 'add_to_pantry_tool' for each item first, then plan using the updated pantry.\n"
-        "8. Never invent native cart rows independently of the recipe cards. Recipe and grocery outputs must stay connected through the saved recipe+grocery artifact.\n"
-        "9. Do not call ordering-provider cart mutation or order-placement tools. Provider cart translation is separate from this agent and happens through the guarded checkout backend.\n"
-        "10. Present results in clean markdown. For grocery requests, mention that the native household grocery cart has been updated only after save_recipe_grocery_plan_tool returns status=success.\n"
-        "11. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
+        "6. Recipe-derived grocery/cart/buy wording: call 'get_pantry_stock_tool', generate recipe cards for the requested scope, derive cart rows from the SAME ingredients, mark pantry-covered rows with alreadyStocked=true and a stockNote, then call 'save_recipe_grocery_plan_tool' with update_cart=true. This replaces previous source=agent cart rows and preserves manual rows.\n"
+        "7. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
+        "8. If the user mentions items already at home or just bought, call 'add_to_pantry_tool' for each item first, then plan using the updated pantry.\n"
+        "9. Keep recipe-derived rows connected to their saved recipe+grocery artifact. Standalone user-requested rows are the deliberate exception and remain source=manual.\n"
+        "10. Do not call ordering-provider cart mutation or order-placement tools. Provider cart translation is separate from this agent and happens through the guarded checkout backend.\n"
+        "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
+        "12. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         get_meal_schedule_tool,
         get_grocery_cart_tool,
+        modify_native_grocery_cart_tool,
         clear_planned_grocery_cart_tool,
         save_recipe_grocery_plan_tool,
         get_recipe_grocery_plan_tool,
@@ -243,17 +247,20 @@ kitch_coordinator = LlmAgent(
         "  calorie tracking, and 'how many calories today' questions.\n\n"
         "→ 'recipe_grocery_planner': For detailed recipes, cooking steps, ingredients, "
         "  groceries, shopping lists, 'what do I need to buy', pantry-aware grocery planning, "
-        "  and household food preferences or exclusions.\n\n"
+        "  standalone add/update/remove requests for the Kitch grocery cart, and household "
+        "  food preferences or exclusions.\n\n"
         "GUIDELINES:\n"
         "1. Be warm and conversational. You're the household's kitchen buddy, not a robot.\n"
         "2. Route naturally — don't tell the user which agent you're using.\n"
         "3. For simple greetings or general chat, respond yourself without routing.\n"
         "4. If unsure, ask a clarifying question rather than guessing wrong.\n"
         "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to vision_scanner for logging.\n"
-        "6. If the user explicitly asks to move, sync, or refresh the existing native grocery cart in Swiggy Instamart, call sync_instamart_cart_tool. This prepares and confirms the provider cart but never orders. If the user is merely planning groceries, route to recipe_grocery_planner and update only the native cart. Never trigger provider synchronization from ordinary grocery wording.\n"
-        "7. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
-        "8. Never ask 'which agent should I use' — just figure it out from context.\n"
-        "9. Never claim a durable change succeeded unless the specialist received a successful persistence-tool result. Do not turn a tool error into reassuring success language."
+        "6. Explicit Instamart cart intent has priority over ordinary grocery routing. If the user names Instamart and asks to add, change, remove, move, sync, or refresh cart items, ALWAYS call sync_instamart_cart_tool; do not transfer that request to recipe_grocery_planner.\n"
+        "7. For an explicit Instamart request that also adds, changes, or removes native grocery intent, pass those exact changes through native_cart_changes on the SAME sync_instamart_cart_tool call. The tool persists the native change first and then invokes the Instamart cart agent with the resulting complete eligible native cart. Do not create a second coordinator tool or claim either change before the tool succeeds.\n"
+        "8. If the user asks only to add, change, or remove items from the Kitch grocery list/cart and does not request provider synchronization, route to recipe_grocery_planner. If the user is merely planning groceries, also route to recipe_grocery_planner. Never trigger provider synchronization from ordinary grocery wording.\n"
+        "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
+        "10. Never ask 'which agent should I use' — just figure it out from context.\n"
+        "11. Never claim a durable change succeeded unless the specialist or tool received a successful persistence result. Do not turn a tool error into reassuring success language."
     ),
     sub_agents=[chef_planner, vision_scanner, recipe_grocery_planner],
     tools=[

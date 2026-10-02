@@ -41,12 +41,19 @@ The weekly planner stores meal names for breakfast, lunch, and dinner. It does n
 
 When the user asks for groceries for a meal or dish, Kitch generates a recipe+ingredient artifact first, then derives native cart rows from that same artifact.
 
+When the user explicitly asks to add, update, or remove a standalone grocery
+item, Kitch may create or change a manual native-cart row without inventing a
+recipe. An explicit Instamart request may then synchronize the resulting
+complete eligible native cart through the existing guarded sync bridge.
+
 **Why:** grocery lists that are inferred separately from recipes can drift from the actual cooking plan. Keeping recipe and grocery outputs connected prevents buying ingredients that the recipe does not use, or missing ingredients that the recipe needs.
 
 ### 4. Native grocery cart is the source of truth
 
 Kitch owns a provider-agnostic native cart. Zepto, Swiggy Instamart, and future
 providers are time-sensitive translations of that cart, not independent intent.
+The native cart is a durable conduit, not a mandatory manual UI gate: recipe
+planning, standalone chat edits, and direct UI edits may all contribute to it.
 
 **Why:** delivery providers differ in catalog structure, package sizes, availability, auth, address selection, and payment flows. A native cart lets Kitch reason about household grocery needs before any provider-specific mapping happens.
 
@@ -168,6 +175,9 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-025 | Fridge-photo grocery requests update pantry first, then plan groceries against the updated pantry. | Prevents reordering things the user just showed Kitch they already have. |
 | REQ-026 | A recipe artifact and its agent-generated cart replacement commit together or not at all. | Prevents a recipe history entry from claiming a cart change that did not persist. |
 | REQ-027 | When durable storage is unavailable, preserve confirmed UI state and explain that nothing was saved. | Users must not be misled by optimistic changes or agent prose. |
+| REQ-027A | Explicit standalone grocery chat requests can add, update, or remove `source=manual` native-cart rows without a recipe artifact. | Lets the native cart connect recipe planning with ordinary household shopping intent. |
+| REQ-027B | Explicit Instamart chat requests and the Groceries UI use the same operation-scoped cart agent and confirmed-cart workflow. | Keeps chat flexible without duplicating provider logic or weakening checkout controls. |
+| REQ-027C | A combined standalone native mutation plus Instamart sync reuses the existing coordinator sync bridge. | Prevents coordinator tool proliferation while preserving a direct conversational workflow. |
 
 ### Pantry and vision requirements
 

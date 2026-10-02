@@ -554,6 +554,19 @@ automated or browser-test order against production.
   For Instamart, test both **Move cart items to ordering app** and the explicit
   chat request **Move my grocery list to Instamart**. Ordinary grocery-planning
   prompts must update only Kitch's native cart.
+- Standalone chat check: Ask **Add one Dairy Milk chocolate to my grocery
+  cart**. Confirm that a manual native row is saved without a fabricated recipe
+  artifact, `UPDATE_GROCERY_CART` is returned, and no provider operation starts.
+- Combined chat check: Ask **Add one Dairy Milk chocolate and sync my cart to
+  Instamart**. Confirm that the same existing coordinator sync bridge first
+  persists the standalone native row, then invokes the Instamart agent with the
+  resulting complete eligible native cart. It must not call a second composite
+  coordinator tool or place an order.
+- Partial-result check: Repeat the combined request with provider address or
+  synchronization failure. The atomic native change remains confirmed,
+  `UPDATE_GROCERY_CART` is returned, the response says Instamart was not
+  synchronized, and no `UPDATE_PROVIDER_CART` action or provider success banner
+  appears.
 - Expected behavior: Only selected, non-pantry-covered rows are searched in the
   chosen address context. The complete provider cart is replaced and read back.
   Search results absent from the confirmed cart, mismatched quantities, missing
@@ -585,8 +598,10 @@ automated or browser-test order against production.
   cart, provider, address, quick-action, payment, and order controls. Pending
   native writes finish before the snapshot is taken.
 - Pass criteria: Every provider-cart row reconciles to selected native intent,
-  every omitted row is disclosed, repeating sync creates no duplicates, the
-  native cart remains unchanged, and no order is placed.
+  every omitted row is disclosed, and repeating sync creates no duplicates.
+  Plain UI/existing-cart sync leaves the native cart unchanged; a combined chat
+  request changes only the explicitly declared native rows before sync. No
+  order is placed.
 - Fail criteria: Search alone is reported as success, excluded rows are sent,
   the review fabricates a total, state changes during sync, or provider failure
   produces a completed stage.

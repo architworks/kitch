@@ -310,6 +310,16 @@ selection, delivery address, provider transfer, provider cart review, then
 payment and order. Zepto and Swiggy Instamart are backend-described providers;
 Blinkit is disabled with `Coming soon`.
 
+The native cart is also allowed to contain standalone `source=manual` intent
+that did not come from a recipe. For example:
+
+```text
+"Add one Dairy Milk chocolate to my grocery cart."
+```
+
+Kitch routes this to the existing grocery specialist, persists the row without
+inventing a recipe artifact, and reports only the confirmed native-cart change.
+
 ---
 
 ## 10. Flow: Prepare and Approve a Provider Cart
@@ -324,16 +334,21 @@ Example prompts:
 - "Open my groceries so I can order them."
 - "Put tomorrow's groceries in Instamart."
 - "Help me review this cart in Zepto."
+- "Move my grocery list to Instamart."
+- "Add one Dairy Milk chocolate and sync my cart to Instamart."
 
 ### Expected Experience
 
-1. The user reviews the native cart and selects eligible rows.
+1. Native intent may come from recipe planning, standalone chat changes, or
+   manual UI edits. The user may review and select eligible rows in the UI, but
+   opening that screen is not mandatory for an explicit chat synchronization.
 2. The user chooses Zepto or Swiggy Instamart. Blinkit remains visible and
    disabled. Kitch remembers the household's last selection.
 3. If required, the user connects or reconnects the provider. Instamart shows
    its environment and uses a household-owned OAuth connection.
 4. The user selects a saved delivery address.
-5. The user starts synchronization in a separate, clearly numbered stage.
+5. The user starts synchronization from the separate, clearly numbered UI
+   stage, or explicitly requests Instamart synchronization in chat.
 6. Kitch uses the native cart as the source of truth, excluding unselected and
    pantry-covered rows and applying known brand preferences.
 7. Kitch searches only after establishing the selected address context,
@@ -364,9 +379,21 @@ Example prompts:
 14. Pending, partial, or ambiguous order state survives reload. A timeout is
     not blindly retried while duplicate-order risk remains.
 
+For a combined explicit chat request, Kitch first applies the declared
+standalone native change and then invokes the same Instamart synchronization
+path with the resulting complete eligible native cart. It does not bypass
+native intent, add another coordinator tool, or place an order.
+If Instamart is unavailable after the native transaction succeeds, Kitch keeps
+the native change, says that the provider cart was not synchronized, and offers
+the existing sync flow for retry; it never collapses that partial outcome into
+provider success.
+
 ### Functional UX Requirements
 
 - The experience must not imply that an actual order was placed.
+- Native-only chat mutations must not claim that a provider cart changed.
+- Explicit chat provider sync and UI provider sync must both use the same
+  backend service, operation lease, Instamart agent, and confirmation rules.
 - The experience may indicate that a provider cart changed only after sync and read-back reconciliation succeed.
 - The user should see enough information to trust the actual provider cart
   contents and total. Kitch must never derive a final total when a provider reports

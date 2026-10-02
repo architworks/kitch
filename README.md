@@ -124,6 +124,7 @@ flowchart TD
     GetPantry --> Supabase
     GetMacro --> Supabase
     GetCart --> Supabase
+    ModifyNativeCart[modify_native_grocery_cart_tool] --> Supabase
     ClearCart --> Supabase
     SaveRecipePlan --> Supabase
     GetRecipePlan --> Supabase
@@ -143,7 +144,9 @@ flowchart TD
 Provider sync is intentionally outside the `recipe_grocery_planner`. A dedicated
 `instamart_cart_agent` may prepare an Instamart cart after an explicit UI or
 chat request. The backend still owns durable review, authority, payment, and
-order approval boundaries.
+order approval boundaries. The existing coordinator sync bridge also supports
+an explicit combined native-cart change plus Instamart sync; no second
+coordinator commerce tool is introduced.
 
 ### Multi-Provider Grocery Integration
 
@@ -548,10 +551,14 @@ docs/
 - Macro diary entries are individual to the active member.
 - Recipe-only requests save recipe artifacts but do not update the cart.
 - Grocery/cart/buy/order requests save recipe artifacts and update agent-planned native cart rows.
+- Standalone chat requests may add, update, or remove manual native-cart rows
+  without fabricating a recipe artifact.
 - Manual cart rows are preserved across agent grocery replanning.
 - Pantry-covered rows remain visible but are excluded from provider sync.
 - Provider bill components and payable totals come only from provider responses. A complete line-price sum may be labeled only as an item subtotal.
 - Chat cannot place real orders.
+- Explicit chat and the Groceries UI may prepare an Instamart cart through the
+  same guarded agent workflow.
 - Every provider order requires a durable reviewed checkout draft, an exact
   confirmation token, a provider-returned payment method, explicit frontend
   approval, and an unchanged final availability check.
@@ -569,7 +576,8 @@ docs/
 - Provider MCP schemas, catalog behavior, auth availability, and production access remain externally controlled.
 - Instamart production remains gated until Swiggy approval and a successful staging soak.
 - Current verified orchestration, matching, provider-draft, and candidate-price
-  defects are tracked in `docs/known_issues.md`.
+  defects and deliberately deferred optimizations are tracked in
+  `docs/known_issues_and_optimizations.md`.
 
 ## More Documentation
 
@@ -582,4 +590,4 @@ Start with these files for deeper context:
   tools, memory, and commerce-agent safety.
 - `docs/current_technology_stack.md`
 - `docs/ux_user_flows.md`
-- `docs/known_issues.md`
+- `docs/known_issues_and_optimizations.md`

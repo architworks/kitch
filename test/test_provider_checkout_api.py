@@ -96,10 +96,24 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         service = self.service(adapter, agent)
         saved_review = {"review_id": "draft-agent", "matched_items": result["items"]}
+        native_changes = [{
+            "action": "add",
+            "name": "Dairy Milk chocolate",
+            "amount": 1,
+            "unit": "bar",
+        }]
+        call_order = []
         with (
             patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
-            patch("app.grocery_checkout.get_grocery_cart", return_value=[native_item]),
+            patch(
+                "app.grocery_checkout.apply_native_grocery_cart_changes",
+                side_effect=lambda changes: call_order.append(("mutate", changes)),
+            ) as mutate,
+            patch(
+                "app.grocery_checkout.get_grocery_cart",
+                side_effect=lambda: call_order.append(("read", None)) or [native_item],
+            ),
             patch("app.grocery_checkout.save_initial_draft", return_value=saved_review) as save_draft,
         ):
             response = await service.sync(
@@ -108,16 +122,62 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
                     "cart_item_ids": ["1"],
                     "selected_address_id": "home-1",
                     "user_instruction": "Move my cart to Instamart",
+                    "native_cart_changes": native_changes,
                 },
                 authority_source="chat_sync",
             )
         self.assertEqual(response["review"]["review_id"], "draft-agent")
+        self.assertTrue(response["native_cart_changed"])
+        mutate.assert_called_once_with(native_changes)
+        self.assertEqual(call_order[0], ("mutate", native_changes))
+        self.assertEqual(call_order[1], ("read", None))
         agent.synchronize.assert_awaited_once()
         call = agent.synchronize.await_args.kwargs
         self.assertEqual(call["source"], "chat_sync")
         self.assertEqual(call["native_items"], [native_item])
         self.assertEqual(call["selected_address_id"], "home-1")
         save_draft.assert_called_once()
+
+    async def test_combined_chat_request_preserves_native_change_when_provider_is_unavailable(self):
+        provider_error = ProviderOperationError(
+            provider="swiggy_instamart",
+            operation="list_addresses",
+            code="provider_unavailable",
+            message="Instamart addresses could not be loaded.",
+            retryable=True,
+        )
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(
+                environment="staging",
+                label="Swiggy Instamart",
+            ),
+            list_addresses=AsyncMock(side_effect=provider_error),
+        )
+        agent = SimpleNamespace(synchronize=AsyncMock())
+        service = self.service(adapter, agent)
+        changes = [{
+            "action": "add",
+            "name": "Dairy Milk chocolate",
+            "amount": 1,
+            "unit": "bar",
+        }]
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=None),
+            patch("app.grocery_checkout.apply_native_grocery_cart_changes") as mutate,
+        ):
+            response = await service.sync_from_chat(
+                user_instruction="Add chocolate and sync to Instamart",
+                native_cart_changes=changes,
+            )
+
+        mutate.assert_called_once_with(changes)
+        agent.synchronize.assert_not_awaited()
+        self.assertEqual(response["status"], "partial")
+        self.assertTrue(response["native_cart_changed"])
+        self.assertFalse(response["provider_cart_changed"])
+        self.assertIn("native Kitch cart was updated", response["message"])
 
     async def test_order_time_change_stops_before_provider_checkout(self):
         row = self.draft_row()

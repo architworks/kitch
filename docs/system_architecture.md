@@ -18,7 +18,7 @@ The current design separates responsibilities deliberately:
 - FastAPI owns browser-facing APIs, state hydration, multimodal request orchestration, and provider approval boundaries.
 - The main ADK coordinator team reasons about culinary and household intent and
   calls Python tools.
-- A separate one-shot Instamart agent performs authorized provider catalogue
+- A separate operation-scoped Instamart agent performs authorized provider catalogue
   matching and reversible cart preparation.
 - Python tools perform deterministic side effects.
 - Supabase stores authoritative structured product state.
@@ -99,6 +99,19 @@ must remain deterministic. Chat may explicitly prepare an Instamart cart; it
 cannot select payment or place an order. The backend creates durable review
 snapshots and requires explicit frontend approval before checkout.
 
+### Native cart is provider-neutral intent, not a mandatory UI gate
+
+Recipe-derived groceries, standalone chat additions, and manual UI edits all
+write to the same durable native cart. The Groceries UI or an explicit chat
+request may then project the complete eligible selection through the Instamart
+agent. This keeps external provider carts rebuildable without forcing the user
+to manually visit the native-cart screen before every synchronization.
+
+The coordinator retains one `sync_instamart_cart_tool` bridge. Combined
+add/update/remove-and-sync requests reuse it; no additional composite commerce
+tool or grocery-ordering router agent is introduced. The full accepted and
+rejected topology record is maintained in `ai_agent_architecture.md`.
+
 ---
 
 ## Frontend Duties
@@ -135,7 +148,9 @@ The frontend does not:
 Why:
 
 - The UI should remain a thin product surface over backend-owned state and safety boundaries.
-- Explicit button actions are easier to reason about than implicit agent side effects for provider cart and order operations.
+- Explicit buttons remain available for provider synchronization and are
+  mandatory for final order approval. Explicit chat may prepare a reversible
+  Instamart cart, but cannot select payment or place an order.
 
 ---
 
@@ -199,8 +214,8 @@ The main ADK application in `backend/app/agent/core.py` contains:
 - `recipe_grocery_planner`
 
 The provider checkout service separately creates `instamart_cart_agent` through
-`InstamartCartAgentService`. This is a one-shot ADK run, not a coordinator
-sub-agent.
+`InstamartCartAgentService`. This is an operation-scoped ADK run, not a
+coordinator sub-agent.
 
 Agents reason over:
 
@@ -214,6 +229,7 @@ Agents reason over:
 - Weekly schedule.
 - Pantry state.
 - Household preferences.
+- Standalone native-cart mutations explicitly requested in chat.
 
 The main coordinator team does not reason over:
 
@@ -265,6 +281,9 @@ Important modeling decisions:
 - The product plans breakfast, lunch, and dinner only.
 - `recipe_grocery_plan_id` links agent-created cart rows back to the recipe+grocery artifact that produced them.
 - `source=manual` rows survive later agent grocery planning.
+- Standalone chat add/update/remove changes use
+  `apply_native_grocery_cart_changes`, so a multi-change request commits as one
+  transaction or rolls back completely.
 - `already_stocked=true` rows remain visible but are excluded from provider sync.
 
 Why this model:
@@ -319,7 +338,7 @@ sequenceDiagram
     API->>Service: sync native snapshot
     Service->>DB: Read cart; acquire provider/environment lease
     alt Swiggy Instamart
-        Service->>Agent: Run one-shot cart agent
+        Service->>Agent: Run operation-scoped cart agent
         Agent->>MCP: Address-scoped iterative search + ordering history
         Agent->>MCP: Replace complete provider cart
         Agent->>MCP: Read provider cart and repair once if needed

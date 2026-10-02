@@ -22,7 +22,7 @@ Kitch uses two related Google ADK execution graphs:
 
 - One long-lived parent coordinator with three registered specialist
   sub-agents.
-- One separate, one-shot Instamart cart agent created by
+- One separate, operation-scoped Instamart cart agent created by
   `GroceryCheckoutService` for an authorized synchronization operation. It is
   not a fourth coordinator sub-agent.
 - Three coordinator commerce tools: two read-only tools and one explicit
@@ -34,97 +34,193 @@ Kitch uses two related Google ADK execution graphs:
   Instamart catalogue matching and cart preparation are agent-driven.
 
 ```mermaid
-flowchart TD
-    User[Household Member] --> API[FastAPI Gateway]
-    API --> Runner[ADK Runner]
-    Runner --> Coordinator[kitch_coordinator]
+flowchart TB
+    User["USER<br/>Household member"]:::user --> API["SERVICE<br/>FastAPI gateway"]:::service
 
-    subgraph AgentTeam[ADK Agent Team]
-        Chef[chef_planner]
-        Vision[vision_scanner]
-        RecipeGrocery[recipe_grocery_planner]
+    subgraph MainADK["ADK Runtime A — conversational graph"]
+        direction TB
+        MainRunner["RUNTIME<br/>Long-lived ADK App + Runner"]:::runtime
+        Coordinator["AGENT<br/>kitch_coordinator"]:::agent
+        Chef["AGENT<br/>chef_planner"]:::agent
+        Vision["AGENT<br/>vision_scanner"]:::agent
+        RecipeGrocery["AGENT<br/>recipe_grocery_planner"]:::agent
+
+        MainRunner --> Coordinator
+        Coordinator --> Chef
+        Coordinator --> Vision
+        Coordinator --> RecipeGrocery
+
+        MealTools["TOOL GROUP<br/>dated meal-plan tools"]:::tool
+        VisionTools["TOOL GROUP<br/>pantry + macro tools"]:::tool
+        RecipeTools["TOOL GROUP<br/>recipe + native-cart tools"]:::tool
+        ProviderReadTools["TOOL GROUP<br/>provider list + checkout status"]:::tool
+        SyncInstamart["TOOL<br/>sync_instamart_cart_tool<br/>existing or combined native + provider sync"]:::tool
+
+        Chef --> MealTools
+        Vision --> VisionTools
+        RecipeGrocery --> RecipeTools
+        Coordinator --> ProviderReadTools
+        Coordinator --> SyncInstamart
     end
 
-    Coordinator --> Chef
-    Coordinator --> Vision
-    Coordinator --> RecipeGrocery
+    API --> MainRunner
 
-    Coordinator --> ListProviders[list_grocery_providers_tool]
-    Coordinator --> CheckoutStatus[get_grocery_checkout_status_tool]
-    Coordinator --> SyncInstamart[sync_instamart_cart_tool]
-
-    subgraph ToolLayer[Python Tool Layer]
-        GetSchedule[get_meal_schedule_tool]
-        ReplaceRange[replace_meal_plan_range_tool]
-        UpdateMeals[update_dated_meals_tool]
-        AddPantry[add_to_pantry_tool]
-        LogMacros[log_macros_tool]
-        GetPantry[get_pantry_stock_tool]
-        GetMacro[get_macro_diary_tool]
-        GetCart[get_grocery_cart_tool]
-        ClearCart[clear_planned_grocery_cart_tool]
-        SaveRecipePlan[save_recipe_grocery_plan_tool]
-        GetRecipePlan[get_recipe_grocery_plan_tool]
-        ListRecipePlans[list_recipe_grocery_plans_tool]
-        SetFoodPreference[set_household_food_preference_tool]
-        SearchFoodPreferences[search_household_food_preferences_tool]
-        GetDatetime[get_current_datetime]
-    end
-
-    Chef --> GetSchedule
-    Chef --> ReplaceRange
-    Chef --> UpdateMeals
-    Chef --> GetDatetime
-
-    Vision --> AddPantry
-    Vision --> LogMacros
-    Vision --> GetPantry
-    Vision --> GetMacro
-    Vision --> GetDatetime
-
-    RecipeGrocery --> GetSchedule
-    RecipeGrocery --> GetCart
-    RecipeGrocery --> ClearCart
-    RecipeGrocery --> SaveRecipePlan
-    RecipeGrocery --> GetRecipePlan
-    RecipeGrocery --> ListRecipePlans
-    RecipeGrocery --> SetFoodPreference
-    RecipeGrocery --> SearchFoodPreferences
-    RecipeGrocery --> GetPantry
-    RecipeGrocery --> AddPantry
-    RecipeGrocery --> GetDatetime
-
-    GetSchedule --> Supabase[(Supabase)]
-    ReplaceRange --> Supabase
-    UpdateMeals --> Supabase
-    AddPantry --> Supabase
-    LogMacros --> Supabase
-    GetPantry --> Supabase
-    GetMacro --> Supabase
-    GetCart --> Supabase
-    ClearCart --> Supabase
-    SaveRecipePlan --> Supabase
-    GetRecipePlan --> Supabase
-    ListRecipePlans --> Supabase
-    SetFoodPreference --> Memory[ADK Memory]
-    SearchFoodPreferences --> Memory
-    GetDatetime --> RuntimeContext[Runtime datetime context]
-
-    API --> Checkout[GroceryCheckoutService]
+    MealTools --> Supabase[("STORE<br/>Supabase structured state")]:::store
+    VisionTools --> Supabase
+    RecipeTools --> Supabase
+    RecipeTools --> Memory[("STORE<br/>Ephemeral ADK memory")]:::store
+    ProviderReadTools --> Checkout["SERVICE<br/>GroceryCheckoutService"]:::service
+    API --> Checkout
     SyncInstamart --> Checkout
-    Checkout --> InstamartAgent[instamart_cart_agent]
-    InstamartAgent --> CommercePolicy[CommerceToolPolicy]
-    InstamartAgent --> Instamart[Swiggy Instamart /im MCP]
-    Checkout --> InstamartAdapter[InstamartProviderAdapter]
-    InstamartAdapter --> Instamart
-    Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
-    ZeptoAdapter --> Zepto[Zepto MCP]
+    Checkout --> Drafts[("STORE<br/>Durable checkout drafts")]:::store
+
+    subgraph CommerceADK["ADK Runtime B — on-demand Instamart graph"]
+        direction TB
+        CommerceRunner["RUNTIME<br/>One-shot ADK App + Runner"]:::runtime
+        InstamartAgent["AGENT<br/>instamart_cart_agent"]:::agent
+        LocalCommerceTools["TOOL GROUP<br/>native cart + preference + result tools"]:::tool
+        InstamartMCPTools["MCP TOOLSET<br/>address + search + history + cart tools"]:::tool
+
+        CommerceRunner --> InstamartAgent
+        InstamartAgent --> LocalCommerceTools
+        InstamartAgent --> InstamartMCPTools
+    end
+
+    Checkout --> CommerceRunner
+    LocalCommerceTools --> Memory
+    InstamartMCPTools --> Policy["POLICY / MIDDLEWARE<br/>CommerceToolPolicy"]:::policy
+    Policy --> InstamartMCP["EXTERNAL MCP SERVER<br/>Swiggy Instamart /im"]:::external
+
+    Checkout --> InstamartAdapter["ADAPTER<br/>InstamartProviderAdapter"]:::adapter
+    InstamartAdapter --> Policy
+    Checkout --> ZeptoAdapter["ADAPTER<br/>ZeptoProviderAdapter"]:::adapter
+    ZeptoAdapter --> ZeptoMCP["EXTERNAL MCP SERVER<br/>Zepto MCP"]:::external
+
+    classDef user fill:#eef2ff,stroke:#3730a3,stroke-width:2px,color:#111827;
+    classDef agent fill:#dcfce7,stroke:#166534,stroke-width:3px,color:#111827;
+    classDef tool fill:#fef3c7,stroke:#a16207,stroke-width:2px,color:#111827;
+    classDef service fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827;
+    classDef runtime fill:#e0e7ff,stroke:#4338ca,stroke-width:2px,color:#111827;
+    classDef adapter fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#111827;
+    classDef policy fill:#ffe4e6,stroke:#be123c,stroke-width:2px,color:#111827;
+    classDef store fill:#f1f5f9,stroke:#334155,stroke-width:2px,color:#111827;
+    classDef external fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#111827;
+    style MainADK fill:#f8fafc,stroke:#4338ca,stroke-width:3px,color:#111827;
+    style CommerceADK fill:#f8fafc,stroke:#4338ca,stroke-width:3px,color:#111827;
 ```
+
+### How to read the topology
+
+| Type | Meaning in Kitch | Uses Gemini reasoning? | Example |
+| :--- | :--- | :---: | :--- |
+| **Agent** | A Gemini-backed ADK `LlmAgent` with instructions and an allowed set of tools or sub-agents. | **Yes** | `chef_planner`, `instamart_cart_agent` |
+| **Tool** | A callable capability exposed to an agent. It may read state, write state, or invoke a guarded backend service. | No | `get_meal_schedule_tool`, `sync_instamart_cart_tool` |
+| **Runtime** | ADK `App`, `Runner`, session, and memory machinery that executes an agent graph. | No | Main conversational runner, operation-scoped Instamart runner |
+| **Service** | Deterministic backend orchestration called by HTTP routes or tools. It is ordinary Python, not an LLM. | No | `GroceryCheckoutService` |
+| **Adapter** | Deterministic provider-specific translation, normalization, OAuth, and checkout code. | No | `InstamartProviderAdapter` |
+| **Policy / middleware** | Server-owned authorization that permits or denies tool calls independently of model output. It is not exposed as a model tool. | No | `CommerceToolPolicy` |
+| **Store** | Durable or ephemeral state storage. | No | Supabase, ADK memory |
+| **External MCP server** | A remote server that publishes provider tools. It is neither a Kitch agent nor a database. | No | Swiggy Instamart `/im` MCP |
+
+The two ADK runtime boxes both contain real agents. Runtime A is always available
+for conversation and contains the coordinator's registered sub-agents. Runtime
+B is created only for an authorized Instamart sync, refresh, or order preflight.
+`GroceryCheckoutService` invokes Runtime B directly, which is why
+`instamart_cart_agent` is not drawn as a child of `kitch_coordinator`.
 
 Provider sync is intentionally outside the `recipe_grocery_planner`. The
 dedicated Instamart cart agent handles provider product reasoning during an
 authorized initial sync, explicit refresh, or mandatory UI order preflight. The
 backend owns authority, durable review, payment, and order approval boundaries.
+
+## Agent-topology decisions
+
+These choices were explicitly deliberated. Future changes should revisit them
+only when product evidence changes, not merely to make the graph look more
+symmetrical.
+
+### Accepted: one coordinator sync bridge to an operation-scoped provider agent
+
+`kitch_coordinator` retains `sync_instamart_cart_tool`. It is a narrow bridge,
+not a replacement for the Instamart agent: the tool establishes backend-owned
+scope and invokes `GroceryCheckoutService`, which runs the actual
+`instamart_cart_agent`. Both the Groceries UI and explicit chat synchronization
+therefore use the same provider workflow.
+
+A combined request such as "add one Dairy Milk chocolate and sync to
+Instamart" reuses this tool. Declared native-cart changes are persisted first;
+the Instamart agent then receives the resulting complete eligible native cart.
+If provider address discovery or synchronization subsequently fails, Kitch
+preserves the confirmed native intent, reports the provider failure as a
+partial outcome, and emits no provider-cart success action.
+
+### Accepted: native cart is a conduit and reconciliation source
+
+The native cart connects recipe planning, standalone chat requests, manual UI
+edits, and provider projection. Calling it authoritative means Kitch can rebuild
+or switch an external provider cart from durable household intent. It does not
+mean users must manually visit the native-cart UI before every provider action.
+
+Recipe-derived rows remain linked to recipe artifacts. Standalone requests such
+as chocolate, milk, or eggs create manual native rows without fabricating a
+recipe.
+
+### Accepted: provider matching remains agentic; transaction control remains deterministic
+
+The Instamart agent interprets live product names, brands, packs, quantities,
+and preferences. `GroceryCheckoutService` still owns leases, durable drafts,
+confirmed MCP result capture, revalidation, approval snapshots, and UI-only
+checkout. This is a division of responsibility, not a second matching layer.
+
+### Rejected: remove chat synchronization and make the UI button the only gateway
+
+This was considered and rejected because explicit chat synchronization was an
+intentional product capability. Removing the bridge would unnecessarily block
+reversible cart preparation even though checkout remains separately protected.
+
+### Rejected: add another composite commerce tool to the coordinator
+
+A separate "mutate native cart and synchronize provider" tool would duplicate
+the existing sync entry point and make the parent agent accumulate edge-case
+tools. Combined requests instead extend the existing sync tool contract.
+
+### Rejected: add a `grocery_ordering_agent` and provider-sub-agent tree now
+
+An additional routing layer is not justified with the current provider and
+intent complexity. It would add latency and another handoff without removing
+the application service required by UI entry, leases, persistence, and checkout
+safety. Reconsider only if multiple active providers create demonstrated
+conversational routing complexity.
+
+### Rejected: register provider cart workers as long-lived conversational sub-agents
+
+Provider agents operate with address-scoped MCP credentials and reversible
+cart-write authority for a single transaction. Operation-scoped sessions reduce
+cross-cart context leakage, close MCP connections deterministically, and allow
+the UI to invoke the same worker without manufacturing a chat handoff.
+
+### Rejected: replace flexible preference memory with deterministic catalogue rules
+
+Food, allergy, brand, and pack preferences remain natural-language ADK memory.
+Live catalogues express equivalent products and quantities inconsistently, so
+the provider agent must interpret preferences against actual results. Retrieval
+relevance can be improved without converting these memories into rigid product
+matching tables.
+
+### Rejected: bypass the native cart for chat-originated provider items
+
+Allowing an ad-hoc provider item to exist only in Instamart would split Kitch's
+shopping intent across systems and make rebuilds, provider switching, and drift
+repair unreliable. Chat may feel direct, but the requested item is first
+represented in native intent before the complete provider projection is built.
+
+### Rejected: require every native-cart row to come from a recipe artifact
+
+That rule correctly protects recipe-derived ingredient lists from drifting away
+from their recipes, but it incorrectly blocks ordinary staples and explicit
+items such as chocolate, milk, or eggs. Recipe-derived rows remain linked and
+transactional; explicitly requested standalone rows are stored as manual native
+intent by the existing grocery specialist.
 
 ---
 
@@ -154,7 +250,7 @@ Responsibilities:
 - Interpret natural language intent.
 - Route dated schedule creation, exact-range lookup, and meal swaps to `chef_planner`.
 - Route food logging, macro diary, pantry scanning, and image-based intake/pantry requests to `vision_scanner`.
-- Route recipes, cooking steps, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
+- Route recipes, cooking steps, ingredients, grocery planning, standalone native-cart edits, and household food preferences to `recipe_grocery_planner`.
 - Answer simple greetings and general chat directly.
 - Avoid exposing internal agent names to users.
 
@@ -165,12 +261,16 @@ Tools:
 - `get_grocery_checkout_status_tool` — reads one provider's durable checkout
   status.
 - `sync_instamart_cart_tool` — invokes the same guarded Instamart sync service
-  used by the Groceries UI, but only for an explicit move/sync/refresh request.
+  used by the Groceries UI, but only for explicit Instamart cart intent. A
+  combined add/update/remove-and-sync request carries its native changes through
+  this same tool before the resulting complete eligible cart is synchronized.
 
 Why the coordinator has a narrowly scoped write tool:
 
 - Provider sync is an explicit conversational intent rather than ordinary
   grocery planning.
+- One bridge keeps the coordinator surface small; no separate tool is added for
+  every combination of native mutation and provider synchronization.
 - The tool can replace a reversible Instamart cart, but cannot select payment or
   call checkout.
 - `GroceryCheckoutService`, `CommerceToolPolicy`, operation leases, and exact
@@ -282,7 +382,8 @@ Why this two-step flow:
 
 Role:
 
-- Recipe, ingredient, pantry-aware grocery, native cart, and household food-preference planner.
+- Recipe, ingredient, pantry-aware grocery, standalone native-cart, and
+  household food-preference planner.
 
 Responsibilities:
 
@@ -295,6 +396,8 @@ Responsibilities:
 - Save native grocery cart rows only when the user asks for groceries/cart/buy/order.
 - Link agent-created cart rows to the source recipe+grocery artifact.
 - Preserve manual cart rows across agent replanning.
+- Add, update, and remove explicitly requested standalone cart rows without
+  fabricating a recipe artifact. These rows use `source=manual`.
 - Save and search flexible household food preferences in ADK memory.
 
 Tools:
@@ -303,6 +406,7 @@ Tools:
 - `get_pantry_stock_tool`
 - `add_to_pantry_tool`
 - `get_grocery_cart_tool`
+- `modify_native_grocery_cart_tool`
 - `clear_planned_grocery_cart_tool`
 - `save_recipe_grocery_plan_tool`
 - `get_recipe_grocery_plan_tool`
@@ -325,17 +429,28 @@ Why recipe and grocery are one agent:
 - Grocery rows must be derived from the same recipe that the user will cook.
 - Splitting recipe generation from grocery generation caused the risk of buying the wrong items or omitting needed ingredients.
 
+Why standalone cart edits remain here:
+
+- The existing grocery specialist already owns Kitch's provider-neutral
+  shopping intent.
+- A chocolate bar, cleaning-adjacent food item, or household staple need not be
+  justified by a recipe.
+- Keeping this capability off the coordinator avoids turning the parent agent
+  into a collection of persistence edge cases.
+
 Why provider sync is excluded:
 
 - Provider catalog matching, addresses, payments, and order state are commerce-layer concerns.
 - The recipe+grocery agent should not be able to place real orders.
-- Provider actions require explicit UI controls and backend review snapshots.
+- Provider cart writes require an explicit UI or chat synchronization request;
+  payment and checkout still require UI controls and backend review snapshots.
 
 Constraints:
 
 - Recipe-only requests do not update the native grocery cart.
 - Grocery requests save both the artifact and native cart rows.
-- Cart rows must be derived from the same recipe cards.
+- Recipe-derived cart rows must come from the same recipe cards; explicitly
+  requested standalone rows are allowed without a recipe artifact.
 - Pantry-covered rows remain in the cart with `alreadyStocked=true`.
 - The agent does not call provider MCP, sync, payment, or order-placement tools.
 
@@ -346,6 +461,9 @@ Constraints:
 Current backend-owned provider behavior:
 
 - Native cart remains Kitch's source of truth.
+- "Source of truth" is a data-reconciliation role, not a mandatory UI step:
+  recipes, direct chat edits, and manual UI edits may all contribute native
+  intent before provider projection.
 - `ProviderRegistry` describes Zepto, Swiggy Instamart, and disabled Blinkit.
 - `GroceryCheckoutService` applies native-snapshot validation, synchronization,
   revalidation, persisted leases, approval snapshots, and order safety.
@@ -386,13 +504,16 @@ Why checkout remains outside the agent topology:
 
 The coordinator receives read-only provider status plus one explicit
 `sync_instamart_cart_tool`. That tool invokes the same guarded service used by
-the Groceries UI. FastAPI emits `UPDATE_PROVIDER_CART` only when the durable
-Instamart draft actually changes. It has no order capability.
+the Groceries UI. For a combined explicit request it applies declared native
+changes first, then passes the resulting complete eligible cart through the
+same service and Instamart agent. FastAPI emits `UPDATE_PROVIDER_CART` only
+when the durable Instamart draft actually changes. The tool has no order
+capability.
 
 This is the intended topology. The currently reproducible failure in which an
 explicit Instamart sync request is routed to recipe/native-grocery handling is
-tracked as KI-001 in `known_issues.md`; it is a routing bug, not the designed
-ownership model.
+tracked as KI-001 in `known_issues_and_optimizations.md`; it is a routing bug,
+not the designed ownership model.
 
 ---
 
@@ -459,31 +580,20 @@ Kitch's AI layer is a Google ADK 2.0 multi-agent system behind a FastAPI gateway
 
 ## Runtime Shape
 
-```mermaid
-flowchart LR
-    User[Household Member] --> Frontend[Next.js App]
-    Frontend --> API[FastAPI Gateway]
-    API --> Runner[Main ADK Runner]
-    Runner --> App[ADK App]
-    App --> Coordinator[kitch_coordinator]
-    Coordinator --> Chef[chef_planner]
-    Coordinator --> Vision[vision_scanner]
-    Coordinator --> RecipeGrocery[recipe_grocery_planner]
-    Chef --> Tools[Python Tools]
-    Vision --> Tools
-    RecipeGrocery --> Tools
-    Tools --> Supabase[(Supabase)]
-    RecipeGrocery --> Memory[ADK Memory Service]
-    Runner --> Sessions[ADK Session Service]
-    Coordinator --> CommerceTools[Provider status + explicit Instamart sync tools]
-    API --> Checkout[GroceryCheckoutService]
-    CommerceTools --> Checkout
-    Checkout --> InstamartAgent[One-shot instamart_cart_agent]
-    InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
-    Checkout --> ProviderAdapters[Backend Provider Adapters]
-```
+The topology diagram above is authoritative. There are three entry paths:
 
-The browser never calls agents directly. It calls FastAPI. FastAPI creates ADK-compatible content, runs the ADK `Runner`, and returns the final response plus state-sync hints.
+1. **Ordinary chat or image request:** the browser calls FastAPI, which runs the
+   main ADK graph beginning at `kitch_coordinator`.
+2. **Groceries UI provider action:** the browser calls a provider-keyed FastAPI
+   route, which invokes `GroceryCheckoutService`. Instamart actions may create
+   the operation-scoped Instamart ADK graph; Zepto remains adapter-driven.
+3. **Explicit chat-based Instamart sync:** `kitch_coordinator` calls
+   `sync_instamart_cart_tool`, which enters the same `GroceryCheckoutService`
+   path as the UI and creates the same operation-scoped Instamart graph.
+
+The browser never calls an agent or provider MCP server directly. FastAPI owns
+request context, persistence postconditions, provider authority, and frontend
+state-sync actions.
 
 ---
 
@@ -525,7 +635,7 @@ Current primitives:
 - `EventsCompactionConfig`
 - `LlmEventSummarizer`
 - Native ADK `Gemini` model adapter, configured with `KITCH_LLM_MODEL`.
-- `McpToolset` with a five-tool Instamart allowlist for the one-shot cart agent.
+- `McpToolset` with a five-tool Instamart allowlist for the operation-scoped cart agent.
 
 Why model configuration is environment-driven:
 
@@ -546,7 +656,8 @@ Responsibilities:
 - Understand user intent.
 - Route dated schedule creation, schedule lookup, and swaps to `chef_planner`.
 - Route food logging, macro diary, pantry, and image tasks to `vision_scanner`.
-- Route recipes, ingredients, grocery planning, and household food preferences to `recipe_grocery_planner`.
+- Route recipes, ingredients, grocery planning, standalone native-cart edits,
+  and household food preferences to `recipe_grocery_planner`.
 - Answer simple general chat directly.
 
 Why:
@@ -604,6 +715,8 @@ Responsibilities:
 - Save pantry-aware native cart rows derived from the same recipe cards.
 - Link native cart rows to the source recipe+grocery artifact.
 - Preserve manual cart rows by replacing only `source=agent` rows.
+- Add, update, and remove standalone `source=manual` native-cart rows directly
+  from chat without creating a fake recipe artifact.
 - Store and search household food preferences in ADK memory.
 - Avoid Zepto/Blinkit/provider tools.
 
@@ -614,7 +727,7 @@ Why recipe+grocery together:
 
 ### `instamart_cart_agent`
 
-Separate one-shot commerce specialist. It is instantiated by
+Separate operation-scoped commerce specialist. It is instantiated by
 `InstamartCartAgentService` for an authorized sync/revalidation/preflight run;
 it is not registered in `kitch_coordinator.sub_agents`.
 
@@ -672,6 +785,7 @@ Pantry and macro tools:
 Recipe+grocery tools:
 
 - `get_grocery_cart_tool`
+- `modify_native_grocery_cart_tool`
 - `clear_planned_grocery_cart_tool`
 - `save_recipe_grocery_plan_tool`
 - `get_recipe_grocery_plan_tool`
@@ -686,7 +800,9 @@ Provider tools/adapters:
 - `list_grocery_providers_tool` and `get_grocery_checkout_status_tool` are
   read-only coordinator tools.
 - `sync_instamart_cart_tool` authorizes only reversible Instamart cart writes
-  after an explicit chat instruction.
+  after an explicit chat instruction. It also accepts declared native-cart
+  changes for a combined request, rather than requiring another coordinator
+  tool.
 - The dedicated cart agent can search and update Instamart, but no agent can
   select payment or place an order.
 

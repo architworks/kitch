@@ -165,9 +165,12 @@ Why not Antigravity SDK as runtime:
 
 Instamart matching and reversible cart preparation run in a dedicated Gemini
 ADK agent with a five-tool `/im` MCP allowlist. The coordinator may invoke it
-only for an explicit Instamart sync request; the recipe planner still owns only
-the native cart. Server-owned middleware authorizes cart writes per request and
-keeps payment selection and checkout outside every agent toolset.
+only through the existing sync bridge for an explicit Instamart request. The
+recipe planner owns both recipe-derived and standalone manual native-cart
+intent. A combined native mutation plus Instamart sync reuses the same bridge;
+no second coordinator tool or grocery-ordering agent is present. Server-owned
+middleware authorizes cart writes per request and keeps payment selection and
+checkout outside every agent toolset.
 
 ---
 
@@ -239,6 +242,9 @@ Persistence contract:
   than a local fallback or apparent success.
 - `save_recipe_grocery_plan_with_cart` is a transactional RPC, so an agent cart
   replacement either commits with its artifact or rolls back completely.
+- `apply_native_grocery_cart_changes` applies a chat-requested batch of
+  standalone add/update/remove changes atomically and returns the confirmed
+  complete native cart.
 
 ---
 

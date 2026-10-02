@@ -23,6 +23,7 @@ from app.commerce_policy import (
     commerce_request_context,
 )
 from app.supabase_client import (
+    apply_native_grocery_cart_changes,
     claim_provider_checkout_operation,
     get_grocery_cart,
     get_provider_checkout_draft,
@@ -78,7 +79,12 @@ class GroceryCheckoutService:
         descriptor = adapter.descriptor()
         operation_id = str(uuid4())
         self._claim(provider_id, descriptor.environment, operation_id)
+        native_cart_changed = False
         try:
+            native_cart_changes = payload.get("native_cart_changes") or []
+            if native_cart_changes:
+                apply_native_grocery_cart_changes(native_cart_changes)
+                native_cart_changed = True
             selected_ids = {str(value) for value in payload.get("cart_item_ids", [])}
             selected_address_id = str(payload.get("selected_address_id") or "").strip()
             if not selected_address_id:
@@ -142,8 +148,23 @@ class GroceryCheckoutService:
             return {
                 "status": result.get("status", "blocked"),
                 "provider": provider_id,
+                "native_cart_changed": native_cart_changed,
                 "review": review,
             }
+        except ProviderOperationError as error:
+            if authority_source == "chat_sync" and native_cart_changed:
+                return {
+                    "status": "partial",
+                    "provider": provider_id,
+                    "native_cart_changed": True,
+                    "provider_cart_changed": False,
+                    "review": None,
+                    "message": (
+                        "The native Kitch cart was updated, but the Instamart "
+                        f"cart was not synchronized: {error.message}"
+                    ),
+                }
+            raise
         finally:
             release_provider_checkout_operation(
                 operation_id,
@@ -408,6 +429,7 @@ class GroceryCheckoutService:
         cart_item_ids: List[str] | None = None,
         selected_address_id: str = "",
         user_instruction: str = "",
+        native_cart_changes: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Explicit chat-only Instamart synchronization with safe address fallback."""
         provider_id = "swiggy_instamart"
@@ -419,13 +441,18 @@ class GroceryCheckoutService:
             address_id = str((existing or {}).get("selected_address_id") or "").strip()
         used_default = False
         if not address_id:
-            address_result = await adapter.list_addresses()
+            try:
+                address_result = await adapter.list_addresses()
+            except ProviderOperationError:
+                if not native_cart_changes:
+                    raise
+                address_result = {"addresses": []}
             addresses = list(address_result.get("addresses") or [])
             selected = next(
                 (address for address in addresses if address.get("is_default")),
                 addresses[0] if addresses else None,
             )
-            if not selected:
+            if not selected and not native_cart_changes:
                 raise ProviderOperationError(
                     provider=provider_id,
                     operation="chat_sync_cart",
@@ -433,14 +460,16 @@ class GroceryCheckoutService:
                     message="Connect Swiggy and add a saved delivery address before moving the cart from chat.",
                     status_code=422,
                 )
-            address_id = str(selected.get("id") or "")
-            used_default = True
+            if selected:
+                address_id = str(selected.get("id") or "")
+                used_default = True
         result = await self.sync(
             provider_id,
             {
                 "cart_item_ids": cart_item_ids or [],
                 "selected_address_id": address_id,
                 "user_instruction": user_instruction,
+                "native_cart_changes": native_cart_changes or [],
             },
             authority_source="chat_sync",
         )

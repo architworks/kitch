@@ -238,6 +238,11 @@ class MigrationContractTests(unittest.TestCase):
             ROOT / "backend" / "database" / "supabase_schema.sql"
         ).read_text(encoding="utf-8")
         self.assertNotIn("auth.uid()", schema)
+        self.assertIn("apply_native_grocery_cart_changes", schema)
+        self.assertIn(
+            "REVOKE ALL ON FUNCTION public.apply_native_grocery_cart_changes",
+            schema,
+        )
         self.assertIn("ENABLE ROW LEVEL SECURITY", schema)
         self.assertIn(
             "save_recipe_grocery_plan_with_cart",

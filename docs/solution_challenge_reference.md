@@ -85,7 +85,10 @@ Agent roles:
 - `kitch_coordinator`: routes natural language.
 - `chef_planner`: creates and edits weekly meal plans.
 - `vision_scanner`: handles plate macros and fridge/pantry scans.
-- `recipe_grocery_planner`: creates recipe artifacts and native grocery rows.
+- `recipe_grocery_planner`: creates recipe artifacts and recipe-derived or
+  standalone manual native grocery rows.
+- `instamart_cart_agent`: operation-scoped provider worker that prepares and
+  confirms the external cart; it is not a long-lived coordinator sub-agent.
 
 Core data flows:
 
@@ -95,11 +98,15 @@ Core data flows:
 2. **Recipe/grocery flow**
    User asks for groceries -> recipe grocery planner reads schedule and pantry -> generates recipe artifact -> derives native cart rows -> UI shows reviewable cart.
 
+   A standalone request such as "add one chocolate" skips recipe generation
+   and writes a manual native row through the same grocery specialist.
+
 3. **Fridge photo flow**
    User uploads fridge photo with grocery request -> vision scanner updates pantry first -> grocery planner runs against updated pantry -> pantry-covered rows are muted/excluded from provider sync.
 
 4. **Provider flow**
-   User selects native cart rows -> backend syncs and reconciles selected
+   User selects native cart rows in the UI or explicitly requests Instamart
+   synchronization in chat -> backend syncs and reconciles selected
    non-stocked rows through the selected adapter -> backend saves an isolated durable checkout draft -> stale
    products are revalidated/repaired -> user must explicitly approve an
    unchanged final cart before order placement.
@@ -348,6 +355,7 @@ Internal Python tools:
 - Read pantry and macro diary.
 - Save recipe/grocery artifacts.
 - Clear and save planned native cart rows.
+- Add, update, and remove standalone manual native-cart rows.
 - Save/search household preferences.
 
 External/provider integration:
@@ -358,6 +366,9 @@ External/provider integration:
   update the reversible cart, but it cannot call checkout or other consequential
   provider mutations.
 - Native cart rows are mapped into provider search/cart operations.
+- A combined explicit chat request reuses the existing coordinator sync bridge:
+  it applies the declared native change and then invokes the same Instamart
+  agent. No second composite coordinator tool is used.
 - Provider results return actual cart items and unavailable items.
 
 Why this matters:
@@ -503,7 +514,10 @@ Use this section to show that the prototype is engineered as a system. Some trad
 
 ### 3. One Recipe+Grocery Agent vs Separate Recipe and Grocery Agents
 
-**Decision:** One specialist agent generates recipe artifacts and derives grocery rows from the same artifact.
+**Decision:** One specialist agent generates recipe artifacts and derives
+recipe-linked grocery rows from the same artifact. The same specialist also
+owns explicitly requested standalone manual cart rows, which intentionally do
+not fabricate a recipe.
 
 **Alternative considered:** Separate recipe generation from grocery list generation.
 
@@ -512,6 +526,8 @@ Use this section to show that the prototype is engineered as a system. Some trad
 - Grocery rows must match the recipe the user will actually cook.
 - Splitting the logic creates drift: buy ingredients the recipe does not use, or miss ingredients the recipe needs.
 - A saved recipe+grocery artifact gives the UI something auditable.
+- Standalone household staples still belong to the grocery domain and do not
+  justify another agent or coordinator persistence tool.
 
 **Cost of the decision:**
 
