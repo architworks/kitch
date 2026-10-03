@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Dict, List
 from uuid import uuid4
 
@@ -38,6 +39,52 @@ INSTAMART_AGENT_MCP_TOOLS = [
     "update_cart",
     "get_cart",
 ]
+
+
+def _before_instamart_tool(
+    tool: Any,
+    args: Dict[str, Any],
+    tool_context: Any,
+    *,
+    capture: CommerceRunCapture,
+    selected_address_id: str,
+) -> None:
+    """Apply server-owned cart authority before an ADK tool invocation."""
+    del tool_context
+    CommerceToolPolicy.authorize(tool.name)
+    capture.record_tool_arguments(tool.name, to_plain(args or {}))
+    if tool.name in {"search_products", "update_cart"}:
+        supplied_address = str(
+            (args or {}).get("addressId")
+            or (args or {}).get("selectedAddressId")
+            or ""
+        )
+        if supplied_address != selected_address_id:
+            raise CommercePolicyError(
+                tool.name,
+                "The Instamart agent may use only the backend-selected delivery address.",
+            )
+    if tool.name == "update_cart" and len(capture.tool_arguments[tool.name]) > 2:
+        raise CommercePolicyError(
+            tool.name,
+            "The Instamart cart agent may perform one initial update and one repair only.",
+        )
+    return None
+
+
+def _after_instamart_tool(
+    tool: Any,
+    args: Dict[str, Any],
+    tool_context: Any,
+    tool_response: Dict[str, Any],
+    *,
+    capture: CommerceRunCapture,
+) -> None:
+    """Capture exact MCP results using ADK's keyword callback contract."""
+    del args, tool_context
+    if tool.name in INSTAMART_AGENT_MCP_TOOLS:
+        capture.record_tool_result(tool.name, to_plain(tool_response))
+    return None
 
 
 def read_scoped_native_cart_tool() -> Dict[str, Any]:
@@ -209,36 +256,12 @@ class InstamartCartAgentService:
             },
         )
 
-        def before_tool(tool: Any, args: Dict[str, Any], _context: Any) -> None:
-            CommerceToolPolicy.authorize(tool.name)
-            capture.record_tool_arguments(tool.name, to_plain(args or {}))
-            if tool.name in {"search_products", "update_cart"}:
-                supplied_address = str(
-                    (args or {}).get("addressId")
-                    or (args or {}).get("selectedAddressId")
-                    or ""
-                )
-                if supplied_address != selected_address_id:
-                    raise CommercePolicyError(
-                        tool.name,
-                        "The Instamart agent may use only the backend-selected delivery address.",
-                    )
-            if tool.name == "update_cart" and len(capture.tool_arguments[tool.name]) > 2:
-                raise CommercePolicyError(
-                    tool.name,
-                    "The Instamart cart agent may perform one initial update and one repair only.",
-                )
-            return None
-
-        def after_tool(
-            tool: Any,
-            _args: Dict[str, Any],
-            _context: Any,
-            tool_response: Dict[str, Any],
-        ) -> None:
-            if tool.name in INSTAMART_AGENT_MCP_TOOLS:
-                capture.record_tool_result(tool.name, to_plain(tool_response))
-            return None
+        before_tool = partial(
+            _before_instamart_tool,
+            capture=capture,
+            selected_address_id=selected_address_id,
+        )
+        after_tool = partial(_after_instamart_tool, capture=capture)
 
         agent = LlmAgent(
             model=configured_llm,

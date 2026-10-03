@@ -117,6 +117,25 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 or metadata.get("selected_sku_id")
                 or ""
             )
+            if not spin_id or not sku_id:
+                alternatives = metadata.get("alternatives_considered") or []
+                for alternative in alternatives:
+                    if not isinstance(alternative, dict):
+                        continue
+                    alternative_spin_id = str(
+                        alternative.get("spin_id")
+                        or alternative.get("spinId")
+                        or ""
+                    )
+                    alternative_sku_id = str(
+                        alternative.get("sku_id")
+                        or alternative.get("skuId")
+                        or ""
+                    )
+                    if (alternative_spin_id, alternative_sku_id) in cart_by_id:
+                        spin_id = alternative_spin_id
+                        sku_id = alternative_sku_id
+                        break
             native = native_by_id.get(native_id)
             actual = cart_by_id.get((spin_id, sku_id))
             try:
@@ -125,6 +144,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 expected_quantity = 0
             if not native or not actual or expected_quantity <= 0 or int(actual.get("quantity") or 0) != expected_quantity:
                 unavailable.append({
+                    "native_item_id": native_id,
                     "name": (native or {}).get("name") or metadata.get("native_item_name") or "Selected item",
                     "reason": "The agent-selected Instamart SKU and quantity were absent from the confirmed cart.",
                     "matching": metadata,
@@ -527,21 +547,6 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 message=f"Instamart is missing required capabilities: {', '.join(missing)}.",
                 retryable=False,
             )
-        incompatible = sorted(
-            name for name in required
-            if not self._schema_is_compatible(
-                name,
-                McpProviderClient.input_schema(tools[name]),
-            )
-        )
-        if incompatible:
-            raise ProviderOperationError(
-                provider=self.provider_id,
-                operation="discover_tools",
-                code="provider_contract_incompatible",
-                message=f"Instamart returned incompatible tool schemas: {', '.join(incompatible)}.",
-                retryable=False,
-            )
         contract = {
             name: McpProviderClient.input_schema(tool)
             for name, tool in sorted(tools.items())
@@ -550,30 +555,6 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             json.dumps(contract, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()[:16]
         return tools, version
-
-    @staticmethod
-    def _schema_is_compatible(name: str, schema: Dict[str, Any]) -> bool:
-        mandatory = {
-            "get_addresses": set(),
-            "search_products": {"addressId", "query"},
-            "update_cart": {"selectedAddressId", "items"},
-            "get_cart": set(),
-            "get_payment_options": set(),
-            "checkout": {"addressId"},
-            "check_payment_status": {"paasId"},
-        }.get(name, set())
-        if not isinstance(schema, dict) or schema.get("type") not in {None, "object"}:
-            return False
-        if not mandatory:
-            return True
-        properties = schema.get("properties")
-        required = schema.get("required")
-        return (
-            isinstance(properties, dict)
-            and mandatory.issubset(properties)
-            and isinstance(required, list)
-            and mandatory.issubset(set(required))
-        )
 
     def _base_result(self, version: str, address_id: str) -> Dict[str, Any]:
         return {
@@ -827,7 +808,10 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 options.append(
                     {
                         "id": str(identifier),
-                        "label": str(self._first(value, "label", "name", "title") or identifier),
+                        "label": self._payment_label(
+                            identifier,
+                            self._first(value, "label", "name", "title"),
+                        ),
                         "kind": "upi",
                         "provider_value": str(identifier),
                         "flow": flow,
@@ -852,13 +836,30 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             else:
                 continue
             text = f"{identifier} {label}".lower()
-            kind = "upi" if any(term in text for term in ("upi", "paywithqr")) else "cod" if any(term in text for term in ("cod", "cash")) else "unsupported"
+            known_upi_identifiers = {
+                "gpay://upi/",
+                "phonepe://",
+                "paytmmp://",
+                "bhim://upi/",
+                "credpay://upi/",
+                "super://",
+                "fpupi://",
+                "paywithqr",
+            }
+            kind = (
+                "upi"
+                if str(identifier).casefold() in known_upi_identifiers
+                or any(term in text for term in ("upi", "paywithqr"))
+                else "cod"
+                if any(term in text for term in ("cod", "cash"))
+                else "unsupported"
+            )
             if kind == "unsupported" or not identifier:
                 continue
             options.append(
                 {
                     "id": str(identifier),
-                    "label": str(label),
+                    "label": self._payment_label(identifier, label),
                     "kind": kind,
                     "provider_value": str(identifier),
                     "flow": "upi_qr" if "paywithqr" in text else "upi_intent" if kind == "upi" else "cash",
@@ -867,6 +868,31 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         deduped = list({option["id"]: option for option in options}.values())
         upi = [option for option in deduped if option["kind"] == "upi"]
         return upi or [option for option in deduped if option["kind"] == "cod"]
+
+    @staticmethod
+    def _payment_label(identifier: Any, provider_label: Any = None) -> str:
+        """Present provider payment identifiers without changing their submitted value."""
+        raw_identifier = str(identifier or "").strip()
+        raw_label = str(provider_label or "").strip()
+        labels = {
+            "gpay://upi/": "Google Pay",
+            "phonepe://": "PhonePe",
+            "paytmmp://": "Paytm",
+            "bhim://upi/": "BHIM",
+            "credpay://upi/": "CRED Pay",
+            "super://": "super.money",
+            "fpupi://": "Flipkart UPI",
+            "paywithqr": "Scan QR with any UPI app",
+            "cash": "Cash on delivery",
+            "cod": "Cash on delivery",
+            "swiggypay": "Swiggy Money",
+        }
+        friendly = labels.get(raw_identifier.casefold())
+        if friendly:
+            return friendly
+        if raw_label and raw_label.casefold() != raw_identifier.casefold():
+            return raw_label
+        return raw_label or raw_identifier or "Payment method"
 
     async def _order_history_after_ambiguous_failure(self) -> List[Dict[str, Any]]:
         try:

@@ -34,7 +34,7 @@ class FakeContext:
 
 
 class FakeInstamartClient:
-    def __init__(self, *, checkout_error=False):
+    def __init__(self, *, checkout_error=False, live_optional_address_schema=False):
         self.calls = []
         self.checkout_error = checkout_error
         names = {
@@ -54,7 +54,11 @@ class FakeInstamartClient:
                 inputSchema={
                     "type": "object",
                     "properties": {key: {} for key in required.get(name, [])},
-                    "required": required.get(name, []),
+                    "required": (
+                        [key for key in required.get(name, []) if key not in {"addressId", "selectedAddressId"}]
+                        if live_optional_address_schema
+                        else required.get(name, [])
+                    ),
                 },
             )
             for name in names
@@ -170,6 +174,12 @@ class InstamartProviderTests(unittest.TestCase):
             "is_default": True,
         }])
 
+    def test_readiness_accepts_live_schema_with_alternative_location_inputs(self):
+        client = FakeInstamartClient(live_optional_address_schema=True)
+        result = asyncio.run(self.adapter(client).readiness())
+        self.assertEqual(result["state"], "ready")
+        self.assertTrue(result["capability_version"])
+
     def test_egg_request_uses_one_twelve_piece_pack_not_twelve_packs(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
         result = self.adapter().confirmed_agent_result(native, "home-1", self.capture())
@@ -180,6 +190,26 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(match["cart_item"]["price_minor"], 9200)
         self.assertEqual(match["cart_item"]["line_total_minor"], 9200)
         self.assertEqual(result["cart_summary"]["total_minor"], 9200)
+
+    def test_confirmed_cart_accepts_selected_ids_from_agent_alternatives(self):
+        native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
+        capture = self.capture()
+        report = capture.structured_result["matches"][0]
+        spin_id = report.pop("spin_id")
+        sku_id = report.pop("sku_id")
+        report["alternatives_considered"] = [{
+            "spin_id": spin_id,
+            "sku_id": sku_id,
+            "product_name": report["product_name"],
+            "pack": report["pack"],
+        }]
+
+        result = self.adapter().confirmed_agent_result(native, "home-1", capture)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cart_item"]["quantity"], 1)
+        self.assertEqual(result["unavailable_items"], [])
 
     def test_agent_partial_cart_is_valid_and_unresolved_item_is_disclosed(self):
         native = [
@@ -208,6 +238,8 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["items"], [])
         self.assertIn("absent from the confirmed cart", result["unavailable_items"][0]["reason"])
+        self.assertEqual(len(result["unavailable_items"]), 1)
+        self.assertEqual(result["unavailable_items"][0]["native_item_id"], "180")
 
     def test_failed_update_result_cannot_be_reconstructed_as_success(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
@@ -215,6 +247,24 @@ class InstamartProviderTests(unittest.TestCase):
         capture.tool_results["update_cart"][-1] = {"error": "provider rejected cart"}
         with self.assertRaises(ProviderOperationError):
             self.adapter().confirmed_agent_result(native, "home-1", capture)
+
+    def test_payment_options_use_friendly_labels_without_changing_provider_values(self):
+        options = self.adapter()._payment_options({
+            "availablePaymentMethods": [
+                "gpay://upi/",
+                "phonepe://",
+                "PayWithQR",
+            ]
+        })
+
+        self.assertEqual(
+            [(option["label"], option["provider_value"]) for option in options],
+            [
+                ("Google Pay", "gpay://upi/"),
+                ("PhonePe", "phonepe://"),
+                ("Scan QR with any UPI app", "PayWithQR"),
+            ],
+        )
 
     def test_checkout_requires_ui_authority(self):
         adapter = self.adapter(FakeInstamartClient())

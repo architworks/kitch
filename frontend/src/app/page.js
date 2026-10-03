@@ -454,6 +454,37 @@ const optionValue = (option, keys, fallback = "") => {
   return fallback;
 };
 
+const formatProviderPaymentLabel = (option, fallback = "Payment method") => {
+  const identifier = optionValue(
+    option,
+    ["id", "payment_method_id", "paymentMethodId", "method"],
+    ""
+  );
+  const providerLabel = optionValue(
+    option,
+    ["label", "name", "payment_method", "paymentMethod", "method", "title"],
+    ""
+  );
+  const friendlyLabels = {
+    "gpay://upi/": "Google Pay",
+    "phonepe://": "PhonePe",
+    "paytmmp://": "Paytm",
+    "bhim://upi/": "BHIM",
+    "credpay://upi/": "CRED Pay",
+    "super://": "super.money",
+    "fpupi://": "Flipkart UPI",
+    paywithqr: "Scan QR with any UPI app",
+    cash: "Cash on delivery",
+    cod: "Cash on delivery",
+    swiggypay: "Swiggy Money"
+  };
+  return friendlyLabels[identifier.toLowerCase()]
+    || friendlyLabels[providerLabel.toLowerCase()]
+    || providerLabel
+    || identifier
+    || fallback;
+};
+
 const textOptionValue = (option, keys, fallback = "") => {
   const normalizeText = (value) => {
     if (value === undefined || value === null || value === "") return "";
@@ -1867,8 +1898,12 @@ export default function Home() {
         } else if (act.type === "UPDATE_GROCERY_CART") {
           triggerBannerAlert("Grocery cart updated by Kitch Agent!");
         } else if (act.type === "UPDATE_PROVIDER_CART") {
-          setSelectedOrderingProvider(act.provider || "swiggy_instamart");
+          const actionProvider = act.provider || "swiggy_instamart";
+          setSelectedOrderingProvider(actionProvider);
           setActiveTab("groceries");
+          if (actionProvider === selectedOrderingProvider) {
+            await restoreProviderCheckoutDraft();
+          }
           triggerBannerAlert("Provider cart prepared. Review the confirmed products before checkout.");
         } else if (act.type === "CONFIRM_DESTRUCTIVE_ACTION") {
           setConfirmationDialog({
@@ -2217,11 +2252,7 @@ export default function Home() {
     )
     : "";
   const instamartSolePaymentLabel = instamartSolePaymentOption
-    ? optionValue(
-      instamartSolePaymentOption,
-      ["label", "name", "payment_method", "paymentMethod", "method", "title"],
-      "Cash on delivery"
-    )
+    ? formatProviderPaymentLabel(instamartSolePaymentOption, "Cash on delivery")
     : "";
   const effectiveProviderPaymentMethod = selectedProviderPaymentMethod || instamartSolePaymentId;
   const providerPaymentState = providerCartReview?.payment_state || {};
@@ -3844,7 +3875,7 @@ export default function Home() {
                                 <option value="">Select payment method</option>
                                 {providerPaymentOptions.map((option, idx) => {
                                   const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${idx}`);
-                                  const label = optionValue(option, ["label", "name", "payment_method", "paymentMethod", "method", "title"], JSON.stringify(option).slice(0, 90));
+                                  const label = formatProviderPaymentLabel(option, JSON.stringify(option).slice(0, 90));
                                   return <option key={`${value}-${idx}`} value={value}>{label}</option>;
                                 })}
                               </select>

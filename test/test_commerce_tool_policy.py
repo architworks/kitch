@@ -5,15 +5,21 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.agent.instamart_cart_agent import INSTAMART_AGENT_MCP_TOOLS  # noqa: E402
+from app.agent.instamart_cart_agent import (  # noqa: E402
+    INSTAMART_AGENT_MCP_TOOLS,
+    _after_instamart_tool,
+    _before_instamart_tool,
+)
 from app.commerce_policy import (  # noqa: E402
     CommercePermission,
     CommercePolicyError,
+    CommerceRunCapture,
     CommerceToolPolicy,
     commerce_request_context,
 )
@@ -67,6 +73,32 @@ class CommerceToolPolicyTests(unittest.TestCase):
             operation_id="order-1",
         ):
             CommerceToolPolicy.authorize("checkout")
+
+    def test_adk_keyword_callback_contract_records_authorized_tool_calls(self):
+        capture = CommerceRunCapture()
+        tool = SimpleNamespace(name="search_products")
+        with commerce_request_context(
+            source="ui_sync",
+            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            operation_id="sync-1",
+            capture=capture,
+        ):
+            _before_instamart_tool(
+                tool=tool,
+                args={"addressId": "home-1", "query": "eggs"},
+                tool_context=object(),
+                capture=capture,
+                selected_address_id="home-1",
+            )
+            _after_instamart_tool(
+                tool=tool,
+                args={"addressId": "home-1", "query": "eggs"},
+                tool_context=object(),
+                tool_response={"success": True},
+                capture=capture,
+            )
+        self.assertEqual(capture.tool_arguments["search_products"][0]["query"], "eggs")
+        self.assertEqual(capture.latest("search_products"), {"success": True})
 
 
 if __name__ == "__main__":
