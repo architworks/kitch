@@ -112,12 +112,15 @@ CREATE TABLE IF NOT EXISTS public.macro_diary (
     id BIGSERIAL PRIMARY KEY,
     profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     meal_name TEXT NOT NULL,
+    quantity NUMERIC(10,2) NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    unit TEXT NOT NULL DEFAULT 'serving',
+    meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'snack', 'dinner')),
     calories INTEGER NOT NULL DEFAULT 0 CHECK (calories >= 0),
     protein_g INTEGER NOT NULL DEFAULT 0 CHECK (protein_g >= 0),
     carbs_g INTEGER NOT NULL DEFAULT 0 CHECK (carbs_g >= 0),
     fat_g INTEGER NOT NULL DEFAULT 0 CHECK (fat_g >= 0),
     fiber_g INTEGER NOT NULL DEFAULT 0 CHECK (fiber_g >= 0),
-    logged_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    consumed_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -237,7 +240,7 @@ CREATE INDEX IF NOT EXISTS idx_recipe_grocery_plans_profile_created_at ON public
 CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_id ON public.grocery_cart_items(profile_id);
 CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_source ON public.grocery_cart_items(profile_id, source);
 CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_recipe_plan ON public.grocery_cart_items(profile_id, recipe_grocery_plan_id);
-CREATE INDEX IF NOT EXISTS idx_macro_diary_profile_id_date ON public.macro_diary(profile_id, logged_at);
+CREATE INDEX IF NOT EXISTS idx_macro_diary_profile_consumed_at ON public.macro_diary(profile_id, consumed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_provider_checkout_drafts_profile_provider
     ON public.provider_checkout_drafts(profile_id, provider, provider_environment);
 CREATE INDEX IF NOT EXISTS idx_provider_connections_profile_provider

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from typing import Any, Callable, Dict, List
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -114,12 +115,15 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "id",
         "profile_id",
         "meal_name",
+        "quantity",
+        "unit",
+        "meal_type",
         "calories",
         "protein_g",
         "carbs_g",
         "fat_g",
         "fiber_g",
-        "logged_at",
+        "consumed_at",
         "updated_at",
     ),
     "provider_checkout_drafts": (
@@ -1557,30 +1561,141 @@ def get_latest_recipe_grocery_plan_metadata(
 
 
 # Macro diary
-def get_macro_diary(user_name: str) -> List[Dict[str, Any]]:
+NUTRITION_MEAL_TYPES = ("breakfast", "lunch", "snack", "dinner")
+
+
+def _nutrition_timestamp(value: str | datetime | None = None) -> datetime:
+    """Resolve an explicit consumption time or default to now in household time."""
+    zone = ZoneInfo(get_household_timezone())
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return datetime.now(zone)
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value).strip()
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            parsed_day = parse_iso_date(raw)
+            current = datetime.now(zone)
+            parsed = datetime.combine(parsed_day, current.timetz().replace(tzinfo=None), tzinfo=zone)
+    return parsed.replace(tzinfo=zone) if parsed.tzinfo is None else parsed.astimezone(zone)
+
+
+def infer_nutrition_meal_type(
+    consumed_at: str | datetime | None = None,
+    explicit_meal_type: str | None = None,
+) -> str:
+    """Use explicit meal context when supplied; otherwise use household-local time."""
+    explicit = str(explicit_meal_type or "").strip().lower()
+    if explicit:
+        if explicit not in NUTRITION_MEAL_TYPES:
+            raise ValueError("meal_type must be breakfast, lunch, snack, or dinner")
+        return explicit
+    hour = _nutrition_timestamp(consumed_at).hour
+    if 5 <= hour <= 10:
+        return "breakfast"
+    if 11 <= hour <= 15:
+        return "lunch"
+    if 16 <= hour <= 18:
+        return "snack"
+    return "dinner"
+
+
+def _nutrition_day_bounds(day: str | date) -> tuple[datetime, datetime]:
+    zone = ZoneInfo(get_household_timezone())
+    target = parse_iso_date(day)
+    start = datetime.combine(target, datetime_time.min, tzinfo=zone)
+    return start.astimezone(timezone.utc), (start + timedelta(days=1)).astimezone(timezone.utc)
+
+
+def _macro_diary_entry(row: Dict[str, Any]) -> Dict[str, Any]:
+    consumed_at = str(row["consumed_at"])
+    local_time = datetime.fromisoformat(consumed_at.replace("Z", "+00:00")).astimezone(
+        ZoneInfo(get_household_timezone())
+    )
+    return {
+        "id": row.get("id"),
+        "name": row["meal_name"],
+        "quantity": row.get("quantity", 1),
+        "unit": row.get("unit") or "serving",
+        "meal_type": row["meal_type"],
+        "calories": row["calories"],
+        "macros": {
+            "protein": row["protein_g"],
+            "carbs": row["carbs_g"],
+            "fat": row["fat_g"],
+            "fiber": row["fiber_g"],
+        },
+        "consumed_at": consumed_at,
+        "date": local_time.date().isoformat(),
+        "time": local_time.strftime("%H:%M"),
+    }
+
+
+def get_macro_diary(
+    user_name: str,
+    start_date: str | date | None = None,
+    end_date: str | date | None = None,
+) -> List[Dict[str, Any]]:
+    def execute_query():
+        query = (
+            supabase.table("macro_diary").select("*")
+            .eq("profile_id", get_user_id(user_name))
+        )
+        if start_date is not None:
+            start, _ = _nutrition_day_bounds(start_date)
+            query = query.gte("consumed_at", start.isoformat())
+        if end_date is not None:
+            _, end = _nutrition_day_bounds(end_date)
+            query = query.lt("consumed_at", end.isoformat())
+        return query.order("consumed_at").execute()
+
     rows = _read_rows(
         "get_macro_diary",
         "macro_diary",
-        lambda: supabase.table("macro_diary")
-        .select("*")
-        .eq("profile_id", get_user_id(user_name))
-        .execute(),
+        execute_query,
     )
-    return [
-        {
-            "id": row.get("id"),
-            "name": row["meal_name"],
-            "calories": row["calories"],
-            "macros": {
-                "protein": row["protein_g"],
-                "carbs": row["carbs_g"],
-                "fat": row["fat_g"],
-                "fiber": row["fiber_g"],
+    return [_macro_diary_entry(row) for row in rows]
+
+
+def get_nutrition_dashboard(
+    user_name: str, start_date: str | date, end_date: str | date,
+) -> Dict[str, Any]:
+    start = parse_iso_date(start_date)
+    end = parse_iso_date(end_date)
+    if end < start:
+        raise ValueError("end_date must not precede start_date")
+    entries = get_macro_diary(user_name, start, end)
+    entries_by_day: Dict[str, List[Dict[str, Any]]] = {
+        day.isoformat(): [] for day in dates_between(start, end)
+    }
+    for entry in entries:
+        entries_by_day.setdefault(entry["date"], []).append(entry)
+    days = []
+    for day in dates_between(start, end):
+        day_entries = entries_by_day[day.isoformat()]
+        days.append({
+            "date": day.isoformat(),
+            "weekday": day.strftime("%A"),
+            "entries": day_entries,
+            "totals": {
+                "calories": sum(float(entry["calories"]) for entry in day_entries),
+                "protein": sum(float(entry["macros"]["protein"]) for entry in day_entries),
+                "carbs": sum(float(entry["macros"]["carbs"]) for entry in day_entries),
+                "fat": sum(float(entry["macros"]["fat"]) for entry in day_entries),
+                "fiber": sum(float(entry["macros"]["fiber"]) for entry in day_entries),
             },
-            "time": row["logged_at"],
-        }
-        for row in rows
-    ]
+        })
+    zone = ZoneInfo(get_household_timezone())
+    return {
+        "timezone": str(zone),
+        "today": datetime.now(zone).date().isoformat(),
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "days": days,
+        "targets": get_nutrition_targets(user_name),
+    }
 
 
 def log_macros(
@@ -1591,7 +1706,13 @@ def log_macros(
     carbs: int,
     fat: int,
     fiber: int = 0,
+    quantity: float = 1,
+    unit: str = "serving",
+    meal_type: str = "",
+    consumed_at: str | datetime | None = None,
 ) -> Dict[str, Any]:
+    timestamp = _nutrition_timestamp(consumed_at)
+    resolved_meal_type = infer_nutrition_meal_type(timestamp, meal_type)
     return _confirmed_row(
         "log_macros",
         "macro_diary",
@@ -1600,11 +1721,15 @@ def log_macros(
             {
                 "profile_id": get_user_id(user_name),
                 "meal_name": meal_name,
+                "quantity": quantity,
+                "unit": str(unit or "serving").strip() or "serving",
+                "meal_type": resolved_meal_type,
                 "calories": calories,
                 "protein_g": protein,
                 "carbs_g": carbs,
                 "fat_g": fat,
                 "fiber_g": fiber,
+                "consumed_at": timestamp.astimezone(timezone.utc).isoformat(),
             }
         )
         .execute(),
@@ -1625,8 +1750,6 @@ def clear_macro_diary(user_name: str) -> bool:
 
 
 def clear_macro_diary_day(user_name: str, day: str | date | None = None) -> int:
-    from zoneinfo import ZoneInfo
-
     timezone_name = get_household_timezone()
     target = parse_iso_date(day) if day else datetime.now(ZoneInfo(timezone_name)).date()
     start = datetime.combine(target, datetime.min.time(), tzinfo=ZoneInfo(timezone_name))
@@ -1635,8 +1758,8 @@ def clear_macro_diary_day(user_name: str, day: str | date | None = None) -> int:
         "clear_macro_diary_day", "macro_diary",
         lambda: supabase.table("macro_diary").delete()
         .eq("profile_id", get_user_id(user_name))
-        .gte("logged_at", start.astimezone(timezone.utc).isoformat())
-        .lt("logged_at", end.astimezone(timezone.utc).isoformat()).execute(),
+        .gte("consumed_at", start.astimezone(timezone.utc).isoformat())
+        .lt("consumed_at", end.astimezone(timezone.utc).isoformat()).execute(),
     )
     return len(rows)
 
@@ -1645,8 +1768,17 @@ def update_macro_entry(user_name: str, entry_id: int, updates: Dict[str, Any]) -
     allowed = {
         "meal_name": "meal_name", "calories": "calories",
         "protein": "protein_g", "carbs": "carbs_g", "fat": "fat_g", "fiber": "fiber_g",
+        "quantity": "quantity", "unit": "unit", "meal_type": "meal_type",
     }
     payload = {column: updates[key] for key, column in allowed.items() if key in updates}
+    if "consumed_at" in updates:
+        payload["consumed_at"] = _nutrition_timestamp(updates["consumed_at"]).astimezone(timezone.utc).isoformat()
+        if "meal_type" not in updates:
+            payload["meal_type"] = infer_nutrition_meal_type(updates["consumed_at"])
+    if "meal_type" in updates:
+        payload["meal_type"] = infer_nutrition_meal_type(
+            updates.get("consumed_at"), str(updates["meal_type"])
+        )
     if not payload:
         raise ValueError("At least one nutrition field is required")
     payload["updated_at"] = _now_iso()

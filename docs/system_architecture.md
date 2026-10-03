@@ -233,7 +233,7 @@ Supabase tables:
 | `recipe_grocery_plans` | Shared household | Stores recipe cards, ingredients, pantry notes, request scope, and cart update metadata. |
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
 | `grocery_cart_items` | Shared household | Stores native provider-agnostic cart rows. |
-| `macro_diary` | Individual | Stores active-user nutrition logs. |
+| `macro_diary` | Individual | Stores dated food entries with quantity, unit, meal group, consumption time, and calorie/macro estimates. |
 | `provider_checkout_drafts` | Shared household | Stores environment-scoped cart projections, mappings, approval snapshots, payment/order state, ambiguous outcomes, and operation leases. |
 | `provider_connections` | Shared household | Stores one encrypted household access token and connection status per provider/environment. |
 | `provider_oauth_clients` | Backend configuration | Stores one dynamic OAuth client registration per provider/environment. |
@@ -241,6 +241,12 @@ Supabase tables:
 | `pending_agent_actions` | Shared household | Stores expiring, single-use confirmation payloads for bulk destructive changes. |
 
 Important modeling decisions:
+
+- Nutrition entries use `consumed_at` as the dated source of truth. An explicit
+  meal/date/time from the user wins; otherwise the request receipt time in the
+  household timezone determines Breakfast, Lunch, Snack, or Dinner.
+- Daily nutrition totals and weekly trends are derived from diary entries;
+  users edit entries or goals rather than overwriting aggregate totals.
 
 - `meal_plans` is uniquely keyed by `(profile_id, plan_date)`; weekdays are
   derived display labels, so Thursday in one week cannot overwrite another.

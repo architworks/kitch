@@ -480,9 +480,12 @@ Example prompts:
 
 1. User describes food or provides a plate photo.
 2. Kitch estimates calories and macros.
-3. Kitch logs the meal to the active member.
-4. Kitch confirms the estimated nutrition.
-5. The active member's daily nutrition state updates.
+3. Kitch preserves an explicitly named meal/date/time. Otherwise, it assigns
+   the entry to Breakfast, Lunch, Snack, or Dinner from the request receipt time
+   in the household timezone.
+4. Kitch logs the food and portion to the active member.
+5. Kitch confirms the estimated nutrition.
+6. The active member's dated daily and weekly nutrition state updates.
 
 ### Functional UX Requirements
 
@@ -491,7 +494,7 @@ Example prompts:
 - Kitch should not log a meal for the wrong person.
 - Users should be able to correct meal name, quantity, or estimated macros.
 - Kitch should communicate uncertainty in estimates.
-- Fridge scans and plate scans must be clearly differentiated.
+- Vision Scanner identifies food but does not guess the meal group.
 
 ### Important States
 
@@ -521,7 +524,8 @@ Example prompts:
 1. Kitch reads the active member's diary.
 2. Kitch summarizes calories and macros.
 3. Kitch compares intake to the member's targets.
-4. User can clear or correct logs when needed.
+4. The user can navigate dates and compare the selected week's intake.
+5. The user can add, edit, delete, or clear dated food entries and edit goals.
 
 ### Functional UX Requirements
 
@@ -529,6 +533,11 @@ Example prompts:
 - Switching members should change personal logs without changing household meal plan or pantry.
 - Kitch should make clear whether it is answering for one person or the household.
 - Clearing logs should affect only the active member.
+- Daily totals remain derived from entries rather than becoming independently
+  editable numbers.
+- Food entries are grouped by Breakfast, Lunch, Snack, and Dinner. Explicit
+  user context wins; otherwise household-local request time determines the
+  group.
 
 ---
 

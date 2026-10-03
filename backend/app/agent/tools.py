@@ -634,12 +634,20 @@ def log_macros_tool(
     protein: int, 
     carbs: int, 
     fat: int, 
-    fiber: int = 0
+    fiber: int = 0,
+    quantity: float = 1,
+    unit: str = "serving",
+    meal_type: str = "",
+    consumed_at: str = "",
 ) -> str:
   """
-  Record a meal intake log with calorie and macronutrient details into the user's Supabase journal.
+  Record one food entry. Supply meal_type or consumed_at only when the user states
+  that context; otherwise household-local submission time assigns both.
   """
-  db_log_macros(user_name, meal_name, calories, protein, carbs, fat, fiber)
+  db_log_macros(
+    user_name, meal_name, calories, protein, carbs, fat, fiber,
+    quantity, unit, meal_type, consumed_at or None,
+  )
   return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {user_name}'s journal."
 
 def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:

@@ -61,6 +61,30 @@ const ABOUT_STEP_TONES = {
 };
 
 const DEFAULT_MEAL_SLOT = "breakfast";
+const NUTRITION_MEALS = [
+  { id: "breakfast", label: "Breakfast", icon: "☀", defaultTime: "08:30" },
+  { id: "lunch", label: "Lunch", icon: "◐", defaultTime: "13:00" },
+  { id: "snack", label: "Snack", icon: "◉", defaultTime: "17:00" },
+  { id: "dinner", label: "Dinner", icon: "☾", defaultTime: "20:30" }
+];
+const EMPTY_NUTRITION_ENTRY = {
+  id: null, meal_name: "", quantity: 1, unit: "serving", meal_type: "breakfast",
+  calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, consumed_at: ""
+};
+const currentNutritionMealType = (timezone = "Asia/Kolkata") => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone, hour: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date());
+  const hour = Number(parts.find(part => part.type === "hour")?.value || 0);
+  if (hour >= 5 && hour <= 10) return "breakfast";
+  if (hour >= 11 && hour <= 15) return "lunch";
+  if (hour >= 16 && hour <= 18) return "snack";
+  return "dinner";
+};
+const formatNutritionNumber = (value) => {
+  const numeric = Number(value || 0);
+  return Number.isInteger(numeric) ? numeric : numeric.toFixed(1);
+};
 const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
 const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
@@ -820,6 +844,13 @@ export default function Home() {
     carbs_target_g: 200,
     fat_target_g: 67
   });
+  const [nutritionDashboard, setNutritionDashboard] = useState({ days: [] });
+  const [selectedNutritionDate, setSelectedNutritionDate] = useState("");
+  const [nutritionTrendMetric, setNutritionTrendMetric] = useState("calories");
+  const [expandedNutritionMeals, setExpandedNutritionMeals] = useState({ breakfast: true });
+  const [nutritionEntryEditor, setNutritionEntryEditor] = useState(null);
+  const [nutritionGoalEditor, setNutritionGoalEditor] = useState(null);
+  const [isNutritionSaving, setIsNutritionSaving] = useState(false);
   const [providerCartReview, setProviderCartReview] = useState(null);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState(null);
   const [providerSavedAddresses, setProviderSavedAddresses] = useState(null);
@@ -972,6 +1003,22 @@ export default function Home() {
     return res.json();
   };
 
+  const loadNutritionDashboard = useCallback(async (userName, focusDate) => {
+    const weekStart = getWeekStartForDate(focusDate);
+    const weekEnd = shiftIsoDate(weekStart, 6);
+    const res = await fetch(apiUrl(
+      `/api/nutrition/${encodeURIComponent(userName)}?start_date=${weekStart}&end_date=${weekEnd}`
+    ));
+    await requireSuccessfulResponse(res);
+    const data = await res.json();
+    setNutritionDashboard(data);
+    setNutritionTargets(data.targets);
+    setSelectedNutritionDate(current => (
+      data.days?.some(day => day.date === current) ? current : focusDate || data.today
+    ));
+    return data;
+  }, []);
+
   const loadMealPlanWeek = useCallback(async (weekStart, focusDate = "") => {
     const res = await fetch(apiUrl(`/api/meal-plan?week_start=${encodeURIComponent(weekStart)}`));
     await requireSuccessfulResponse(res);
@@ -1123,6 +1170,26 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeTab, syncProviderRegistry]);
+
+  useEffect(() => {
+    if (activeTab !== "analytics" || !mealPlan.today) return undefined;
+    let ignore = false;
+    const focusDate = selectedNutritionDate || mealPlan.today;
+    const timer = window.setTimeout(() => {
+      loadNutritionDashboard(activeUser, focusDate).catch(error => {
+        if (!ignore) {
+          console.error("Failed to load nutrition dashboard", error);
+          setAlertBanner({ show: true, text: apiErrorMessage(error, "Could not load nutrition history.") });
+        }
+      });
+    }, 0);
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
+    // The selected day is navigated explicitly so it does not trigger duplicate requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeUser, mealPlan.today, loadNutritionDashboard]);
 
   useEffect(() => {
     if (activeTab !== "groceries" || !selectedProviderAddressesRoute) return undefined;
@@ -1744,20 +1811,121 @@ export default function Home() {
   };
 
   const resetDailyLogs = async () => {
+    const diaryDate = selectedNutritionDate || nutritionDashboard.today;
     setConfirmationDialog({
-      title: "Clear today's nutrition entries?",
-      message: `This removes every nutrition entry logged today for ${activeUser}.`,
-      confirmLabel: "Clear today",
+      title: "Clear this nutrition day?",
+      message: `This removes every nutrition entry for ${activeUser} on ${formatPlanDate(diaryDate, { month: "long", day: "numeric", year: "numeric" })}.`,
+      confirmLabel: "Clear day",
       onConfirm: async () => {
-        const res = await fetch(apiUrl(`/api/diary/clear/${activeUser}`), {
+        const res = await fetch(apiUrl(`/api/diary/clear/${encodeURIComponent(activeUser)}`), {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ confirmed: true }),
+          body: JSON.stringify({ confirmed: true, date: diaryDate }),
         });
         await requireSuccessfulResponse(res);
+        await loadNutritionDashboard(activeUser, diaryDate);
         await syncLiveState(activeUser);
-        triggerBannerAlert(`Cleared today's plate logs for ${activeUser}.`);
+        triggerBannerAlert(`Cleared nutrition entries for ${formatPlanDate(diaryDate, { month: "short", day: "numeric" })}.`);
       },
     });
+  };
+
+  const navigateNutritionDate = async (nextDate) => {
+    if (!nextDate) return;
+    setSelectedNutritionDate(nextDate);
+    setNutritionEntryEditor(null);
+    const currentStart = nutritionDashboard.start_date;
+    const currentEnd = nutritionDashboard.end_date;
+    if (!currentStart || nextDate < currentStart || nextDate > currentEnd) {
+      try {
+        await loadNutritionDashboard(activeUser, nextDate);
+      } catch (error) {
+        triggerBannerAlert(apiErrorMessage(error, "Could not load that nutrition week."));
+      }
+    }
+  };
+
+  const openNutritionEntryEditor = (mealType, entry = null) => {
+    setNutritionEntryEditor(entry ? {
+      id: entry.id,
+      meal_name: entry.name,
+      quantity: entry.quantity,
+      unit: entry.unit,
+      meal_type: entry.meal_type,
+      calories: entry.calories,
+      protein: entry.macros.protein,
+      carbs: entry.macros.carbs,
+      fat: entry.macros.fat,
+      fiber: entry.macros.fiber,
+      consumed_at: entry.consumed_at
+    } : { ...EMPTY_NUTRITION_ENTRY, meal_type: mealType });
+    setExpandedNutritionMeals(current => ({ ...current, [mealType]: true }));
+  };
+
+  const saveNutritionEntry = async () => {
+    if (!nutritionEntryEditor?.meal_name?.trim()) {
+      triggerBannerAlert("Add a food name before saving.");
+      return;
+    }
+    setIsNutritionSaving(true);
+    try {
+      const meal = NUTRITION_MEALS.find(item => item.id === nutritionEntryEditor.meal_type);
+      const consumedAt = nutritionEntryEditor.consumed_at || (
+        `${selectedNutritionDate}T${meal?.defaultTime || "12:00"}:00`
+      );
+      const payload = { ...nutritionEntryEditor, consumed_at: consumedAt };
+      const route = nutritionEntryEditor.id
+        ? `/api/diary/${encodeURIComponent(activeUser)}/entries/${nutritionEntryEditor.id}`
+        : `/api/diary/${encodeURIComponent(activeUser)}/entries`;
+      const res = await fetch(apiUrl(route), {
+        method: nutritionEntryEditor.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      await requireSuccessfulResponse(res);
+      setNutritionEntryEditor(null);
+      await loadNutritionDashboard(activeUser, selectedNutritionDate);
+      await syncLiveState(activeUser);
+      triggerBannerAlert(nutritionEntryEditor.id ? "Nutrition entry updated." : "Food added to the diary.");
+    } catch (error) {
+      triggerBannerAlert(apiErrorMessage(error, "The nutrition entry could not be saved."));
+    } finally {
+      setIsNutritionSaving(false);
+    }
+  };
+
+  const deleteNutritionEntry = async (entryId) => {
+    try {
+      const res = await fetch(apiUrl(`/api/diary/${encodeURIComponent(activeUser)}/entries/${entryId}`), {
+        method: "DELETE"
+      });
+      await requireSuccessfulResponse(res);
+      await loadNutritionDashboard(activeUser, selectedNutritionDate);
+      await syncLiveState(activeUser);
+      triggerBannerAlert("Nutrition entry removed.");
+    } catch (error) {
+      triggerBannerAlert(apiErrorMessage(error, "The nutrition entry could not be removed."));
+    }
+  };
+
+  const saveNutritionGoals = async () => {
+    if (!nutritionGoalEditor) return;
+    setIsNutritionSaving(true);
+    try {
+      const res = await fetch(apiUrl(`/api/nutrition/targets/${encodeURIComponent(activeUser)}`), {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nutritionGoalEditor)
+      });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      setNutritionTargets(data.nutrition_targets);
+      setNutritionDashboard(current => ({ ...current, targets: data.nutrition_targets }));
+      setNutritionGoalEditor(null);
+      triggerBannerAlert("Daily nutrition goals updated.");
+    } catch (error) {
+      triggerBannerAlert(apiErrorMessage(error, "Nutrition goals could not be updated."));
+    } finally {
+      setIsNutritionSaving(false);
+    }
   };
 
   const patchPantry = async (changes) => {
@@ -2110,11 +2278,42 @@ export default function Home() {
   });
 
   const calPercentage = Math.min(100, Math.round((loggedCal / targetCalories) * 100));
-  const strokeDashoffset = 471.2 - (471.2 * calPercentage) / 100;
-
   const protPerc = Math.min(100, Math.round((loggedProt / targetProtein) * 100));
   const carbPerc = Math.min(100, Math.round((loggedCarb / targetCarbs) * 100));
   const fatPerc = Math.min(100, Math.round((loggedFat / targetFat) * 100));
+
+  const selectedNutritionDay = nutritionDashboard.days?.find(
+    day => day.date === selectedNutritionDate
+  ) || { entries: [], totals: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 } };
+  const nutritionTotals = selectedNutritionDay.totals;
+  const nutritionCalPercentage = Math.min(
+    100, Math.round((Number(nutritionTotals.calories || 0) / targetCalories) * 100)
+  );
+  const nutritionStrokeDashoffset = 471.2 - (471.2 * nutritionCalPercentage) / 100;
+  const nutritionMacroRows = [
+    { key: "protein", label: "Protein", value: Number(nutritionTotals.protein || 0), target: targetProtein, klass: "protein" },
+    { key: "carbs", label: "Carbs", value: Number(nutritionTotals.carbs || 0), target: targetCarbs, klass: "carbs" },
+    { key: "fat", label: "Fats", value: Number(nutritionTotals.fat || 0), target: targetFat, klass: "fat" }
+  ].map(row => ({ ...row, percent: Math.min(100, Math.round((row.value / row.target) * 100)) }));
+  const nutritionEntriesByMeal = NUTRITION_MEALS.reduce((groups, meal) => ({
+    ...groups,
+    [meal.id]: (selectedNutritionDay.entries || []).filter(entry => entry.meal_type === meal.id)
+  }), {});
+  const nutritionTrendTarget = {
+    calories: targetCalories, protein: targetProtein, carbs: targetCarbs, fat: targetFat
+  }[nutritionTrendMetric];
+  const nutritionTrendMax = Math.max(
+    nutritionTrendTarget,
+    ...(nutritionDashboard.days || []).map(day => Number(day.totals?.[nutritionTrendMetric] || 0)),
+    1
+  );
+  const nutritionTip = nutritionTotals.calories <= 0
+    ? "Log a meal or scan a plate to start today’s nutrition picture."
+    : nutritionMacroRows.find(row => row.percent < 60)
+      ? `${nutritionMacroRows.find(row => row.percent < 60).label} is furthest from today’s goal so far.`
+      : nutritionCalPercentage > 100
+        ? "Today’s logged calories are above the current goal. Review portions if anything looks off."
+        : "Your logged intake is progressing steadily toward today’s goals.";
 
   // Items checkout checklist
   const checkoutItems = groceryList
@@ -3021,54 +3220,167 @@ export default function Home() {
 
           {activeTab === "analytics" && (
             <section className="page-view analytics-page" aria-label="Macro logs">
-              <div className="section-heading page-heading">
+              <div className="nutrition-page-heading">
                 <div>
                   <span className="eyebrow">Personal nutrition</span>
-                  <h2>Macro Logs for {activeUser}</h2>
+                  <h2>Nutrition for {activeUser}</h2>
+                  <p>Track daily intake, review trends, and correct your food log.</p>
                 </div>
-                <button id="clear-diary-btn" className="clear-diary-btn" onClick={resetDailyLogs}>Clear Logs</button>
+                <div className="nutrition-date-control" aria-label="Nutrition date navigation">
+                  <button type="button" aria-label="Previous day" disabled={!selectedNutritionDate} onClick={() => navigateNutritionDate(shiftIsoDate(selectedNutritionDate, -1))}>‹</button>
+                  <strong>{formatPlanDate(selectedNutritionDate, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</strong>
+                  <button type="button" aria-label="Next day" disabled={!selectedNutritionDate} onClick={() => navigateNutritionDate(shiftIsoDate(selectedNutritionDate, 1))}>›</button>
+                  <button type="button" className="nutrition-today-btn" disabled={!nutritionDashboard.today || selectedNutritionDate === nutritionDashboard.today} onClick={() => navigateNutritionDate(nutritionDashboard.today)}>Today</button>
+                </div>
               </div>
-              <div className="nutrition-page-grid">
-                <article className="calorie-focus-card">
-                  <h3>Calories Today</h3>
-                  <div className="calorie-dial">
-                    <svg width="180" height="180" viewBox="0 0 180 180">
-                      <circle className="calorie-dial-ring-bg" cx="90" cy="90" r="75" />
-                      <circle id="calorie-dial-fill" className="calorie-dial-ring-fill" cx="90" cy="90" r="75" strokeDasharray="471.2" style={{ strokeDashoffset: strokeDashoffset }} />
-                    </svg>
-                    <div className="calorie-dial-info">
-                      <h2 id="logged-calories-num">{loggedCal}</h2>
-                      <p id="target-calories-num">/ {targetCalories} kcal</p>
-                    </div>
-                  </div>
-                  <span id="calorie-percentage-badge" className="calorie-percentage-badge">{calPercentage}% Met</span>
-                </article>
-                <article className="macro-breakdown-card">
-                  <h3 className="tracker-title">Macros Breakdown</h3>
-                  {[
-                    ["Protein", loggedProt, targetProtein, protPerc, "protein"],
-                    ["Carbohydrates", loggedCarb, targetCarbs, carbPerc, "carbs"],
-                    ["Fats", loggedFat, targetFat, fatPerc, "fat"]
-                  ].map(([label, logged, target, percent, klass]) => (
-                    <div key={label} className="macro-bar-group">
-                      <div className="macro-bar-header"><span>{label} (Target: {target}g)</span><span>{logged}g</span></div>
-                      <div className="progress-track"><div className={`progress-fill ${klass}`} style={{ width: `${percent}%` }}></div></div>
-                    </div>
-                  ))}
-                </article>
-                <article className="diary-section">
-                  <div className="diary-header"><h3 className="diary-heading" id="diary-user-heading">Plate Logs</h3></div>
-                  <div id="diary-list" className="diary-list">
-                    {loggedMeals.length === 0 ? (
-                      <div className="diary-empty-state">🍳 {activeUser} has not logged any plates today. Use the camera button below to scan a plate.</div>
-                    ) : loggedMeals.map((meal, idx) => (
-                      <div key={idx} className="diary-item">
-                        <div className="diary-item-info"><h4>{meal.name}</h4><span>Log Time: {meal.time}</span></div>
-                        <div className="diary-item-macros">🔥 {meal.calories} kcal<span>P: {meal.macros.protein}g | C: {meal.macros.carbs}g | F: {meal.macros.fat}g</span></div>
+
+              <div className="nutrition-overview-grid">
+                <article className="nutrition-summary-card">
+                  <h3>Calories &amp; Macros</h3>
+                  <div className="nutrition-summary-body">
+                    <div>
+                      <div className="calorie-dial nutrition-calorie-dial">
+                        <svg width="180" height="180" viewBox="0 0 180 180" aria-hidden="true">
+                          <circle className="calorie-dial-ring-bg" cx="90" cy="90" r="75" />
+                          <circle className="calorie-dial-ring-fill" cx="90" cy="90" r="75" strokeDasharray="471.2" style={{ strokeDashoffset: nutritionStrokeDashoffset }} />
+                        </svg>
+                        <div className="calorie-dial-info">
+                          <h2>{formatNutritionNumber(nutritionTotals.calories)}</h2>
+                          <p>/ {targetCalories} kcal</p>
+                        </div>
                       </div>
-                    ))}
+                      <span className="calorie-percentage-badge">{nutritionCalPercentage}% of goal</span>
+                    </div>
+                    <div className="nutrition-macro-list">
+                      {nutritionMacroRows.map(row => (
+                        <div className="nutrition-macro-row" key={row.key}>
+                          <span className={`nutrition-macro-icon ${row.klass}`}>{row.label.slice(0, 1)}</span>
+                          <div>
+                            <span>{row.label}</span>
+                            <strong>{formatNutritionNumber(row.value)} / {row.target} g</strong>
+                          </div>
+                          <div className="progress-track"><div className={`progress-fill ${row.klass}`} style={{ width: `${row.percent}%` }}></div></div>
+                          <em>{row.percent}%</em>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </article>
+
+                <article className="nutrition-trend-card">
+                  <div className="nutrition-card-heading">
+                    <h3>Weekly Intake Trend</h3>
+                    <select value={nutritionTrendMetric} onChange={event => setNutritionTrendMetric(event.target.value)} aria-label="Trend metric">
+                      <option value="calories">Calories</option>
+                      <option value="protein">Protein</option>
+                      <option value="carbs">Carbs</option>
+                      <option value="fat">Fats</option>
+                    </select>
+                  </div>
+                  <div className="nutrition-trend-chart">
+                    {(nutritionDashboard.days || []).map(day => {
+                      const intake = Number(day.totals?.[nutritionTrendMetric] || 0);
+                      const goalHeight = Math.max(8, (nutritionTrendTarget / nutritionTrendMax) * 100);
+                      const intakeHeight = Math.min(100, (intake / nutritionTrendMax) * 100);
+                      return (
+                        <button key={day.date} type="button" className={day.date === selectedNutritionDate ? "active" : ""} onClick={() => navigateNutritionDate(day.date)} aria-label={`${day.weekday}: ${formatNutritionNumber(intake)} ${nutritionTrendMetric}`}>
+                          <span className="nutrition-chart-bars">
+                            <i style={{ height: `${goalHeight}%` }}></i>
+                            <b style={{ height: `${intakeHeight}%` }}></b>
+                          </span>
+                          <small>{day.weekday.slice(0, 3)}</small>
+                          <em>{formatPlanDate(day.date, { month: "short", day: "numeric" })}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="nutrition-chart-legend"><span><i></i>Intake</span><span><i></i>Goal</span></div>
+                </article>
+              </div>
+
+              <div className="nutrition-content-grid">
+                <article className="nutrition-log-card">
+                  <div className="nutrition-card-heading">
+                    <div><h3>Food Logs</h3><p>{formatPlanDate(selectedNutritionDate, { weekday: "long", month: "long", day: "numeric" })}</p></div>
+                    <div className="nutrition-log-actions">
+                      <button type="button" className="nutrition-add-meal-btn" onClick={() => openNutritionEntryEditor(currentNutritionMealType(nutritionDashboard.timezone))}>＋ Add food</button>
+                      <button type="button" className="nutrition-clear-day-btn" onClick={resetDailyLogs} disabled={!selectedNutritionDay.entries?.length}>Clear day</button>
+                    </div>
+                  </div>
+                  <div className="nutrition-meal-groups">
+                    {NUTRITION_MEALS.map(meal => {
+                      const entries = nutritionEntriesByMeal[meal.id] || [];
+                      const mealTotals = entries.reduce((totals, entry) => ({
+                        calories: totals.calories + Number(entry.calories || 0),
+                        protein: totals.protein + Number(entry.macros?.protein || 0),
+                        carbs: totals.carbs + Number(entry.macros?.carbs || 0),
+                        fat: totals.fat + Number(entry.macros?.fat || 0)
+                      }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+                      const expanded = Boolean(expandedNutritionMeals[meal.id]);
+                      return (
+                        <section className={`nutrition-meal-group ${expanded ? "expanded" : ""}`} key={meal.id}>
+                          <button type="button" className="nutrition-meal-summary" onClick={() => setExpandedNutritionMeals(current => ({ ...current, [meal.id]: !current[meal.id] }))}>
+                            <span className={`nutrition-meal-icon ${meal.id}`}>{meal.icon}</span>
+                            <strong>{meal.label}</strong>
+                            <span>{entries[0]?.time || meal.defaultTime}</span>
+                            <div><b>{formatNutritionNumber(mealTotals.calories)}</b> kcal <i></i>{formatNutritionNumber(mealTotals.protein)}g P <i></i>{formatNutritionNumber(mealTotals.carbs)}g C <i></i>{formatNutritionNumber(mealTotals.fat)}g F</div>
+                            <em>{expanded ? "⌃" : "⌄"}</em>
+                          </button>
+                          {expanded && (
+                            <div className="nutrition-meal-details">
+                              {entries.length > 0 && (
+                                <div className="nutrition-entry-head"><span>Food item</span><span>Quantity</span><span>kcal</span><span>Protein</span><span>Carbs</span><span>Fats</span><span>Actions</span></div>
+                              )}
+                              {entries.map(entry => (
+                                <div className="nutrition-entry-row" key={entry.id}>
+                                  <strong>{entry.name}</strong>
+                                  <span>{formatNutritionNumber(entry.quantity)} {entry.unit}</span>
+                                  <span>{formatNutritionNumber(entry.calories)}</span>
+                                  <span>{formatNutritionNumber(entry.macros.protein)}g</span>
+                                  <span>{formatNutritionNumber(entry.macros.carbs)}g</span>
+                                  <span>{formatNutritionNumber(entry.macros.fat)}g</span>
+                                  <div><button type="button" onClick={() => openNutritionEntryEditor(meal.id, entry)} aria-label={`Edit ${entry.name}`}>✎</button><button type="button" className="delete" onClick={() => deleteNutritionEntry(entry.id)} aria-label={`Delete ${entry.name}`}>×</button></div>
+                                </div>
+                              ))}
+                              {nutritionEntryEditor?.meal_type === meal.id && (
+                                <div className="nutrition-entry-editor">
+                                  <label>Food item<input value={nutritionEntryEditor.meal_name} onChange={event => setNutritionEntryEditor(current => ({ ...current, meal_name: event.target.value }))} /></label>
+                                  <label>Meal<select value={nutritionEntryEditor.meal_type} onChange={event => setNutritionEntryEditor(current => ({ ...current, meal_type: event.target.value }))}>{NUTRITION_MEALS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+                                  <label>Quantity<input type="number" min="0.01" step="0.01" value={nutritionEntryEditor.quantity} onChange={event => setNutritionEntryEditor(current => ({ ...current, quantity: event.target.value }))} /></label>
+                                  <label>Unit<input value={nutritionEntryEditor.unit} onChange={event => setNutritionEntryEditor(current => ({ ...current, unit: event.target.value }))} /></label>
+                                  <label>Calories<input type="number" min="0" value={nutritionEntryEditor.calories} onChange={event => setNutritionEntryEditor(current => ({ ...current, calories: event.target.value }))} /></label>
+                                  <label>Protein (g)<input type="number" min="0" value={nutritionEntryEditor.protein} onChange={event => setNutritionEntryEditor(current => ({ ...current, protein: event.target.value }))} /></label>
+                                  <label>Carbs (g)<input type="number" min="0" value={nutritionEntryEditor.carbs} onChange={event => setNutritionEntryEditor(current => ({ ...current, carbs: event.target.value }))} /></label>
+                                  <label>Fats (g)<input type="number" min="0" value={nutritionEntryEditor.fat} onChange={event => setNutritionEntryEditor(current => ({ ...current, fat: event.target.value }))} /></label>
+                                  <div className="nutrition-editor-actions"><button type="button" onClick={() => setNutritionEntryEditor(null)}>Cancel</button><button type="button" onClick={saveNutritionEntry} disabled={isNutritionSaving}>{nutritionEntryEditor.id ? "Save changes" : "Add food"}</button></div>
+                                </div>
+                              )}
+                              {!entries.length && nutritionEntryEditor?.meal_type !== meal.id && <p className="nutrition-empty-meal">No food logged. Add an item or ask Kitch to track it.</p>}
+                              <button type="button" className="nutrition-add-item-link" onClick={() => openNutritionEntryEditor(meal.id)}>＋ Add food item</button>
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
+                </article>
+
+                <aside className="nutrition-side-rail">
+                  <article className="nutrition-goals-card">
+                    <div className="nutrition-card-heading"><h3>Daily Goals</h3><button type="button" onClick={() => setNutritionGoalEditor(nutritionGoalEditor ? null : { ...nutritionTargets })} aria-label="Edit daily goals">⚙</button></div>
+                    {nutritionGoalEditor ? (
+                      <div className="nutrition-goal-editor">
+                        {[["daily_calorie_target", "Calories", "kcal"], ["protein_target_g", "Protein", "g"], ["carbs_target_g", "Carbs", "g"], ["fat_target_g", "Fats", "g"]].map(([key, label, unit]) => (
+                          <label key={key}><span>{label}</span><input type="number" min="1" value={nutritionGoalEditor[key]} onChange={event => setNutritionGoalEditor(current => ({ ...current, [key]: event.target.value }))} /><em>{unit}</em></label>
+                        ))}
+                        <div><button type="button" onClick={() => setNutritionGoalEditor(null)}>Cancel</button><button type="button" onClick={saveNutritionGoals} disabled={isNutritionSaving}>Save</button></div>
+                      </div>
+                    ) : (
+                      <dl><div><dt>Calories</dt><dd>{targetCalories} kcal</dd></div><div><dt>Protein</dt><dd>{targetProtein} g</dd></div><div><dt>Carbs</dt><dd>{targetCarbs} g</dd></div><div><dt>Fats</dt><dd>{targetFat} g</dd></div></dl>
+                    )}
+                  </article>
+                  <article className="nutrition-tip-card"><span>♧</span><div><h3>Tip for today</h3><p>{nutritionTip}</p></div></article>
+                </aside>
               </div>
             </section>
           )}

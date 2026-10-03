@@ -488,6 +488,26 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: The wrong entry or person changes, totals disagree with the
   diary, or a cancelled clear still removes data.
 
+### Scenario 4.5 - Dated Nutrition Dashboard and Meal Grouping
+
+- Prompt/action: Log one item with an explicit meal such as "I had oats for
+  breakfast," then log another item without naming a meal. Open Nutrition,
+  navigate across the visible week, edit one portion, and update one daily goal.
+- Expected behavior: Explicit meal context wins. The entry without meal context
+  is grouped from the request receipt time in the household timezone. Both
+  appear on the correct date, and the selected-day totals and weekly trend use
+  the same persisted entries.
+- UI check: The page shows the calorie/macro summary, seven-day trend,
+  Breakfast/Lunch/Snack/Dinner groups, entry edit/delete controls, and editable
+  daily goals. Empty meal groups remain concise.
+- Persistence check: Reload and confirm the entry correction, dated meal
+  groups, trend totals, and updated goal still agree with the database.
+- Pass criteria: Dated navigation, grouping, manual correction, goals, and
+  derived totals remain consistent after reload and member switching.
+- Fail criteria: Browser time changes the saved date, explicit meal context is
+  ignored, totals drift from entries, another member changes, or reload loses
+  the update.
+
 ## Section 5: Macro Logging via Image
 
 These scenarios verify that Camera and Gallery share one non-mutating classifier

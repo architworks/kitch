@@ -93,6 +93,7 @@ def inject_datetime_callback(callback_context: CallbackContext) -> Optional[Cont
     context = calendar_context(get_household_timezone())
     now = context["now"]
     callback_context.state["household_timezone"] = context["timezone"]
+    callback_context.state["request_received_at"] = now.isoformat()
     callback_context.state["current_datetime"] = now.strftime("%A, %B %d, %Y (%Y-%m-%d) at %I:%M %p")
     callback_context.state["current_day_of_week"] = now.strftime("%A").lower()
     callback_context.state["current_date"] = context["today"].isoformat()
@@ -189,7 +190,11 @@ nutrition_tracker = LlmAgent(
         "update_nutrition_entry_tool, and delete one explicitly identified entry with "
         "delete_nutrition_entry_tool. Update explicit calorie or macro goals with "
         "update_nutrition_targets_tool. Use clear_nutrition_day_tool for a whole day; it creates a "
-        "backend confirmation and must not be simulated by repeated deletes. Confirm changes only "
+        "backend confirmation and must not be simulated by repeated deletes. When the user explicitly "
+        "names breakfast, lunch, snack, or dinner, pass that meal_type. When the user gives an explicit "
+        "consumption date or time, pass it as consumed_at. Otherwise pass the trusted request time "
+        "{request_received_at?} as consumed_at and omit meal_type so the backend assigns the meal from "
+        "household-local time. Confirm changes only "
         "after a successful tool result."
     ),
     tools=[log_macros_tool, get_macro_diary_tool, update_nutrition_entry_tool,
