@@ -22,7 +22,7 @@ from app.grocery_checkout import GroceryCheckoutService
 from app.providers.base import ProviderOperationError
 from app.providers.instamart import InstamartProviderAdapter
 from app.providers.registry import provider_registry
-from app.household_config import DEFAULT_HOUSEHOLD_SIZE, canonical_user_name, household_members_text
+from app.household_config import canonical_user_name
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
 
@@ -43,6 +43,11 @@ from app.supabase_client import (
     delete_recipe_grocery_plan,
     get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
+    get_household_members,
+    get_nutrition_targets,
+    update_nutrition_targets,
+    get_selected_grocery_provider,
+    set_selected_grocery_provider,
     build_meal_plan_week,
     delete_past_meal_plans,
     get_household_timezone,
@@ -129,7 +134,6 @@ async def delete_past_meal_plans_at_household_midnight() -> None:
 async def get_or_create_session(
     user_name: str,
     session_id: str,
-    diet_preference: str,
     household_size: int,
     planner_week_start: str = "",
     planner_selected_date: str = "",
@@ -162,11 +166,11 @@ async def get_or_create_session(
             planner_week_start = ""
             planner_selected_date = ""
     
+    members = get_household_members()
     state_updates = {
         "user:profile_name": active_user,
-        "user:dietary_profile": diet_preference,
         "app:household_size": household_size,
-        "app:household_members": household_members_text(),
+        "app:household_members": ", ".join(member["name"] for member in members),
         "app:planner_week_start": planner_week_start,
         "app:planner_week_dates": planner_week_dates,
         "app:planner_selected_date": planner_selected_date,
@@ -299,7 +303,6 @@ async def chat_endpoint(payload: ChatRequest):
         await get_or_create_session(
             user_name=active_user,
             session_id=session_id,
-            diet_preference=profile["diet_preference"],
             household_size=profile["household_size"],
             planner_week_start=payload.planner_context.visible_week_start,
             planner_selected_date=payload.planner_context.selected_date,
@@ -418,8 +421,7 @@ async def upload_photo_endpoint(
         await get_or_create_session(
             user_name=active_user,
             session_id=session_id,
-            diet_preference=profile.get("diet_preference", "balanced"),
-            household_size=profile.get("household_size", DEFAULT_HOUSEHOLD_SIZE),
+            household_size=profile["household_size"],
         )
 
         override = classification_override.strip().lower()
@@ -532,9 +534,13 @@ async def get_state_endpoint(user_name: str):
         meal_plan = build_meal_plan_week()
         grocery_cart = get_grocery_cart()
         latest_recipe_grocery_plan = get_latest_recipe_grocery_plan_metadata()
+        household_members = get_household_members()
+        nutrition_targets = get_nutrition_targets(active_user)
         
         return {
             "profile": profile,
+            "household_members": household_members,
+            "nutrition_targets": nutrition_targets,
             "pantry_stock": pantry,
             "pantry": pantry_state,
             "macro_diary": diary,
@@ -667,32 +673,27 @@ async def cancel_agent_action_endpoint(action_id: str):
 
 @app.patch("/api/household/profile")
 async def update_household_profile_endpoint(payload: Dict[str, Any]):
-    """Persist shared household planning settings before confirming them in UI."""
+    """Persist factual shared-household configuration."""
     try:
         current = get_household_profile()
         profile = update_household_profile(
-            diet_preference=payload.get(
-                "diet_preference",
-                current["diet_preference"],
-            ),
             household_size=int(
                 payload.get("household_size", current["household_size"])
-            ),
-            daily_calorie_target=int(
-                payload.get(
-                    "daily_calorie_target",
-                    current["daily_calorie_target"],
-                )
-            ),
-            preferred_grocery_provider=payload.get(
-                "preferred_grocery_provider",
-                current.get("preferred_grocery_provider"),
             ),
             timezone_name=payload.get("timezone_name", current.get("timezone_name")),
         )
         return {"status": "success", "profile": profile}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/nutrition/targets/{user_name}")
+async def update_nutrition_targets_endpoint(user_name: str, payload: Dict[str, Any]):
+    """Persist deterministic nutrition goals outside the household profile."""
+    return {
+        "status": "success",
+        "nutrition_targets": update_nutrition_targets(canonical_user_name(user_name), payload),
+    }
 
 @app.post("/api/diary/clear/{user_name}")
 async def clear_diary_endpoint(user_name: str, payload: Dict[str, Any]):
@@ -839,10 +840,19 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
 @app.get("/api/grocery/providers")
 async def grocery_providers_endpoint():
     response = grocery_checkout_service.providers()
-    response["preferred_provider"] = get_household_profile().get(
-        "preferred_grocery_provider"
-    )
+    response["selected_provider"] = get_selected_grocery_provider()
     return response
+
+
+@app.patch("/api/grocery/provider-selection")
+async def grocery_provider_selection_endpoint(payload: Dict[str, Any]):
+    """Persist the checkout UI's active provider as operational workflow state."""
+    provider_id = str(payload.get("selected_provider") or "").strip()
+    provider_registry.get(provider_id)
+    return {
+        "status": "success",
+        "selection": set_selected_grocery_provider(provider_id),
+    }
 
 
 @app.post("/api/grocery/providers/{provider_id}/connection/start")

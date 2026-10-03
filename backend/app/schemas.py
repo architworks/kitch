@@ -26,8 +26,6 @@ class PlannerContext(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     active_user: str
-    diet_preference: str
-    household_size: int
     planner_context: PlannerContext
     pantry_stock: List[Dict[str, Any]]
     grocery_list: List[Dict[str, Any]]

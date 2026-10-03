@@ -3,7 +3,6 @@
 # Multi-household registration is intentionally deferred. Until then, this file
 # is the single place where the prototype household and its seeded members live.
 
-HOUSEHOLD_NAME = "Kitch Household"
 HOUSEHOLD_MEMBERS = ("Archit", "Anubhav", "Naman")
 DEFAULT_ACTIVE_USER = HOUSEHOLD_MEMBERS[0]
 DEFAULT_HOUSEHOLD_SIZE = len(HOUSEHOLD_MEMBERS)

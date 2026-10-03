@@ -163,7 +163,9 @@ Current routes:
 | `PATCH /api/pantry` | Applies atomic add/set/adjust/remove operations without changing the native cart. |
 | `PUT /api/pantry` | Confirmed complete pantry replacement; an empty list marks it empty. |
 | `POST /api/grocery-cart/reconcile-pantry` | Explicitly recalculates native purchase quantities from the current pantry. |
-| `PATCH /api/household/profile` | Persists diet, household size, calorie target, timezone, and UI-selected provider. |
+| `PATCH /api/household/profile` | Persists factual household size and timezone only. |
+| `PATCH /api/nutrition/targets/{user}` | Persists deterministic personal calorie and macro goals. |
+| `PATCH /api/grocery/provider-selection` | Persists the checkout UI's active provider as workflow state. |
 | `PATCH/DELETE /api/diary/{user}/entries/{id}` | Corrects or deletes one nutrition entry. |
 | `POST /api/diary/clear/{user}` | Confirmed clearing of one household-calendar diary day. |
 | `POST /api/agent-actions/{id}/confirm|cancel` | Consumes or cancels an expiring destructive action. |
@@ -224,7 +226,9 @@ Supabase tables:
 
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
-| `profiles` | Prototype user/shared profile | Stores settings, preferred provider, pantry revision, and full-review time. |
+| `profiles` | Prototype member/shared-owner profile | Stores factual member identity, household size, timezone, pantry revision, and full-review time. It contains no semantic preferences. |
+| `nutrition_targets` | Individual | Stores deterministic calorie and macro goals separately from preference memory. |
+| `provider_selection_state` | Shared household workflow | Stores the ordering provider currently selected in the checkout UI. |
 | `meal_plans` | Shared household | Stores breakfast/lunch/dinner meal names keyed by exact calendar date. |
 | `recipe_grocery_plans` | Shared household | Stores recipe cards, ingredients, pantry notes, request scope, and cart update metadata. |
 | `pantry_stock` | Shared household | Stores current pantry/fridge inventory. |
@@ -353,7 +357,7 @@ Architectural invariants:
 
 - User selection means "include this native row in the chosen provider projection."
 - Pantry-covered rows are never included.
-- The household preference is restored. Without one, connected Zepto is chosen
+- The checkout UI's last operational provider selection is restored. Without one, connected Zepto is chosen
   first, then connected Instamart; otherwise provider selection stays active.
   Blinkit is disabled and cannot issue API calls.
 - A saved delivery address is required before sync.

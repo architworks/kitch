@@ -23,6 +23,7 @@ from app.supabase_client import (
     list_recipe_grocery_plans as db_list_recipe_grocery_plans,
     update_macro_entry as db_update_macro_entry,
     delete_macro_entry as db_delete_macro_entry,
+    update_nutrition_targets as db_update_nutrition_targets,
     update_household_profile as db_update_household_profile,
     get_household_profile as db_get_household_profile,
     create_pending_agent_action as db_create_pending_agent_action,
@@ -676,17 +677,29 @@ def clear_nutrition_day_tool(
   return {"status": "confirmation_required", **action}
 
 
-def update_household_settings_tool(
-  diet_preference: str = "", household_size: int = 0,
-  daily_calorie_target: int = 0, timezone_name: str = "",
+def update_nutrition_targets_tool(
+  user_name: str, daily_calorie_target: int = 0,
+  protein_target_g: int = 0, carbs_target_g: int = 0, fat_target_g: int = 0,
 ) -> Dict[str, Any]:
-  """Update household settings; provider selection is intentionally unavailable."""
+  """Update deterministic personal nutrition goals outside the household profile."""
+  updates = {
+    key: value for key, value in {
+      "daily_calorie_target": daily_calorie_target,
+      "protein_target_g": protein_target_g,
+      "carbs_target_g": carbs_target_g,
+      "fat_target_g": fat_target_g,
+    }.items() if value
+  }
+  return {"status": "success", "nutrition_targets": db_update_nutrition_targets(user_name, updates)}
+
+
+def update_household_configuration_tool(
+  household_size: int = 0, timezone_name: str = "",
+) -> Dict[str, Any]:
+  """Update factual household configuration; semantic preferences are unavailable."""
   current = db_get_household_profile()
   profile = db_update_household_profile(
-    diet_preference=diet_preference or current["diet_preference"],
     household_size=household_size or current["household_size"],
-    daily_calorie_target=daily_calorie_target or current["daily_calorie_target"],
-    preferred_grocery_provider=current.get("preferred_grocery_provider"),
     timezone_name=timezone_name or current.get("timezone_name"),
   )
   return {"status": "success", "profile": profile}

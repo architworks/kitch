@@ -74,8 +74,6 @@ class PlanningCalendarTests(unittest.TestCase):
         payload = ChatRequest(
             message="Plan tomorrow",
             active_user="Archit",
-            diet_preference="balanced",
-            household_size=3,
             planner_context={
                 "visible_week_start": "2026-08-10",
                 "selected_date": "2026-08-12",

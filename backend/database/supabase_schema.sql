@@ -6,14 +6,30 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
-    diet_preference TEXT NOT NULL DEFAULT 'balanced' CHECK (diet_preference IN ('balanced', 'keto', 'vegan', 'high-protein')),
     household_size INTEGER NOT NULL DEFAULT 3 CHECK (household_size >= 1),
-    daily_calorie_target INTEGER NOT NULL DEFAULT 2000,
     timezone_name TEXT NOT NULL DEFAULT 'Asia/Kolkata',
-    preferred_grocery_provider TEXT,
     pantry_revision BIGINT NOT NULL DEFAULT 0,
     pantry_reviewed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Nutrition goals are user-specific operational state, not household-profile
+-- preferences.
+CREATE TABLE IF NOT EXISTS public.nutrition_targets (
+    profile_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+    daily_calorie_target INTEGER NOT NULL DEFAULT 2000 CHECK (daily_calorie_target > 0),
+    protein_target_g INTEGER NOT NULL DEFAULT 150 CHECK (protein_target_g > 0),
+    carbs_target_g INTEGER NOT NULL DEFAULT 200 CHECK (carbs_target_g > 0),
+    fat_target_g INTEGER NOT NULL DEFAULT 67 CHECK (fat_target_g > 0),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- The last provider selected in the checkout UI is operational workflow state,
+-- not a semantic household preference.
+CREATE TABLE IF NOT EXISTS public.provider_selection_state (
+    profile_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+    selected_provider TEXT NOT NULL CHECK (length(btrim(selected_provider)) > 0),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- 2. Create Date-Specific Meal Plans Table
@@ -260,6 +276,8 @@ DECLARE
 BEGIN
     FOREACH table_name IN ARRAY ARRAY[
         'profiles',
+        'nutrition_targets',
+        'provider_selection_state',
         'meal_plans',
         'pantry_stock',
         'recipe_grocery_plans',

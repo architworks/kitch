@@ -26,8 +26,8 @@ from app.supabase_client import (
     apply_native_grocery_cart_changes,
     claim_provider_checkout_operation,
     get_grocery_cart,
-    get_household_profile,
     get_provider_checkout_draft,
+    get_selected_grocery_provider,
     release_provider_checkout_operation,
     save_provider_checkout_draft,
 )
@@ -440,14 +440,14 @@ class GroceryCheckoutService:
         user_instruction: str = "",
         native_cart_changes: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
-        """Synchronize an explicitly requested or UI-preferred provider cart."""
+        """Synchronize an explicitly requested or UI-selected provider cart."""
         provider_id = str(provider_id or "").strip().lower().replace(" ", "_")
         provider_id = {
             "swiggy": "swiggy_instamart", "instamart": "swiggy_instamart",
             "swiggy_instamart": "swiggy_instamart", "zepto": "zepto",
         }.get(provider_id, provider_id)
         if not provider_id:
-            provider_id = str(get_household_profile().get("preferred_grocery_provider") or "").strip()
+            provider_id = get_selected_grocery_provider()
         if provider_id not in {"zepto", "swiggy_instamart"}:
             raise ProviderOperationError(
                 provider=provider_id or "unselected", operation="chat_sync_cart",

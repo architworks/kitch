@@ -254,23 +254,26 @@ explicitly requests next week.
   failures roll back the complete range.
 - Fail criteria: Off-by-one dates, week projection, or partial persistence.
 
-### Scenario 1.8 - Update Household Settings Without Implicit Overwrites
+### Scenario 1.8 - Keep Configuration, Goals, and Preferences in Their Domains
 
-- Prompt/action: In separate chat turns, change the household size, daily
-  calorie target, diet profile, and household timezone. Then send an unrelated
-  chat message from a browser whose locally displayed settings have not yet
-  refreshed.
-- Expected behavior: Kitch applies only explicitly requested setting changes
-  and uses the confirmed values in later serving, calorie, and calendar
-  behavior. An ordinary chat message must not silently rewrite settings.
-- Isolation check: Provider authentication and the saved ordering-app choice
-  remain unchanged.
-- Persistence check: Refresh and restart the backend. Confirm the explicit
-  settings remain and date interpretation follows the saved household timezone.
-- Pass criteria: Explicit changes persist and influence later behavior without
-  unrelated settings changing.
-- Fail criteria: Kitch only acknowledges the change in text, loses it after
-  restart, overwrites it from stale UI state, or changes provider settings.
+- Prompt/action: In separate chat turns, change the household size and timezone,
+  change the active member's calorie or macro goal, and state a natural-language
+  dietary preference. Then send an unrelated chat message from a browser whose
+  locally displayed state has not yet refreshed.
+- Expected behavior: Household size/timezone persist as factual profile data;
+  nutrition goals persist in nutrition state; dietary preference is stored only
+  in agent memory. An ordinary chat message must not rewrite any of them.
+- Isolation check: Provider authentication and the checkout UI's selected
+  ordering app remain unchanged.
+- Persistence check: Refresh the page and confirm factual configuration,
+  nutrition goals, and provider workflow state remain. Confirm the dietary
+  preference remains usable during the current backend process but is honestly
+  lost after a backend restart while memory is intentionally process-local.
+- Pass criteria: Each value affects its owning domain, no semantic preference is
+  written to `profiles`, and no unrelated state changes.
+- Fail criteria: A preference appears in profile storage, stale UI state
+  overwrites confirmed data, the agent claims ephemeral memory is durable, or a
+  setting change alters provider authentication/selection.
 
 ## Section 2: Plan Modification
 

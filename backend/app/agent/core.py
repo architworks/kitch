@@ -9,7 +9,6 @@ from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models.google_llm import Gemini
 from google.genai.types import Content, Part
-from app.household_config import DEFAULT_HOUSEHOLD_SIZE, household_members_text
 from app.planning_calendar import calendar_context
 from app.supabase_client import get_household_timezone
 
@@ -41,7 +40,8 @@ from .tools import (
     list_grocery_providers_tool,
     get_grocery_checkout_status_tool,
     sync_provider_cart_tool,
-    update_household_settings_tool,
+    update_household_configuration_tool,
+    update_nutrition_targets_tool,
 )
 from .structured_models import PhotoAnalysis, PantryReconciliation
 from .tool_error_policy import recover_unknown_tool_error
@@ -83,8 +83,6 @@ configured_llm = build_llm_model()
 # as substitutes for structured Supabase state.
 session_service = InMemorySessionService()
 memory_service = InMemoryMemoryService()
-HOUSEHOLD_MEMBERS_TEXT = household_members_text()
-HOUSEHOLD_SIZE_TEXT = str(DEFAULT_HOUSEHOLD_SIZE)
 
 # 1.5 Datetime Injection Callback
 def inject_datetime_callback(callback_context: CallbackContext) -> Optional[Content]:
@@ -125,9 +123,8 @@ chef_planner = LlmAgent(
         "IMPORTANT CONTEXT:\n"
         "- Current datetime: {current_datetime?}\n"
         "- Today is: {current_day_of_week?}\n"
-        "- Household members: " + HOUSEHOLD_MEMBERS_TEXT + " (" + HOUSEHOLD_SIZE_TEXT + " people)\n"
+        "- Household members: {app:household_members?}\n"
         "- Household size: {app:household_size?}\n"
-        "- Dietary preference: {user:dietary_profile?}\n"
         "- Household timezone: {household_timezone?}\n"
         "- Today: {current_date?}\n"
         "- Tomorrow: {tomorrow_date?}\n"
@@ -140,18 +137,21 @@ chef_planner = LlmAgent(
         "1. Meal plans store dynamically generated MEAL NAME STRINGS only. Do not pull from a static database, and do not use recipe IDs (like b1, d2).\n"
         "2. Resolve every scope to exact ISO dates before reading or writing: tomorrow is tomorrow_date; this week is current_date through current_week_end; next week/the next week/coming week is planning_week_start through planning_week_end; next N days starts current_date unless the user says starting tomorrow.\n"
         "3. A bare weekday refers to that weekday in the visible planner week when supplied. Otherwise use the nearest non-past occurrence. State the resolved exact date in the response.\n"
-        "4. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
-        "5. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
-        "6. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
-        "7. Use remove_future_meals_tool for explicit future slot/date/range removal. For every/all saved meal plans, pass action=all without inventing boundary dates; the tool resolves the actual saved future range. A single slot or date executes directly; bulk, ranges, and all-future removal require confirmation. When the tool returns confirmation_required, say the removal has not happened yet and ask the user to review the confirmation. Never create or modify past dates.\n"
-        "8. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
-        "9. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
+        "4. Before creating or suggesting meals, search household preference memory. If the user explicitly states a new dietary preference, exclusion, or planning style, store that natural-language statement in memory before continuing.\n"
+        "5. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
+        "6. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
+        "7. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
+        "8. Use remove_future_meals_tool for explicit future slot/date/range removal. For every/all saved meal plans, pass action=all without inventing boundary dates; the tool resolves the actual saved future range. A single slot or date executes directly; bulk, ranges, and all-future removal require confirmation. When the tool returns confirmation_required, say the removal has not happened yet and ask the user to review the confirmation. Never create or modify past dates.\n"
+        "9. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
+        "10. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
     ),
     tools=[
         get_meal_schedule_tool,
         replace_meal_plan_range_tool,
         update_dated_meals_tool,
         remove_future_meals_tool,
+        set_household_food_preference_tool,
+        search_household_food_preferences_tool,
         get_current_datetime
     ],
     mode="task",
@@ -187,12 +187,14 @@ nutrition_tracker = LlmAgent(
         "You are Kitch's Nutrition Tracker. Nutrition is user-specific. Log described meals with "
         "log_macros_tool, read progress with get_macro_diary_tool, correct one entry with "
         "update_nutrition_entry_tool, and delete one explicitly identified entry with "
-        "delete_nutrition_entry_tool. Use clear_nutrition_day_tool for a whole day; it creates a "
+        "delete_nutrition_entry_tool. Update explicit calorie or macro goals with "
+        "update_nutrition_targets_tool. Use clear_nutrition_day_tool for a whole day; it creates a "
         "backend confirmation and must not be simulated by repeated deletes. Confirm changes only "
         "after a successful tool result."
     ),
     tools=[log_macros_tool, get_macro_diary_tool, update_nutrition_entry_tool,
-           delete_nutrition_entry_tool, clear_nutrition_day_tool, get_current_datetime],
+           delete_nutrition_entry_tool, clear_nutrition_day_tool,
+           update_nutrition_targets_tool, get_current_datetime],
     mode="task",
     on_tool_error_callback=recover_unknown_tool_error,
 )
@@ -225,7 +227,7 @@ recipe_grocery_planner = LlmAgent(
         "IMPORTANT CONTEXT:\n"
         "- Current datetime: {current_datetime?}\n"
         "- Active user: {user:profile_name?}\n"
-        "- Household members: " + HOUSEHOLD_MEMBERS_TEXT + " (" + HOUSEHOLD_SIZE_TEXT + " people)\n"
+        "- Household members: {app:household_members?}\n"
         "- Household size: {app:household_size?}\n\n"
         "CRITICAL RULES:\n"
         "1. Before generating recipes or recipe-derived groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
@@ -275,7 +277,6 @@ kitch_coordinator = LlmAgent(
         "- Current datetime: {current_datetime?}\n"
         "- Today is: {current_day_of_week?}\n"
         "- Active user: {user:profile_name?}\n"
-        "- Dietary preference: {user:dietary_profile?}\n"
         "- Household members: {app:household_members?}\n"
         "- Household size: {app:household_size?}\n\n"
         "YOUR JOB is to understand what the user needs and route to the right specialist:\n\n"
@@ -295,8 +296,7 @@ kitch_coordinator = LlmAgent(
         "4. If unsure, ask a clarifying question rather than guessing wrong.\n"
         "5. When the user says 'I ate something' or 'log what I ate', ALWAYS route to nutrition_tracker for logging.\n"
         "6. All recipes, pantry, native grocery cart, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
-        "7. Household settings (diet, household size, calorie target, timezone) may be changed with update_household_settings_tool. Provider authentication and default-provider selection remain UI-only.\n"
-        "   When one message combines a household-setting change with specialist work, call update_household_settings_tool first and require status=success, then invoke the relevant specialist task. Never delegate the whole mixed request before persisting the setting, and never claim the setting changed from the requested intent alone.\n"
+        "7. Factual household size and timezone may be changed with update_household_configuration_tool. Dietary, food, allergy, planning-style, and brand preferences are natural-language agent memories and must never be written to the household profile. Personal calorie and macro goals belong to nutrition_tracker. Provider authentication and provider selection remain UI-only.\n"
         "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
         "10. Never ask 'which agent should I use' — just figure it out from context.\n"
@@ -307,7 +307,7 @@ kitch_coordinator = LlmAgent(
     tools=[
         list_grocery_providers_tool,
         get_grocery_checkout_status_tool,
-        update_household_settings_tool,
+        update_household_configuration_tool,
     ],
     on_tool_error_callback=recover_unknown_tool_error,
     before_agent_callback=inject_datetime_callback

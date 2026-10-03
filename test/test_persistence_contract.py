@@ -280,6 +280,28 @@ class MigrationContractTests(unittest.TestCase):
         self.assertIn("claim_provider_checkout_operation", migration)
         self.assertIn("release_provider_checkout_operation", migration)
 
+    def test_profile_preferences_are_moved_to_their_own_domains(self):
+        migration = (
+            ROOT
+            / "backend"
+            / "database"
+            / "migrations"
+            / "20261003_separate_profile_preferences.sql"
+        ).read_text(encoding="utf-8")
+        schema = (
+            ROOT / "backend" / "database" / "supabase_schema.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CREATE TABLE public.nutrition_targets", migration)
+        self.assertIn("CREATE TABLE public.provider_selection_state", migration)
+        self.assertIn("DROP COLUMN diet_preference", migration)
+        self.assertIn("DROP COLUMN daily_calorie_target", migration)
+        self.assertIn("DROP COLUMN preferred_grocery_provider", migration)
+        profiles_ddl = schema.split("CREATE TABLE IF NOT EXISTS public.profiles", 1)[1].split(");", 1)[0]
+        self.assertNotIn("diet_preference", profiles_ddl)
+        self.assertNotIn("daily_calorie_target", profiles_ddl)
+        self.assertNotIn("preferred_grocery_provider", profiles_ddl)
+
 
 if __name__ == "__main__":
     unittest.main()

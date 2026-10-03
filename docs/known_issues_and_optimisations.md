@@ -151,7 +151,8 @@ not imply converting preferences into rigid relational rules.
 
 ### OPT-003: Auth-backed households
 
-The current prototype household and active members are configured in code.
+The current prototype member IDs are configured in code while factual member
+names are persisted in `profiles` and returned by the backend.
 Introduce authentication, household membership, and per-household ownership
 before supporting unrelated households in one deployment. This change must
 also introduce membership-aware RLS policies if clients ever access Supabase

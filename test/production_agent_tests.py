@@ -122,8 +122,6 @@ def chat_request(message: str) -> str:
     payload = {
         "message": message,
         "active_user": ACTIVE_USER,
-        "diet_preference": "balanced",
-        "household_size": 3,
         "planner_context": {
             "visible_week_start": week_start_for(household_today()).isoformat(),
             "selected_date": household_today().isoformat()

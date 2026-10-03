@@ -70,6 +70,8 @@ provider probes have a bounded timeout.
 Current structured tables are:
 
 - `profiles`
+- `nutrition_targets`
+- `provider_selection_state`
 - `meal_plans`
 - `recipe_grocery_plans`
 - `pantry_stock`
@@ -113,13 +115,15 @@ receives it.
 
 ### Prototype household
 
-Prototype members are centralized in:
+Prototype member IDs are bootstrapped in:
 
 - `backend/app/household_config.py`
 - `frontend/src/app/householdConfig.js`
 
-Shared resources currently use the configured household-owner profile;
-nutrition rows remain member-specific. Auth-backed registration and multiple
+Member names are factual `profiles.full_name` values returned by the backend;
+the local files provide the prototype IDs and initial UI bootstrap only. Shared
+resources currently use the configured household-owner profile; nutrition rows
+and targets remain member-specific. Auth-backed registration and multiple
 households are not implemented yet.
 
 ## Session and memory services

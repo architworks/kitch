@@ -17,7 +17,6 @@ from supabase import Client, create_client
 
 from app.household_config import (
     DEFAULT_HOUSEHOLD_SIZE,
-    HOUSEHOLD_NAME,
     canonical_user_name,
     get_household_profile_id,
     get_user_id,
@@ -48,14 +47,18 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "profiles": (
         "id",
         "full_name",
-        "diet_preference",
         "household_size",
-        "daily_calorie_target",
         "timezone_name",
-        "preferred_grocery_provider",
         "pantry_revision",
         "pantry_reviewed_at",
         "created_at",
+    ),
+    "nutrition_targets": (
+        "profile_id", "daily_calorie_target", "protein_target_g",
+        "carbs_target_g", "fat_target_g", "updated_at",
+    ),
+    "provider_selection_state": (
+        "profile_id", "selected_provider", "updated_at",
     ),
     "meal_plans": (
         "id",
@@ -519,46 +522,13 @@ def get_household_profile() -> Dict[str, Any]:
     return rows[0]
 
 
-def update_profile(
-    user_name: str,
-    diet_preference: str,
-    household_size: int,
-    daily_calorie_target: int = 2000,
-) -> Dict[str, Any]:
-    user_name = canonical_user_name(user_name)
-    return _confirmed_row(
-        "update_profile",
-        "profiles",
-        lambda: supabase.table("profiles")
-        .upsert(
-            {
-                "id": get_user_id(user_name),
-                "full_name": user_name,
-                "diet_preference": diet_preference,
-                "household_size": household_size,
-                "daily_calorie_target": daily_calorie_target,
-            }
-        )
-        .execute(),
-    )
-
-
 def update_household_profile(
-    diet_preference: str,
     household_size: int,
-    daily_calorie_target: int = 2000,
-    preferred_grocery_provider: str | None = None,
     timezone_name: str | None = None,
 ) -> Dict[str, Any]:
     payload = {
-        "id": get_household_profile_id(),
-        "full_name": HOUSEHOLD_NAME,
-        "diet_preference": diet_preference,
         "household_size": household_size,
-        "daily_calorie_target": daily_calorie_target,
     }
-    if preferred_grocery_provider is not None:
-        payload["preferred_grocery_provider"] = preferred_grocery_provider
     if timezone_name is not None:
         from zoneinfo import ZoneInfo
 
@@ -567,9 +537,84 @@ def update_household_profile(
     return _confirmed_row(
         "update_household_profile",
         "profiles",
-        lambda: supabase.table("profiles")
-        .upsert(payload)
+        lambda: supabase.table("profiles").update(payload)
+        .eq("id", get_household_profile_id())
         .execute(),
+    )
+
+
+def get_household_members() -> List[Dict[str, Any]]:
+    """Return factual configured household-member profiles."""
+    rows = _read_rows(
+        "get_household_members",
+        "profiles",
+        lambda: supabase.table("profiles")
+        .select("id,full_name")
+        .execute(),
+    )
+    owner_id = get_household_profile_id()
+    return sorted(
+        ({"id": row["id"], "name": row["full_name"]} for row in rows),
+        key=lambda row: (row["id"] != owner_id, row["name"].lower()),
+    )
+
+
+def get_nutrition_targets(user_name: str) -> Dict[str, Any]:
+    rows = _read_rows(
+        "get_nutrition_targets",
+        "nutrition_targets",
+        lambda: supabase.table("nutrition_targets").select("*")
+        .eq("profile_id", get_user_id(user_name)).limit(1).execute(),
+    )
+    if not rows:
+        raise PersistenceError(
+            operation="get_nutrition_targets",
+            table="nutrition_targets",
+            supabase_code="nutrition_targets_missing",
+            retryable=False,
+        )
+    return rows[0]
+
+
+def update_nutrition_targets(user_name: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "daily_calorie_target", "protein_target_g", "carbs_target_g", "fat_target_g",
+    }
+    payload = {key: int(value) for key, value in updates.items() if key in allowed}
+    if not payload or any(value <= 0 for value in payload.values()):
+        raise ValueError("Nutrition targets must contain positive target values")
+    payload["updated_at"] = _now_iso()
+    return _confirmed_row(
+        "update_nutrition_targets",
+        "nutrition_targets",
+        lambda: supabase.table("nutrition_targets").update(payload)
+        .eq("profile_id", get_user_id(user_name)).execute(),
+    )
+
+
+def get_selected_grocery_provider() -> str:
+    rows = _read_rows(
+        "get_selected_grocery_provider",
+        "provider_selection_state",
+        lambda: supabase.table("provider_selection_state")
+        .select("selected_provider")
+        .eq("profile_id", get_household_profile_id()).limit(1).execute(),
+    )
+    return str(rows[0].get("selected_provider") or "").strip() if rows else ""
+
+
+def set_selected_grocery_provider(provider_id: str) -> Dict[str, Any]:
+    selected = str(provider_id or "").strip()
+    if not selected:
+        raise ValueError("selected_provider is required")
+    return _confirmed_row(
+        "set_selected_grocery_provider",
+        "provider_selection_state",
+        lambda: supabase.table("provider_selection_state").upsert({
+            "profile_id": get_household_profile_id(),
+            "selected_provider": selected,
+            "updated_at": _now_iso(),
+        }, on_conflict="profile_id").execute(),
     )
 
 

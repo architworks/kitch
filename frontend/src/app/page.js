@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
-import { DIET_TYPES } from "./mockData.js";
 import {
   DEFAULT_ACTIVE_USER,
   DEFAULT_HOUSEHOLD_SIZE,
@@ -757,8 +756,8 @@ export default function Home() {
   const [selectedPlanDate, setSelectedPlanDate] = useState("");
   const [currentMealSlot, setCurrentMealSlot] = useState(DEFAULT_MEAL_SLOT);
   const [expandedMealKey, setExpandedMealKey] = useState("");
-  const [dietPreference, setDietPreference] = useState("balanced");
   const [householdSize, setHouseholdSize] = useState(DEFAULT_HOUSEHOLD_SIZE);
+  const [householdMembers, setHouseholdMembers] = useState(HOUSEHOLD_MEMBERS);
   const [activeUser, setActiveUser] = useState(DEFAULT_ACTIVE_USER);
   const [userProfiles, setUserProfiles] = useState(createUserProfiles);
   const [pantryStock, setPantryStock] = useState([]);
@@ -783,8 +782,13 @@ export default function Home() {
   const [smartDockExpanded, setSmartDockExpanded] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [orderingProviders, setOrderingProviders] = useState([]);
-  const [preferredOrderingProvider, setPreferredOrderingProvider] = useState("");
   const [selectedOrderingProvider, setSelectedOrderingProvider] = useState(DEFAULT_ORDERING_PROVIDER);
+  const [nutritionTargets, setNutritionTargets] = useState({
+    daily_calorie_target: 2000,
+    protein_target_g: 150,
+    carbs_target_g: 200,
+    fat_target_g: 67
+  });
   const [providerCartReview, setProviderCartReview] = useState(null);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState(null);
   const [providerSavedAddresses, setProviderSavedAddresses] = useState(null);
@@ -895,15 +899,23 @@ export default function Home() {
       }));
     }
     if (data.profile) {
-      if (data.profile.diet_preference) {
-        setDietPreference(data.profile.diet_preference);
-      }
       if (data.profile.household_size) {
         setHouseholdSize(data.profile.household_size);
       }
-      if (data.profile.preferred_grocery_provider) {
-        setPreferredOrderingProvider(data.profile.preferred_grocery_provider);
-      }
+    }
+    if (Array.isArray(data.household_members) && data.household_members.length > 0) {
+      const members = data.household_members.map(member => ({
+        value: member.name,
+        label: member.name === DEFAULT_ACTIVE_USER ? `${member.name} (me)` : member.name
+      }));
+      setHouseholdMembers(members);
+      setUserProfiles(prev => members.reduce((profiles, member) => ({
+        ...profiles,
+        [member.value]: profiles[member.value] || { name: member.value, loggedMeals: [] }
+      }), prev));
+    }
+    if (data.nutrition_targets) {
+      setNutritionTargets(data.nutrition_targets);
     }
     if (data.meal_plan) {
       const nextMealPlan = data.meal_plan;
@@ -967,10 +979,10 @@ export default function Home() {
       const providers = (Array.isArray(data.providers) ? data.providers : []).map(withProviderRoutes);
       setOrderingProviders(providers);
       setProviderConnectionStatus(null);
-      const preferred = data.preferred_provider || preferredOrderingProvider;
+      const selectedByWorkflow = data.selected_provider || "";
       setSelectedOrderingProvider(current => {
         if (providers.some(provider => provider.id === current && provider.enabled)) return current;
-        if (providers.some(provider => provider.id === preferred && provider.enabled)) return preferred;
+        if (providers.some(provider => provider.id === selectedByWorkflow && provider.enabled)) return selectedByWorkflow;
         const connectedZepto = providers.find(provider => provider.id === "zepto" && provider.enabled && provider.state === "configured");
         const connectedInstamart = providers.find(provider => provider.id === "swiggy_instamart" && provider.enabled && provider.state === "connected");
         return connectedZepto?.id || connectedInstamart?.id || "";
@@ -985,7 +997,7 @@ export default function Home() {
       });
       return [];
     }
-  }, [preferredOrderingProvider]);
+  }, []);
 
   const syncProviderAddresses = useCallback(async () => {
     if (!selectedProviderEnabled || !selectedProviderAddressesRoute) return null;
@@ -1095,7 +1107,6 @@ export default function Home() {
     const timer = window.setTimeout(() => {
       setActiveTab("groceries");
       setSelectedOrderingProvider(connectedProvider);
-      setPreferredOrderingProvider(connectedProvider);
       setAlertBanner({ show: true, text: "The household grocery-provider connection is ready." });
       syncProviderRegistry();
     }, 0);
@@ -1212,12 +1223,11 @@ export default function Home() {
     ];
   }, [clearProviderSyncTimers]);
 
-  const saveHouseholdProfile = async (dietType, size) => {
+  const saveHouseholdProfile = async (size) => {
     const res = await fetch(apiUrl("/api/household/profile"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        diet_preference: dietType,
         household_size: size
       })
     });
@@ -1225,22 +1235,10 @@ export default function Home() {
     return res.json();
   };
 
-  const switchDiet = async (dietType) => {
-    if (!DIET_TYPES[dietType]) return;
-    try {
-      const data = await saveHouseholdProfile(dietType, householdSize);
-      setDietPreference(data.profile.diet_preference);
-      triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[dietType].name}!`);
-    } catch (e) {
-      console.error("Failed to update dietary profile", e);
-      triggerBannerAlert(apiErrorMessage(e, "Could not update the dietary profile."));
-    }
-  };
-
   const updateHouseholdSize = async (size) => {
     const val = Math.max(1, parseInt(size) || 1);
     try {
-      const data = await saveHouseholdProfile(dietPreference, val);
+      const data = await saveHouseholdProfile(val);
       setHouseholdSize(data.profile.household_size);
       triggerBannerAlert(`Updated household size to ${data.profile.household_size}.`);
     } catch (e) {
@@ -1584,16 +1582,15 @@ export default function Home() {
     if (!provider.enabled || providerSyncInFlightRef.current) return;
     if (provider.id === selectedOrderingProvider) return;
     setSelectedOrderingProvider(provider.id);
-    setPreferredOrderingProvider(provider.id);
     setProviderConnectionStatus(null);
     setProviderSavedAddresses(null);
     setProviderAddressLoadError("");
     setSelectedProviderAddress("");
     invalidateProviderReview();
-    fetch(apiUrl("/api/household/profile"), {
+    fetch(apiUrl("/api/grocery/provider-selection"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preferred_grocery_provider: provider.id })
+      body: JSON.stringify({ selected_provider: provider.id })
     }).catch(error => console.error("Failed to remember ordering provider", error));
   };
 
@@ -1825,8 +1822,6 @@ export default function Home() {
       const chatPayload = {
         message: prompt,
         active_user: activeUser,
-        diet_preference: dietPreference,
-        household_size: householdSize,
         planner_context: {
           visible_week_start: mealPlan.week_start || "",
           selected_date: selectedPlanDate || mealPlan.today || ""
@@ -1861,17 +1856,7 @@ export default function Home() {
 
       if (response.action) {
         const act = response.action;
-        if (act.type === "SWITCH_DIET") {
-          const textLower = response.text.toLowerCase();
-          let newDiet = dietPreference;
-          if (textLower.includes("keto")) newDiet = "keto";
-          else if (textLower.includes("vegan")) newDiet = "vegan";
-          else if (textLower.includes("high-protein") || textLower.includes("active")) newDiet = "high-protein";
-          else if (textLower.includes("balanced")) newDiet = "balanced";
-
-          setDietPreference(newDiet);
-          triggerBannerAlert(`Switched dietary profile to ${DIET_TYPES[newDiet].name}!`);
-        } else if (act.type === "UPDATE_PLANNER") {
+        if (act.type === "UPDATE_PLANNER") {
           const focusDate = act.focus_date || act.affected_dates?.[0];
           if (focusDate) {
             await loadMealPlanWeek(getWeekStartForDate(focusDate), focusDate);
@@ -2066,12 +2051,12 @@ export default function Home() {
     setChatInput(`Change ${formatPlanDate(planDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} ${slot} to `);
   };
 
-  // Daily target calorie values per person
-  const targetCalories = DIET_TYPES[dietPreference].dailyCalorieTargetPerPerson;
-  const dietMeta = DIET_TYPES[dietPreference];
-  const targetProtein = Math.round((targetCalories * (dietMeta.targetMacros.protein / 100)) / 4);
-  const targetCarbs = Math.round((targetCalories * (dietMeta.targetMacros.carbs / 100)) / 4);
-  const targetFat = Math.round((targetCalories * (dietMeta.targetMacros.fat / 100)) / 9);
+  // Personal nutrition goals are stored in the nutrition domain, independently
+  // of free-form dietary preferences in agent memory.
+  const targetCalories = Number(nutritionTargets.daily_calorie_target);
+  const targetProtein = Number(nutritionTargets.protein_target_g);
+  const targetCarbs = Number(nutritionTargets.carbs_target_g);
+  const targetFat = Number(nutritionTargets.fat_target_g);
 
   // Active user's aggregated daily values
   const activeUserProfile = userProfiles[activeUser] || { name: activeUser, loggedMeals: [] };
@@ -2593,7 +2578,7 @@ export default function Home() {
         </nav>
         <div className="rail-member-card">
           <div className="rail-member-avatar">
-            {HOUSEHOLD_MEMBERS.map(member => (
+            {householdMembers.map(member => (
               <span key={member.value}>{member.value[0]}</span>
             ))}
           </div>
@@ -2622,18 +2607,9 @@ export default function Home() {
             <div className="control-group">
               <label htmlFor="profile-selector">Active User</label>
               <select id="profile-selector" name="profile-selector" value={activeUser} onChange={(e) => switchActiveUser(e.target.value)}>
-                {HOUSEHOLD_MEMBERS.map(member => (
+                {householdMembers.map(member => (
                   <option key={member.value} value={member.value}>{member.label}</option>
                 ))}
-              </select>
-            </div>
-            <div className="control-group">
-              <label htmlFor="diet-selector">Diet Profile</label>
-              <select id="diet-selector" name="diet-selector" value={dietPreference} onChange={(e) => switchDiet(e.target.value)}>
-                <option value="balanced">Balanced Diet</option>
-                <option value="keto">Keto / Low-Carb</option>
-                <option value="vegan">Vegan / Plant-Based</option>
-                <option value="high-protein">High-Protein Active</option>
               </select>
             </div>
             <div className="control-group">
@@ -2860,11 +2836,10 @@ export default function Home() {
                     <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 60vw" priority unoptimized />
                     <div className="chip-row">
                       <span>{householdSize} people</span>
-                      <span>{dietMeta.name}</span>
                     </div>
                     <div className="hero-footer">
                       <div className="avatar-stack">
-                        {HOUSEHOLD_MEMBERS.map(member => (
+                        {householdMembers.map(member => (
                           <span key={member.value}>{member.value[0]}</span>
                         ))}
                       </div>

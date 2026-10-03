@@ -59,10 +59,10 @@ from the user's wording.
 
 | Agent | Reads | May mutate | Cannot do |
 | --- | --- | --- | --- |
-| `kitch_coordinator` | Routing context and provider status | Diet, household size, calorie target, timezone | Provider auth/default, carts, payment, order |
-| `chef_planner` | Exact dated plans and calendar context | Future ranges, slots and dates; bulk removal after confirmation | Recipes, pantry, groceries, past plans |
+| `kitch_coordinator` | Routing context and provider status | Factual household size and timezone | Semantic preferences, provider auth/selection, carts, payment, order |
+| `chef_planner` | Exact dated plans, calendar context, preference memory | Future ranges, slots and dates; natural-language planning preferences; bulk removal after confirmation | Recipes, pantry, groceries, past plans |
 | `recipe_grocery_planner` | Recipes, pantry, native cart, memory, provider status | Recipes, pantry, native cart, preferences, reversible provider sync | OAuth, provider default, payment, checkout, cancellation |
-| `nutrition_tracker` | Active user's diary | Log, correct, delete one entry; clear day after confirmation | Pantry or household plans |
+| `nutrition_tracker` | Active user's diary and nutrition goals | Log, correct, delete one entry; update nutrition goals; clear day after confirmation | Pantry or household plans |
 | `vision_scanner` | Image and accompanying text | Nothing | Tools or persistence claims |
 | `instamart_cart_agent` | Scoped intent, preferences and allowed MCP tools | Instamart cart during authorized operation | Checkout, auth, address mutation, provider default |
 
@@ -94,9 +94,9 @@ The retired `already_stocked` and `stock_note` snapshots must not return.
 
 ## Memory
 
-Household food, allergy, brand, pack, and ordering preferences remain natural-language ADK memory, not relational catalogue rules. Agents access it through tools. The current `InMemoryMemoryService` is ephemeral across backend restarts; Vertex AI is the planned durability layer.
+Household dietary style, food, allergy, brand, pack, and ordering preferences remain natural-language ADK memory, not profile columns or relational catalogue rules. Agents access it through tools. The current `InMemoryMemoryService` is ephemeral across backend restarts; Vertex AI is the planned durability layer.
 
-Structured product state—pantry, meal plans, recipes, grocery rows, nutrition, settings, and checkout drafts—always belongs in Supabase. Memory never substitutes for failed persistence.
+Structured product state—pantry, meal plans, recipes, grocery rows, nutrition logs and goals, factual household configuration, provider workflow state, and checkout drafts—belongs in Supabase. Memory never substitutes for failed persistence, and Supabase never substitutes for preference memory.
 
 ## Commerce safety
 
@@ -127,6 +127,8 @@ Accepted:
 - Domain ownership stays split among planning, recipe/grocery/pantry, and nutrition specialists.
 - Vision is non-mutating and classifies before persistence.
 - Preference memory remains flexible text.
+- Household profiles contain factual identity/configuration only; nutrition
+  goals and provider workflow selection have separate structured ownership.
 - Native cart is the durable conduit between planning and provider projections.
 - Provider sync belongs to Recipe/Grocery Planner; ordering remains UI-only.
 - Pantry mutation and pantry-to-cart reconciliation are separate explicit
@@ -140,6 +142,8 @@ Rejected:
 - Inferring image purpose from Camera or Gallery.
 - A pantry-only `clear_pantry` tool: replacement consistently covers empty, partial, and observed inventories.
 - Rigid SQL preference rules for messy product catalogues.
+- Diet-type enums or other semantic preference columns on household profiles;
+  database durability must not substitute for the memory service.
 - Deterministic unit-spelling gates for semantic pantry reasoning; the agent
   interprets real-world quantities while the application enforces only
   functionally necessary invariants such as item identity and explicit amount.
