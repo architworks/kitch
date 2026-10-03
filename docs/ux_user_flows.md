@@ -244,7 +244,9 @@ Example prompts:
 
 ### Expected Experience
 
-1. The user provides items through text, manual entry, or photo.
+1. The user provides items through text, manual entry, or photo. For an update
+   to existing stock, Kitch reads the current pantry before deciding the new
+   state.
 2. The Pantry tab shows every row, amount, unit, last update, revision freshness,
    add/edit/remove controls, and “Mark pantry empty.”
 3. For a photo, Vision Scanner first classifies it as `meal`, `pantry`, or
@@ -258,6 +260,8 @@ Example prompts:
 
 - Pantry is shared across the household.
 - Pantry updates should never be personal to only one member.
+- Every added, set, or adjusted item must identify its quantity; Kitch must not
+  persist a quantity-bearing change after dropping the observed amount.
 - Kitch should handle approximate quantities when exact amounts are unknown.
 - Classification uses explicit states rather than a displayed confidence score.
 - Complete replacement and emptying require an exact-impact confirmation.

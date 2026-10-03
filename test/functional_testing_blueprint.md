@@ -1,7 +1,8 @@
 # Kitch Functional Testing Blueprint
 
 This document converts the historical production verification scenarios from
-`docs/production_test_results.md` into a reusable functional test template.
+`docs/test_artifacts/production_test_results.md` into a reusable functional
+test template.
 It is intended for manual, assisted, or automated functional testing of the
 full Kitch product experience.
 

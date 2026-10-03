@@ -1,4 +1,4 @@
-# Kitch AI Agent Architecture
+# Kitch AI Agent Topology and Authority
 
 This is the authoritative description of the Gemini + Google ADK topology, domain ownership, memory, and authority boundaries.
 
@@ -46,6 +46,11 @@ Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and services
 
 The three domain specialists run in ADK `task` mode. Every new household chat turn therefore begins at `kitch_coordinator`; a previous specialist cannot retain routing control over the next message. The coordinator can complete its own household-setting operation and then invoke the appropriate specialist in the same turn.
 
+If one message combines a coordinator-owned setting change with specialist
+work, the coordinator persists the setting first and delegates only after the
+tool confirms success. A failed setting write cannot be inferred as successful
+from the user's wording.
+
 `vision_scanner` is a real agent but not a conversational sub-agent. It is logically one-shot so image classification does not inherit chat assumptions and cannot mutate state. ADK requires a root `LlmAgent` to use `chat` mode, so isolation is provided by a unique session for every upload plus `include_contents="none"`. It returns exactly `meal`, `pantry`, or `ambiguous`, structured observations, and no confidence score. Camera and Gallery are only upload mechanisms.
 
 `pantry_reconciliation_mode` uses the same isolated-runner pattern and is invoked only after an explicit request to update the native cart from pantry state. It reasons about real-world coverage; the backend validates exact cart IDs and nonnegative quantities before committing the cart changes.
@@ -68,6 +73,9 @@ The complete team is the “head chef.” The coordinator routes; it does not ac
 Pantry is shared household state. Recipe/Grocery Planner reads rows, `pantry_revision`, and `pantry_reviewed_at`.
 
 - `patch_pantry_tool` atomically applies `add`, `set`, `adjust`, and single `remove` operations.
+- Recipe/Grocery Planner reads the current pantry before proposing a mutation.
+  Every quantity-bearing mutation includes an explicit amount from the user or
+  structured image observation; an omitted amount is rejected before storage.
 - `replace_pantry_tool` creates a pending destructive action; an empty replacement means an empty pantry.
 - Current-inventory photos use `set`; explicitly newly purchased stock uses `add`.
 - Full replacement updates `pantry_reviewed_at`; incremental edits do not claim a full review.
@@ -96,6 +104,18 @@ Recipe/Grocery Planner owns `sync_provider_cart_tool`. A provider named in chat 
 
 `CommerceToolPolicy` carries server-owned `read`, `cart_write`, or `checkout` authority. Cart mutation is reversible. Checkout is excluded from agent toolsets and permitted only in the UI Place Order endpoint after durable draft, lease, snapshot, address, payment, revalidation, and acknowledgement checks.
 
+## Tool execution and failure handling
+
+Agents may claim success only after a successful tool result. FastAPI also
+tracks request-scoped persistence failures and returns 503 even if the agent
+runtime continues generating text.
+
+The shared tool-error callback recovers only from a model-generated tool name
+that is not registered. Because no application tool ran, the model is asked to
+re-read its actual toolset and try again. Exceptions from real tools—including
+database and provider failures—are never converted into apparent success or an
+automatic mutation retry.
+
 ## Confirmation model
 
 Single explicitly identified deletions execute directly. Bulk deletion and complete replacement create an expiring, single-use `pending_agent_actions` row. Chat returns `CONFIRM_DESTRUCTIVE_ACTION`; the frontend shows exact impact and calls confirmation. Cancellation performs no mutation. Backend state—not prompt wording—enforces this.
@@ -109,6 +129,9 @@ Accepted:
 - Preference memory remains flexible text.
 - Native cart is the durable conduit between planning and provider projections.
 - Provider sync belongs to Recipe/Grocery Planner; ordering remains UI-only.
+- Pantry mutation and pantry-to-cart reconciliation are separate explicit
+  operations; changing pantry stock does not silently rewrite purchase intent.
+- UI sync and explicit chat sync share the same guarded provider-cart workflow.
 
 Rejected:
 
@@ -117,10 +140,12 @@ Rejected:
 - Inferring image purpose from Camera or Gallery.
 - A pantry-only `clear_pantry` tool: replacement consistently covers empty, partial, and observed inventories.
 - Rigid SQL preference rules for messy product catalogues.
+- Deterministic unit-spelling gates for semantic pantry reasoning; the agent
+  interprets real-world quantities while the application enforces only
+  functionally necessary invariants such as item identity and explicit amount.
 - A `grocery_ordering_agent` router before demonstrated multi-provider routing complexity.
 - Provider-specific coordinator sync tools; one provider-neutral specialist tool avoids a tool soup.
 - Agent access to auth, saved provider default, payment, checkout, cancellation, or confirmation bypass.
 
-## Persistence postcondition
-
-Agents may claim success only after a successful tool result. FastAPI independently tracks persistence failures and returns 503 even if the agent framework catches a tool exception and continues producing text.
+Open agent-runtime defects and deferred topology work are tracked in
+`known_issues_and_optimisations.md` rather than duplicated here.

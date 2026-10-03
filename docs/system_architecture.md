@@ -3,8 +3,9 @@
 This document describes the current end-to-end system design: frontend, backend gateway, ADK runtime, persistence, provider adapters, and approval boundaries.
 
 For product intent, read `vision_and_requirements.md`.
-For AI runtime and agent roles, read `ai_agent_architecture.md`.
-For concrete stack/configuration, read `current_technology_stack.md`.
+For AI runtime and agent roles, read `ai_agent_topology.md`.
+For dependencies, environment variables, local startup, and deployment, read
+`runtime_stack_and_configuration.md`.
 
 ---
 
@@ -16,45 +17,30 @@ The current design separates responsibilities deliberately:
 
 - The frontend renders state and collects explicit user actions.
 - FastAPI owns browser-facing APIs, state hydration, multimodal request orchestration, and provider approval boundaries.
-- The main ADK head-chef team routes household settings, dated planning,
-  recipe/grocery/pantry work, and user-specific nutrition to clear owners.
-- A one-shot non-mutating Vision Scanner classifies images before any domain
-  mutation occurs.
-- A separate operation-scoped Instamart agent performs authorized provider catalogue
-  matching and reversible cart preparation.
+- The Gemini/ADK runtime owns reasoning and tool-mediated domain operations;
+  its internal topology is documented separately.
+- Images are classified before any domain mutation occurs.
+- Provider-specific executors perform authorized catalogue matching and
+  reversible cart preparation.
 - Python tools perform deterministic side effects.
 - Supabase stores authoritative structured product state.
 - ADK memory stores explicitly ephemeral household food and brand preferences.
 - The commerce layer translates Kitch's native cart into provider carts through
-  provider-specific execution: a guarded Gemini agent for Instamart and an
-  adapter-driven flow for Zepto.
+  provider-specific execution behind one checkout service.
 
 ```mermaid
 flowchart LR
     Browser[Browser / Next.js UI] -->|HTTP| API[FastAPI Gateway]
-    API -->|runner.run_async| Runner[ADK Runner]
-    Runner --> Coordinator[kitch_coordinator]
-    Coordinator -->|task invocation| Chef[chef_planner]
-    Coordinator -->|task invocation| RecipeGrocery[recipe_grocery_planner]
-    Coordinator -->|task invocation| Nutrition[nutrition_tracker]
-    Coordinator --> ProviderReadTools[Provider status tools]
-    API --> Vision[one-shot vision_scanner]
-    Vision -->|meal| Nutrition
-    Vision -->|pantry| RecipeGrocery
-
-    Chef --> Tools[Python Tool Layer]
-    Nutrition --> Tools
-    RecipeGrocery --> Tools
-
+    API -->|agent requests| AgentRuntime[Gemini + ADK head-chef runtime]
+    AgentRuntime --> Tools[Application tool layer]
     Tools --> Supabase[(Supabase PostgreSQL)]
-    RecipeGrocery --> Memory[ADK Memory]
-    Runner --> Sessions[ADK Sessions]
+    AgentRuntime --> Memory[Ephemeral ADK sessions and text memory]
 
     API --> Checkout[GroceryCheckoutService]
-    RecipeGrocery -->|sync_provider_cart_tool| Checkout
-    Checkout --> InstamartAgent[Gemini Instamart cart agent]
-    InstamartAgent --> ToolPolicy[Commerce tool policy]
-    InstamartAgent --> InstamartMCP[Swiggy Instamart /im MCP]
+    AgentRuntime -->|authorized reversible sync| Checkout
+    Checkout --> ProviderExecutor[Selected provider cart executor]
+    ProviderExecutor --> ToolPolicy[Commerce tool policy]
+    ProviderExecutor --> InstamartMCP[Swiggy Instamart /im MCP]
     Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
     Checkout --> InstamartAdapter[InstamartProviderAdapter]
     ZeptoAdapter --> ZeptoMCP[Zepto MCP]
@@ -114,7 +100,7 @@ to manually visit the native-cart screen before every synchronization.
 Provider synchronization is owned by Recipe/Grocery Planner through one
 provider-neutral bridge. A named provider overrides only the current operation;
 otherwise the UI-selected provider is used. The full accepted and rejected
-topology record is maintained in `ai_agent_architecture.md`.
+topology record is maintained in `ai_agent_topology.md`.
 
 ---
 
@@ -214,59 +200,17 @@ Why the backend owns durable checkout drafts:
 
 ---
 
-## Agent Runtime Duties
+## Agent Runtime Boundary
 
-The main ADK application in `backend/app/agent/core.py` contains:
+FastAPI invokes the Gemini/ADK runtime for reasoning and tool-mediated domain
+operations. The browser never calls an agent or MCP server directly. Final
+provider checkout remains a backend-authorized UI operation outside all agent
+toolsets.
 
-- `kitch_coordinator`
-- `chef_planner`
-- `recipe_grocery_planner`
-- `nutrition_tracker`
-
-The coordinator is the root chat agent. The three domain specialists use ADK
-`task` mode, so each user turn is routed afresh by the coordinator rather than
-resuming whichever specialist handled the previous turn. This also lets mixed
-requests persist coordinator-owned household settings before invoking a domain
-task.
-
-FastAPI invokes `vision_scanner` and `pantry_reconciliation_mode` in isolated,
-logically one-shot ADK runners. ADK root agents must use `chat` mode, so these
-runs use a unique session per operation and exclude prior contents. Neither
-agent has mutation tools.
-
-The provider checkout service separately creates `instamart_cart_agent` through
-`InstamartCartAgentService`. This is an operation-scoped ADK run, not a
-coordinator sub-agent.
-
-Agents reason over:
-
-- User text.
-- Optional image content.
-- Current date/time.
-- Active user.
-- Household size.
-- Household members.
-- Dietary profile.
-- Weekly schedule.
-- Pantry state.
-- Household preferences.
-- Standalone native-cart mutations explicitly requested in chat.
-
-The main coordinator team does not reason over:
-
-- UI layout.
-- Provider payment UI state.
-- Frontend route state.
-- Final order placement.
-
-The Instamart cart agent reasons only over the scoped native items, selected
-address, ordering preferences, Swiggy history, and the allowlisted `/im`
-catalogue/cart tools. It never receives checkout authority.
-
-Why:
-
-- Agents should handle culinary reasoning and state updates through tools.
-- UI and provider safety workflows should remain deterministic backend/frontend logic.
+The authoritative topology, every agent and tool role, task-vs-chat execution
+mode, memory access, image routing, confirmation behavior, and accepted or
+rejected topology decisions are documented only in
+`ai_agent_topology.md`.
 
 ---
 
@@ -404,24 +348,17 @@ sequenceDiagram
     end
 ```
 
-Important rules:
+Architectural invariants:
 
 - User selection means "include this native row in the chosen provider projection."
 - Pantry-covered rows are never included.
-- The main page chronology is native cart, ordering app, delivery address,
-  transfer, provider cart review, then payment and order.
-- Numbered stage markers are light green while pending and dark green only
-  when their underlying state is complete. Native-cart, selection, provider,
-  or address changes invalidate the provider review and return transfer,
-  review, and order markers to pending.
 - The household preference is restored. Without one, connected Zepto is chosen
   first, then connected Instamart; otherwise provider selection stays active.
   Blinkit is disabled and cannot issue API calls.
 - A saved delivery address is required before sync.
 - Provider sync cannot start while a native-cart write is still in flight.
-- Once sync starts, the frontend disables native-cart selection, quantity,
-  unit, add, delete, clear, address, and quick-action controls. A modal progress
-  dialog retains focus until the request succeeds or fails.
+- Sync, revalidation, and checkout are serialized per household/provider;
+  clients lock conflicting controls for the lifetime of the operation.
 - Product search cannot start until the selected provider confirms the address/store context.
 - Search results do not count as cart success. The backend must confirm exact
   provider identifiers and quantities in the returned provider cart.
@@ -450,17 +387,6 @@ Important rules:
   reset payment and acknowledgement. Unresolved native items remain in the
   approval snapshot as explicitly omitted rows; confirmed partial carts may
   proceed, while carts with no confirmed items remain blocked.
-- The cart-item review occupies the main workflow; subtotal, fees, discount,
-  total, and total-source explanation are shown in the right summary sidebar.
-- Provider-cart rows show the provider image, mapped native item, unit price,
-  read-only quantity, pack size, and line subtotal. Rows are ordered by line
-  subtotal descending. Kitch does not expose provider-cart quantity controls
-  until direct cart editing is implemented.
-- The transfer stage is a single compact action row; it does not introduce a
-  second internal section for its one button.
-- Actual address labels are shown when the selected provider exposes them.
-- The UI distinguishes enabled, connected, reconnect-required, degraded,
-  production-gated, and address/store-ready states.
 - Instamart uses only `/im`. Its dedicated agent receives only
   `get_addresses`, `search_products`, `your_go_to_items`, `update_cart`, and
   `get_cart`; checkout and other mutations are absent.
@@ -469,7 +395,7 @@ Important rules:
   Checkout is independently allowed only for the UI place-order endpoint.
 - Exact MCP update/read results are captured after tool calls. Durable cart and
   bill state never comes from the model's textual reconstruction.
-- Instamart displays only payment methods returned by the fresh confirmed cart
+- Instamart accepts only payment methods returned by the fresh confirmed cart
   or provider payment capability. UPI is exclusive when returned; its opaque
   app ID is echoed unchanged, or the documented QR flag is used. COD is offered
   only when UPI is absent and Cash is returned.
@@ -482,45 +408,11 @@ Important rules:
 
 Why:
 
-- Users care about what went into the cart, not internal matching terminology.
 - Provider auth and tool mechanics are implementation details.
 - Real order placement needs a human review point.
 
----
-
-## Memory and Session Design
-
-Current local ADK services:
-
-- `InMemorySessionService`
-- `InMemoryMemoryService`
-
-Current persistent app state:
-
-- Supabase.
-
-Current memory contents:
-
-- Household food preferences.
-- Household brand preferences.
-
-Why in-memory services now:
-
-- The product is still in local/deployment testing.
-- In-memory sessions make restarts predictable during development.
-- Supabase already persists the deterministic records that the UI needs.
-- Vertex AI service setup can wait until the deployed runtime is validated.
-
-Planned migration:
-
-- `VertexAISessionService` for durable sessions.
-- `VertexAIMemoryBank` for durable household preferences.
-
-Why the migration is deferred:
-
-- It avoids coupling early product experimentation to managed memory setup.
-- It lets the current app stabilize before introducing cloud-state debugging.
-- The code already uses ADK service abstractions, so the migration should not require changing the agent topology.
+The checkout chronology, progress states, review layout, and responsive
+behavior are documented in `ux_user_flows.md`, not duplicated here.
 
 ---
 
@@ -535,3 +427,6 @@ Why the migration is deferred:
 - Multi-household registration is not implemented.
 - Provider order placement is live and must remain guarded.
 - The current household is configured in code until real registration exists.
+
+Reproducible defects, operational blockers, and deliberately deferred
+optimisations are maintained in `known_issues_and_optimisations.md`.
