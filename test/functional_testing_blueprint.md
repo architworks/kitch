@@ -75,8 +75,10 @@ Before running the scenarios, prepare a consistent household test context.
 
 - Use the same active household member throughout the run unless the scenario
   explicitly requires otherwise.
-- Confirm `/api/health` reports ready before starting. It verifies the elevated
-  backend credential, required tables/columns, and configured household profile.
+- Confirm `/api/health/live` responds immediately, then confirm
+  `/api/health/ready` reports ready before starting. Readiness verifies the
+  elevated backend credential, required tables/columns, and configured
+  household profile while reporting provider degradation separately.
 - Confirm the app can read and write user profile, meal plan, pantry, food
   diary, grocery, and recipe-artifact state. Preference memory is explicitly
   ephemeral in this release.
@@ -93,15 +95,15 @@ Before running the scenarios, prepare a consistent household test context.
 
 | Capability | Primary scenarios |
 | --- | --- |
-| Dated meal creation, editing, and removal | 1.1–1.8, 2.1–2.6, 9.1–9.6 |
-| Recipe creation, revision, and deletion | 2A.1–2A.2 |
-| Nutrition logging, correction, deletion, and daily clearing | 3.1–3.4, 4.1, 9.3 |
-| Neutral image classification and routing | 4.1–4.3, 6.2, 6.4 |
-| Pantry inspection and mutation through UI, chat, and images | 6.1–6.4 |
-| Native-cart and provider-cart preparation | 5.1–5.3, 7.1–7.4 |
-| Flexible household preference memory | 1.3, 7.2, 8.1–8.3 |
-| Household settings and domain routing | 1.8, 3.4, 6.3, 7.2 |
-| Destructive-action and order authority boundaries | 2.6, 3.4, 6.3, 7.4 |
+| Dated meal creation, editing, and removal | 1.1–1.8, 2.1–2.6, 10.1–10.6 |
+| Recipe creation, revision, and deletion | 3.1–3.2 |
+| Nutrition logging, correction, deletion, and daily clearing | 4.1–4.4, 5.1, 10.3 |
+| Neutral image classification and routing | 5.1–5.3, 7.2, 7.4 |
+| Pantry inspection and mutation through UI, chat, and images | 7.1–7.4 |
+| Native-cart and provider-cart preparation | 6.1–6.3, 8.1–8.4 |
+| Flexible household preference memory | 1.3, 8.2, 9.1–9.3 |
+| Household settings and domain routing | 1.8, 4.4, 7.3, 8.2 |
+| Destructive-action and order authority boundaries | 2.6, 4.4, 7.3, 8.4 |
 
 ## Meal-Plan Persistence Regression Context
 
@@ -196,7 +198,7 @@ explicitly requests next week.
   carb staples should not dominate the plan.
 - Persistence and recall check: Confirm the weekly plan and structured diet
   profile remain after refresh and backend restart. Free-form food and brand
-  preferences remain separately tested as process-local memory in Section 8.
+  preferences remain separately tested as process-local memory in Section 9.
 - Pass criteria: Complete keto plan is saved and later behavior respects keto.
 - Fail criteria: Incomplete plan, non-keto plan, preference not remembered, or
   old cuisine plan remains.
@@ -366,14 +368,14 @@ preserve the rest of the weekly schedule.
 - Fail criteria: The wrong date or slot is removed, broad deletion is
   surprising or unclear, past state changes, or unrelated plans are lost.
 
-## Section 2A: Recipe Management
+## Section 3: Recipe Management
 
 These scenarios verify that users can request full cooking details for a
 planned meal without implicitly asking Kitch to buy anything. They cover the
 Home-page **View details** flow, which seeds a `Show me the recipe for ...`
 prompt, and the persisted recipe rendered in the Recipes page.
 
-### Scenario 2A.1 - View Recipe Details for the Next Planned Meal
+### Scenario 3.1 - View Recipe Details for the Next Planned Meal
 
 - Prerequisite: The active meal plan has a named next meal on the Home page.
   Record that meal name before beginning.
@@ -406,7 +408,7 @@ prompt, and the persisted recipe rendered in the Recipes page.
   frontend must preserve the last confirmed recipe and cart state without
   showing a success banner.
 
-### Scenario 2A.2 - Revise and Delete a Saved Recipe
+### Scenario 3.2 - Revise and Delete a Saved Recipe
 
 - Prerequisite: Save two recipe artifacts. Let the first populate linked
   recipe-generated grocery rows, and add a separate manual native-cart row.
@@ -427,12 +429,12 @@ prompt, and the persisted recipe rendered in the Recipes page.
 - Fail criteria: A duplicate recipe is created, unrelated or manual rows are
   replaced, linked rows become orphaned, or only part of a revision persists.
 
-## Section 3: Macro Logging via Text Message
+## Section 4: Macro Logging via Text Message
 
 These scenarios verify that plain text food messages are converted into diary
 entries with reasonable calorie and macro estimates.
 
-### Scenario 3.1 - Roti and Dal Lunch
+### Scenario 4.1 - Roti and Dal Lunch
 
 - Prompt/action: "I ate 2 rotis and dal for lunch today"
 - Expected behavior: The assistant logs lunch for today with rotis and dal.
@@ -444,7 +446,7 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: No diary entry, wrong date, wrong meal, or wildly implausible
   nutrition.
 
-### Scenario 3.2 - Smoothie Ingredients
+### Scenario 4.2 - Smoothie Ingredients
 
 - Prompt/action: "Had a smoothie - banana, peanut butter, oats, milk"
 - Expected behavior: The assistant logs a smoothie based on the listed
@@ -456,7 +458,7 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: Missing diary entry, missing major ingredients, or implausible
   estimate.
 
-### Scenario 3.3 - Black Coffee
+### Scenario 4.3 - Black Coffee
 
 - Prompt/action: "Just had a black coffee, nothing else"
 - Expected behavior: The assistant logs black coffee as a very low-calorie
@@ -468,7 +470,7 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: No entry, wrong food item, or added ingredients the user did
   not mention.
 
-### Scenario 3.4 - Correct, Delete, and Clear Nutrition Safely
+### Scenario 4.4 - Correct, Delete, and Clear Nutrition Safely
 
 - Prompt/action: Correct one named diary entry, delete one explicitly identified
   entry, then request clearing today's diary.
@@ -483,12 +485,12 @@ entries with reasonable calorie and macro estimates.
 - Fail criteria: The wrong entry or person changes, totals disagree with the
   diary, or a cancelled clear still removes data.
 
-## Section 4: Macro Logging via Image
+## Section 5: Macro Logging via Image
 
 These scenarios verify that Camera and Gallery share one non-mutating classifier
 before the image is routed to Nutrition Tracker or Recipe/Grocery Planner.
 
-### Scenario 4.1 - Salad Plate Photo
+### Scenario 5.1 - Salad Plate Photo
 
 - Prompt/action: Upload a salad plate image with the prompt "Log this salad
   plate photo".
@@ -504,7 +506,7 @@ before the image is routed to Nutrition Tracker or Recipe/Grocery Planner.
 - Fail criteria: Image ignored, food not logged, wrong food recognized, or no
   persisted diary entry.
 
-### Scenario 4.2 - Fridge Scan Updates Pantry
+### Scenario 5.2 - Fridge Scan Updates Pantry
 
 - Prompt/action: Upload a fridge image with the prompt "Update my pantry with
   this fridge scan".
@@ -523,7 +525,7 @@ before the image is routed to Nutrition Tracker or Recipe/Grocery Planner.
 - Fail criteria: Image ignored, no pantry update, or clearly visible items are
   missed without explanation.
 
-### Scenario 4.3 - Neutral Image Classification and Ambiguity
+### Scenario 5.3 - Neutral Image Classification and Ambiguity
 
 - Prompt/action: Submit the same meal and pantry fixtures once from Camera and
   once from Gallery, then submit an image whose purpose is genuinely ambiguous.
@@ -534,12 +536,12 @@ before the image is routed to Nutrition Tracker or Recipe/Grocery Planner.
 - Pass criteria: No confidence threshold is shown, no mutation occurs before
   classification is resolved, and an override uses the retained file once.
 
-## Section 5: Grocery List Creation
+## Section 6: Grocery List Creation
 
 These scenarios verify that the assistant can turn the active meal plan into a
 usable grocery list.
 
-### Scenario 5.1 - Weekly Groceries
+### Scenario 6.1 - Weekly Groceries
 
 - Prompt/action: "What groceries do I need for the week?"
 - Expected behavior: The assistant generates groceries for the active weekly
@@ -553,7 +555,7 @@ usable grocery list.
 - Fail criteria: No grocery list, generic advice, missing persistence, or list
   unrelated to current meals.
 
-### Scenario 5.2 - Shopping List
+### Scenario 6.2 - Shopping List
 
 - Prompt/action: "Make a shopping list"
 - Expected behavior: The assistant creates a usable shopping checklist from the
@@ -565,7 +567,7 @@ usable grocery list.
 - Fail criteria: No list, no persistence, or the list ignores the active meal
   plan.
 
-### Scenario 5.3 - Groceries for an Exact Date Range
+### Scenario 6.3 - Groceries for an Exact Date Range
 
 - Prerequisite: Persist distinct meals in the current and following week.
 - Prompt/action: Ask for groceries for one exact date, then for a bounded date
@@ -578,12 +580,12 @@ usable grocery list.
 - Pass criteria: The grocery result respects exact range boundaries.
 - Fail criteria: Kitch silently uses the visible or next full week instead.
 
-## Section 6: Pantry-Aware Grocery Subtraction
+## Section 7: Pantry-Aware Grocery Subtraction
 
 These scenarios verify that the assistant updates pantry state and avoids
 recommending items already stocked.
 
-### Scenario 6.1 - Already Have Eggs and Avocado
+### Scenario 7.1 - Already Have Eggs and Avocado
 
 - Prompt/action: "I already have eggs and avocado, update the grocery list."
 - Expected behavior: The assistant adds eggs and avocado to pantry/stock state
@@ -597,7 +599,7 @@ recommending items already stocked.
 - Fail criteria: Pantry not updated, grocery list still asks the user to buy
   those items without qualification, or state is lost.
 
-### Scenario 6.2 - Fridge Scan and Remaining Groceries
+### Scenario 7.2 - Fridge Scan and Remaining Groceries
 
 - Prompt/action: Upload a fridge scan and ask "Log my fridge scan and tell me
   what else I still need to buy".
@@ -614,7 +616,7 @@ recommending items already stocked.
 - Fail criteria: Image ignored, pantry not updated, or remaining grocery list
   ignores visible stocked items.
 
-### Scenario 6.3 - Inspect, Edit, Remove, and Empty Pantry
+### Scenario 7.3 - Inspect, Edit, Remove, and Empty Pantry
 
 - Prompt/action: Open the Pantry tab, inspect all rows and timestamps, add one
   item, set and decrement quantities, and remove one row. Repeat equivalent
@@ -641,7 +643,7 @@ recommending items already stocked.
   changes the wrong row, loses confirmed state after refresh, or applies a
   cancelled replacement.
 
-### Scenario 6.4 - Photo Semantics and Explicit Cart Reconciliation
+### Scenario 7.4 - Photo Semantics and Explicit Cart Reconciliation
 
 - Prompt/action: Upload the same current-inventory pantry photo twice, then an
   explicitly described purchase photo.
@@ -669,13 +671,13 @@ recommending items already stocked.
   change without an explicit command, ignore pantry coverage after explicit
   reconciliation, or a failed reconciliation partially persists.
 
-## Section 7: Ordering App Integration
+## Section 8: Ordering App Integration
 
 These four scenarios apply the same functional contract to Zepto and Swiggy
 Instamart. Use fixtures or Swiggy staging for order-path tests. Never place an
 automated or browser-test order against production.
 
-### Scenario 7.1 - Provider Selection, Connection, and Address
+### Scenario 8.1 - Provider Selection, Connection, and Address
 
 - Prerequisite: Apply the multi-provider migration and configure at least one
   test provider. Use an authorized Swiggy local/staging account for Instamart.
@@ -703,7 +705,7 @@ automated or browser-test order against production.
   address/auth state, a disabled card calls an API, or catalog search starts
   before address context is established.
 
-### Scenario 7.2 - Provider Cart Synchronization and Reconciliation
+### Scenario 8.2 - Provider Cart Synchronization and Reconciliation
 
 - Prerequisite: Select at least two rows with positive purchase quantities,
   leave another unselected, and include one fully pantry-allocated row.
@@ -766,7 +768,7 @@ automated or browser-test order against production.
   the review fabricates a total, state changes during sync, or provider failure
   produces a completed stage.
 
-### Scenario 7.3 - Durable Revalidation, Repair, and Provider Switching
+### Scenario 8.3 - Durable Revalidation, Repair, and Provider Switching
 
 - Prerequisite: Save a successful draft, then make it older than five minutes
   or simulate product, pack, price, quantity, or provider-cart drift.
@@ -798,7 +800,7 @@ automated or browser-test order against production.
   drift becomes Kitch intent, unresolved rows disappear, or cross-provider
   checkout state leaks.
 
-### Scenario 7.4 - Payment Approval, Checkout Safety, and Recovery
+### Scenario 8.4 - Payment Approval, Checkout Safety, and Recovery
 
 - Prerequisite: Use a recorded adapter fixture or Swiggy staging. Do not use a
   production order account.
@@ -826,13 +828,13 @@ automated or browser-test order against production.
   blindly retried, a changed snapshot orders, partial outcomes are flattened,
   or the UI reports success without confirmed backend/provider state.
 
-## Section 8: Ephemeral Preference Recall
+## Section 9: Ephemeral Preference Recall
 
 These scenarios verify that brand and category preferences affect later grocery
 or delivery-preparation behavior within the running backend process. They do
 not claim persistence across a backend restart until Vertex AI memory is used.
 
-### Scenario 8.1 - Bread Brand Preference
+### Scenario 9.1 - Bread Brand Preference
 
 - Prompt/action: "For bread, always get Baker's Dozen whole wheat"
 - Expected behavior: The assistant stores a bread brand/type preference.
@@ -844,7 +846,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not acknowledged, not remembered, or later bread
   item ignores the preference.
 
-### Scenario 8.2 - Grocery Category Exclusion
+### Scenario 9.2 - Grocery Category Exclusion
 
 - Prompt/action: "Never add cereals or cookies to my grocery list - only dairy,
   fruits, and veggies."
@@ -859,7 +861,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not saved, ignored later, or grocery lists include
   excluded categories without user override.
 
-### Scenario 8.3 - Amul Butter Preference
+### Scenario 9.3 - Amul Butter Preference
 
 - Prompt/action: "I prefer Amul butter over any other brand"
 - Expected behavior: The assistant stores an Amul butter brand preference.
@@ -871,7 +873,7 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Fail criteria: Preference not acknowledged, not remembered, or provider
   payload/grocery preview uses generic butter without applying the preference.
 
-## Section 9: Datetime Awareness
+## Section 10: Datetime Awareness
 
 These scenarios verify that relative and explicit dates are resolved using the
 household timezone and used to query the exact dated meal or diary state.
@@ -879,7 +881,7 @@ household timezone and used to query the exact dated meal or diary state.
 Record the actual date and timezone in the artifact before running this
 section. The expected weekday depends on the run date.
 
-### Scenario 9.1 - Dinner Tonight
+### Scenario 10.1 - Dinner Tonight
 
 - Prompt/action: "What's for dinner tonight?"
 - Expected behavior: The assistant resolves "tonight" to the current calendar
@@ -891,7 +893,7 @@ section. The expected weekday depends on the run date.
 - Pass criteria: Correct date resolution and correct dinner.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
-### Scenario 9.2 - Tomorrow Morning
+### Scenario 10.2 - Tomorrow Morning
 
 - Prompt/action: "What am I eating tomorrow morning?"
 - Expected behavior: The assistant resolves "tomorrow morning" to tomorrow's
@@ -901,7 +903,7 @@ section. The expected weekday depends on the run date.
 - Pass criteria: Correct date resolution and correct breakfast.
 - Fail criteria: Wrong weekday, wrong meal, generic answer, or no plan lookup.
 
-### Scenario 9.3 - Calories Today So Far
+### Scenario 10.3 - Calories Today So Far
 
 - Prompt/action: "How many calories have I eaten today so far?"
 - Expected behavior: The assistant queries today's food diary and totals
@@ -913,7 +915,7 @@ section. The expected weekday depends on the run date.
 - Fail criteria: Wrong date, old entries included, logged entries omitted, or
   no total when diary entries exist.
 
-### Scenario 9.4 - Week Navigation and Planned-Date-Only Rendering
+### Scenario 10.4 - Week Navigation and Planned-Date-Only Rendering
 
 - Action: Open the planner, navigate previous week, next week, and back with
   **Today**.
@@ -930,7 +932,7 @@ section. The expected weekday depends on the run date.
   weekday rows, "meal not set" rows, or automatic navigation away from an
   empty current week.
 
-### Scenario 9.5 - Household Timezone Overrides Browser Timezone
+### Scenario 10.5 - Household Timezone Overrides Browser Timezone
 
 - Setup: Keep the household timezone at `Asia/Kolkata` and run the browser in a
   substantially different local timezone.
@@ -942,7 +944,7 @@ section. The expected weekday depends on the run date.
   before and after reload and backend restart.
 - Fail criteria: Any surface changes date because of browser timezone.
 
-### Scenario 9.6 - Past Meal-Plan Retention Cleanup
+### Scenario 10.6 - Past Meal-Plan Retention Cleanup
 
 - Setup: In a controlled database fixture, store one row before the household
   current date, one for today, and one future row.

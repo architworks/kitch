@@ -95,10 +95,11 @@ cd backend
 venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Readiness check:
+Health checks:
 
 ```bash
-curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/health/live
+curl http://127.0.0.1:8000/api/health/ready
 ```
 
 ### 4. Configure and start the frontend

@@ -186,7 +186,8 @@ Current routes:
 | `POST /api/grocery/providers/{provider}/checkout/revalidate` | Repairs and reconciles stale provider cart state. |
 | `POST /api/grocery/providers/{provider}/checkout/place-order` | Revalidates and places only the exact approved snapshot. |
 | `POST /api/grocery/providers/{provider}/checkout/payment-status` | Polls only when the discovered provider capability documents payment status. |
-| `GET /api/health` | Readiness check for elevated database access, required schema, and the configured household profile. |
+| `GET /api/health/live` | Dependency-free process and event-loop liveness check. |
+| `GET /api/health/ready` | Core readiness check for elevated database access, required schema, and the configured household profile; provider states are informational. |
 
 Why the backend owns durable checkout drafts:
 

@@ -81,6 +81,27 @@ grocery_checkout_service = GroceryCheckoutService(
 )
 
 
+def _confirmation_action_from_tool_response(value: Any, depth: int = 0) -> Dict[str, Any] | None:
+    """Recover a confirmation action from an ADK function-response event."""
+    if depth > 3 or not isinstance(value, dict):
+        return None
+    if (
+        value.get("status") == "confirmation_required"
+        and value.get("type") == "CONFIRM_DESTRUCTIVE_ACTION"
+        and value.get("action_id")
+    ):
+        return {
+            "type": "CONFIRM_DESTRUCTIVE_ACTION",
+            "action_id": value["action_id"],
+            "impact": value.get("impact") or {},
+        }
+    for key in ("result", "response", "output", "data"):
+        nested = _confirmation_action_from_tool_response(value.get(key), depth + 1)
+        if nested:
+            return nested
+    return None
+
+
 async def delete_past_meal_plans_at_household_midnight() -> None:
     """Run retention cleanup after every household-calendar date boundary."""
     while True:
@@ -179,7 +200,7 @@ async def lifespan(app: FastAPI):
     """
     Refuse startup unless durable storage is correctly configured and ready.
     """
-    validate_persistence_readiness()
+    await asyncio.to_thread(validate_persistence_readiness)
     deleted_count = await asyncio.to_thread(delete_past_meal_plans)
     if deleted_count:
         print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
@@ -305,11 +326,19 @@ async def chat_endpoint(payload: ChatRequest):
         
         # 4. Stream and run the persistent agent turn
         text_reply = ""
+        tool_confirmation_action = None
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=user_message
         ):
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    function_response = getattr(part, "function_response", None)
+                    if function_response and tool_confirmation_action is None:
+                        tool_confirmation_action = _confirmation_action_from_tool_response(
+                            getattr(function_response, "response", None)
+                        )
             if event.is_final_response() and event.content and event.content.parts:
                 text_reply = event.content.parts[0].text
                 
@@ -340,9 +369,13 @@ async def chat_endpoint(payload: ChatRequest):
             for plan_date in set(meal_plan_before) | set(meal_plan_after)
             if meal_plan_before.get(plan_date) != meal_plan_after.get(plan_date)
         )
-        pending_confirmation = requested_confirmation()
+        pending_confirmation = requested_confirmation() or tool_confirmation_action
         if pending_confirmation:
             action = pending_confirmation
+            impact = pending_confirmation.get("impact") or {}
+            text_reply = (
+                f"This change has not been applied yet. {impact.get('message') or 'Review the exact impact and confirm to continue.'}"
+            )
         elif changed_plan_dates:
             action = {
                 "type": "UPDATE_PLANNER",
@@ -906,17 +939,29 @@ async def place_provider_order_endpoint(
 async def provider_payment_status_endpoint(provider_id: str):
     return await grocery_checkout_service.payment_status(provider_id)
 
-@app.get("/api/health")
-async def health_check():
-    """Readiness check for elevated access, schema, and household config."""
+@app.get("/api/health/live")
+async def liveness_check():
+    """Report that the process and FastAPI event loop can serve requests."""
+    return {
+        "status": "alive",
+        "service": "kitch-backend",
+    }
+
+
+@app.get("/api/health/ready")
+async def readiness_check():
+    """Verify core persistence and report provider readiness separately."""
     try:
-        readiness = validate_persistence_readiness()
+        persistence, providers = await asyncio.gather(
+            asyncio.to_thread(validate_persistence_readiness),
+            provider_registry.readiness(),
+        )
         return {
             "status": "ready",
             "engine": "google-adk",
             "memory": "ephemeral-process-local",
-            "persistence": readiness,
-            "providers": await provider_registry.readiness(),
+            "persistence": persistence,
+            "providers": providers,
         }
     except PersistenceError as error:
         return JSONResponse(

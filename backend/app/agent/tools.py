@@ -141,17 +141,107 @@ def update_dated_meals_tool(
 def remove_future_meals_tool(
   operations: List[Dict[str, Any]], user_name: str = DEFAULT_ACTIVE_USER,
 ) -> Dict[str, Any]:
-  """Remove future meal slots, dates, or ranges; bulk requests require confirmation."""
+  """
+  Remove future meal slots, dates, ranges, or every saved future plan.
+
+  Supported actions are slot, date, range, and all. The all action resolves the
+  household's actual saved future dates before asking for confirmation. Past
+  plans are never included.
+  """
   from app.agent_confirmation import record_confirmation
   parsed = _ensure_dict(operations)
   if not isinstance(parsed, list) or not parsed:
     return {"status": "error", "message": "operations must be a non-empty list"}
-  is_bulk = len(parsed) > 1 or any(str(op.get("action") or "").lower() == "range" for op in parsed)
+
+  context = calendar_context(get_household_timezone())
+  today = context["today"]
+  aliases = {
+    "remove_slot": "slot", "delete_slot": "slot", "clear_slot": "slot", "remove_meal": "slot",
+    "day": "date", "remove_date": "date", "delete_date": "date", "clear_date": "date",
+    "remove_range": "range", "delete_range": "range", "clear_range": "range",
+  }
+  all_actions = {
+    "all", "clear", "clear_all", "delete_all", "remove_all", "all_future",
+    "clear_future", "clear_all_future", "clear_all_meal_plans", "remove_all_meal_plans",
+  }
+  normalized: List[Dict[str, Any]] = []
+
+  for raw_operation in parsed:
+    if not isinstance(raw_operation, dict):
+      return {"status": "error", "message": "Each meal removal operation must be an object."}
+    operation = dict(raw_operation)
+    raw_action = str(operation.get("action") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    has_dates = any(operation.get(key) for key in ("start_date", "end_date", "plan_date", "date"))
+    if raw_action in all_actions and not has_dates:
+      future_days = db_get_meal_schedule(today.isoformat(), None)
+      future_dates = sorted({str(day.get("plan_date") or "") for day in future_days if day.get("plan_date")})
+      if not future_dates:
+        return {
+          "status": "success", "affected_dates": [],
+          "message": "There are no saved future meal plans to remove.",
+        }
+      normalized.append({
+        "action": "range", "start_date": future_dates[0], "end_date": future_dates[-1],
+      })
+      continue
+
+    action = aliases.get(raw_action, raw_action)
+    if not action:
+      action = "slot" if operation.get("meal_slot") else (
+        "range" if operation.get("end_date") else "date"
+      )
+    if action not in {"slot", "date", "range"}:
+      return {
+        "status": "error",
+        "message": "Meal removals must target a future meal slot, date, date range, or all future plans.",
+      }
+
+    start_value = operation.get("start_date") or operation.get("plan_date") or operation.get("date")
+    end_value = operation.get("end_date") or start_value
+    if not start_value:
+      return {"status": "error", "message": "Meal removal requires an exact future date."}
+    try:
+      start_date = parse_iso_date(str(start_value))
+      end_date = parse_iso_date(str(end_value))
+    except ValueError:
+      return {"status": "error", "message": "Meal removal dates must use exact ISO calendar dates."}
+    if start_date < today or end_date < today:
+      return {"status": "error", "message": "Past meal plans cannot be modified."}
+    if end_date < start_date:
+      return {"status": "error", "message": "Meal removal end date cannot precede its start date."}
+
+    normalized_operation: Dict[str, Any] = {
+      "action": action, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(),
+    }
+    if action == "slot":
+      meal_slot = str(operation.get("meal_slot") or "").strip().lower()
+      if meal_slot not in {"breakfast", "lunch", "dinner"}:
+        return {"status": "error", "message": "A meal-slot removal must name breakfast, lunch, or dinner."}
+      if end_date != start_date:
+        return {"status": "error", "message": "A meal-slot removal can target only one exact date."}
+      normalized_operation["meal_slot"] = meal_slot
+    elif action == "date":
+      normalized_operation["end_date"] = start_date.isoformat()
+    normalized.append(normalized_operation)
+
+  is_bulk = len(normalized) > 1 or any(op["action"] == "range" for op in normalized)
   if not is_bulk:
-    return {"status": "success", **db_remove_future_meal_plan_entries(parsed)}
+    return {"status": "success", **db_remove_future_meal_plan_entries(normalized)}
+
+  if len(normalized) == 1 and normalized[0]["action"] == "range":
+    impact_message = (
+      f"This removes saved meals from {normalized[0]['start_date']} through "
+      f"{normalized[0]['end_date']}. Past meal plans remain unchanged."
+    )
+  else:
+    targets = ", ".join(
+      f"{op.get('meal_slot') + ' on ' if op.get('meal_slot') else ''}{op['start_date']}"
+      for op in normalized
+    )
+    impact_message = f"This removes the requested future meal-plan scopes: {targets}."
   pending = db_create_pending_agent_action(
-    active_user=user_name, action_type="remove_meal_plans", payload={"operations": parsed},
-    impact_summary={"title": "Remove these planned meals?", "message": f"This removes meals across {len(parsed)} requested scope(s)."},
+    active_user=user_name, action_type="remove_meal_plans", payload={"operations": normalized},
+    impact_summary={"title": "Remove these planned meals?", "message": impact_message},
   )
   action = {"type": "CONFIRM_DESTRUCTIVE_ACTION", "action_id": pending["id"], "impact": pending["impact_summary"]}
   record_confirmation(action)

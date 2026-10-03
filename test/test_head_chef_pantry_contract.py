@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -71,6 +72,65 @@ class DestructiveConfirmationTests(unittest.IsolatedAsyncioTestCase):
             create.assert_called_once()
         finally:
             end_confirmation_scope(token)
+
+
+class MealRemovalToolTests(unittest.TestCase):
+    def test_clear_all_resolves_saved_future_dates_and_requests_confirmation(self):
+        token = begin_confirmation_scope()
+        try:
+            pending = {
+                "id": "pending-meals",
+                "impact_summary": {"title": "Remove these planned meals?", "message": "exact range"},
+            }
+            with (
+                patch.object(tools, "calendar_context", return_value={"today": date(2026, 10, 3)}),
+                patch.object(tools, "get_household_timezone", return_value="Asia/Kolkata"),
+                patch.object(tools, "db_get_meal_schedule", return_value=[
+                    {"plan_date": "2026-10-05"}, {"plan_date": "2026-10-12"},
+                ]),
+                patch.object(tools, "db_create_pending_agent_action", return_value=pending) as create,
+                patch.object(tools, "db_remove_future_meal_plan_entries") as remove,
+            ):
+                result = tools.remove_future_meals_tool([{"action": "clear_all"}], "Archit")
+
+            self.assertEqual(result["status"], "confirmation_required")
+            create.assert_called_once()
+            self.assertEqual(create.call_args.kwargs["payload"]["operations"], [{
+                "action": "range", "start_date": "2026-10-05", "end_date": "2026-10-12",
+            }])
+            remove.assert_not_called()
+            self.assertEqual(requested_confirmation()["action_id"], "pending-meals")
+        finally:
+            end_confirmation_scope(token)
+
+    def test_past_removal_is_rejected_without_calling_persistence(self):
+        with (
+            patch.object(tools, "calendar_context", return_value={"today": date(2026, 10, 3)}),
+            patch.object(tools, "get_household_timezone", return_value="Asia/Kolkata"),
+            patch.object(tools, "db_remove_future_meal_plan_entries") as remove,
+        ):
+            result = tools.remove_future_meals_tool([{
+                "action": "date", "start_date": "2026-10-02",
+            }])
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Past meal plans", result["message"])
+        remove.assert_not_called()
+
+    def test_single_slot_is_normalized_and_removed_directly(self):
+        persisted = {"affected_dates": ["2026-10-05"]}
+        with (
+            patch.object(tools, "calendar_context", return_value={"today": date(2026, 10, 3)}),
+            patch.object(tools, "get_household_timezone", return_value="Asia/Kolkata"),
+            patch.object(tools, "db_remove_future_meal_plan_entries", return_value=persisted) as remove,
+        ):
+            result = tools.remove_future_meals_tool([{
+                "action": "remove_meal", "plan_date": "2026-10-05", "meal_slot": "dinner",
+            }])
+        self.assertEqual(result["status"], "success")
+        remove.assert_called_once_with([{
+            "action": "slot", "start_date": "2026-10-05", "end_date": "2026-10-05",
+            "meal_slot": "dinner",
+        }])
 
 
 class PantryToolInputTests(unittest.IsolatedAsyncioTestCase):

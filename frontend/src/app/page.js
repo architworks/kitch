@@ -132,11 +132,16 @@ const requireSuccessfulResponse = async (response) => {
   throw new ApiResponseError(response.status, body?.detail || body);
 };
 
-const apiErrorMessage = (error, fallback) => (
-  error instanceof ApiResponseError && error.isPersistenceFailure
-    ? PERSISTENCE_FAILURE_MESSAGE
-    : error?.message || fallback
-);
+const apiErrorMessage = (error, fallback) => {
+  if (error instanceof ApiResponseError && error.isPersistenceFailure) {
+    return PERSISTENCE_FAILURE_MESSAGE;
+  }
+  const message = String(error?.message || "").trim();
+  if (!message || /^(failed to fetch|load failed|networkerror)/i.test(message)) {
+    return fallback;
+  }
+  return message;
+};
 
 const AboutIconBadge = ({ name, tone = "sage", className = "" }) => {
   const badgeClass = `about-icon-badge tone-${tone} about-icon-${name} ${className}`.trim();
@@ -759,7 +764,7 @@ export default function Home() {
   const [pantryStock, setPantryStock] = useState([]);
   const [pantryRevision, setPantryRevision] = useState(0);
   const [pantryReviewedAt, setPantryReviewedAt] = useState("");
-  const [nativeCartTab, setNativeCartTab] = useState("cart");
+  const [groceryWorkspaceTab, setGroceryWorkspaceTab] = useState("pantry");
   const [pantryDrafts, setPantryDrafts] = useState({});
   const [pantryNewItem, setPantryNewItem] = useState({ name: "", amount: 1, unit: "piece" });
   const [confirmationDialog, setConfirmationDialog] = useState(null);
@@ -780,7 +785,6 @@ export default function Home() {
   const [orderingProviders, setOrderingProviders] = useState([]);
   const [preferredOrderingProvider, setPreferredOrderingProvider] = useState("");
   const [selectedOrderingProvider, setSelectedOrderingProvider] = useState(DEFAULT_ORDERING_PROVIDER);
-  const [isNativeCartExpanded, setIsNativeCartExpanded] = useState(false);
   const [providerCartReview, setProviderCartReview] = useState(null);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState(null);
   const [providerSavedAddresses, setProviderSavedAddresses] = useState(null);
@@ -2346,7 +2350,7 @@ export default function Home() {
     ? `${calPercentage}% of daily target`
     : "No meals logged yet";
   const quickPrompts = [
-    "Plan next week for the whole household",
+    ...(activeTab === "planner" && !hasAnyMealPlan ? [] : ["Plan next week for the whole household"]),
     "What are we cooking tomorrow?",
     "What groceries should I order for tomorrow?"
   ];
@@ -2960,29 +2964,8 @@ export default function Home() {
                     </article>
                   ) : (
                     <article id="weekly-plan-grid" className="planner-empty-state" aria-label="No saved household meal plan">
-                      <div className="planner-empty-copy">
-                        <span className="eyebrow">No plan yet</span>
-                        <h3>Start with a household meal plan.</h3>
-                        <p>Ask Kitch to plan tomorrow, an exact date, or a full week. Planned dates will appear here after they are saved.</p>
-                        <button
-                          type="button"
-                          className="planner-empty-cta"
-                          onClick={() => {
-                            setChatInput("Plan next week for the whole household");
-                            setSmartDockExpanded(true);
-                          }}
-                        >
-                          Plan next week
-                        </button>
-                      </div>
-                      <div className="planner-empty-preview" aria-hidden="true">
-                        <AboutIconBadge name="calendar" tone="sage" />
-                        <div>
-                          <span>Breakfast</span>
-                          <span>Lunch</span>
-                          <span>Dinner</span>
-                        </div>
-                      </div>
+                      <AboutIconBadge name="calendar" tone="sage" />
+                      <p>Saved meals will appear here.</p>
                     </article>
                   )}
                 </section>
@@ -3316,7 +3299,7 @@ export default function Home() {
                 <div>
                   <span className="eyebrow">Grocery Management</span>
                   <h2>Review and order groceries</h2>
-                  <p>Review the household cart, choose an ordering app, and approve the exact provider order.</p>
+                  <p>Review pantry and shopping needs, then choose an ordering app and approve the exact provider order.</p>
                 </div>
                 <div className="grocery-header-actions">
                   <button type="button" disabled={isProviderSyncing} onClick={() => setActiveTab("recipes")}>Import from recipe</button>
@@ -3326,45 +3309,56 @@ export default function Home() {
 
               <div className="grocery-checkout-layout">
                 <div className="grocery-workflow-main">
-                  <section className="checkout-stage checkout-timeline-stage native-cart-panel">
+                  <section className="checkout-stage checkout-timeline-stage grocery-workspace-panel">
                     <span className={`checkout-stage-number ${nativeCartStageComplete ? "completed" : "pending"}`} aria-hidden="true">1</span>
-                    <div className="native-cart-summary-header">
+                    <div className="grocery-workspace-header">
                       <div>
-                        <h2>Native cart</h2>
-                        <p>Review quantities and choose which household items to send to the ordering app.</p>
+                        <span className="eyebrow">Household groceries</span>
+                        <h2>Pantry and shopping cart</h2>
+                        <p>Review what you have at home and manage what still needs to be ordered.</p>
                       </div>
-                      <div className="native-cart-summary-facts">
-                        <strong>{totalCount} items</strong>
-                        <span>{groceryCategoryCount} categories</span>
-                        <span>{providerSelectedCount} selected for {selectedProvider.label}</span>
+                      <div className="grocery-workspace-facts" aria-label="Household grocery summary">
+                        <span><strong>{pantryStock.length}</strong> pantry items</span>
+                        <span><strong>{totalCount}</strong> cart items</span>
                       </div>
+                    </div>
+
+                    <div className="grocery-workspace-tabs" role="tablist" aria-label="Household grocery views">
                       <button
                         type="button"
-                        className={`native-cart-toggle ${isNativeCartExpanded ? "expanded" : ""}`}
-                        aria-expanded={isNativeCartExpanded}
-                        aria-controls="native-cart-details"
-                        onClick={() => setIsNativeCartExpanded(current => !current)}
+                        role="tab"
+                        id="pantry-workspace-tab"
+                        aria-selected={groceryWorkspaceTab === "pantry"}
+                        aria-controls="pantry-workspace-panel"
+                        className={groceryWorkspaceTab === "pantry" ? "active" : ""}
+                        onClick={() => setGroceryWorkspaceTab("pantry")}
                       >
-                        {isNativeCartExpanded ? "Collapse cart" : "Review cart"}
-                        <span className="native-cart-toggle-icon" aria-hidden="true">↓</span>
+                        <span className="grocery-workspace-tab-icon pantry-icon" aria-hidden="true" />
+                        <span className="grocery-workspace-tab-label">Pantry</span>
+                        <span className="grocery-workspace-tab-count">{pantryStock.length} items</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="cart-workspace-tab"
+                        aria-selected={groceryWorkspaceTab === "cart"}
+                        aria-controls="cart-workspace-panel"
+                        className={groceryWorkspaceTab === "cart" ? "active" : ""}
+                        onClick={() => setGroceryWorkspaceTab("cart")}
+                      >
+                        <span className="grocery-workspace-tab-icon cart-icon" aria-hidden="true" />
+                        <span className="grocery-workspace-tab-label">Shopping cart</span>
+                        <span className="grocery-workspace-tab-count">{totalCount} items</span>
                       </button>
                     </div>
 
                     <div
-                      id="native-cart-details"
-                      className={`native-cart-details ${isNativeCartExpanded ? "expanded" : ""}`}
-                      aria-hidden={!isNativeCartExpanded}
-                      inert={isNativeCartExpanded ? undefined : ""}
+                      className="grocery-workspace-content"
+                      id={groceryWorkspaceTab === "cart" ? "cart-workspace-panel" : "pantry-workspace-panel"}
+                      role="tabpanel"
+                      aria-labelledby={groceryWorkspaceTab === "cart" ? "cart-workspace-tab" : "pantry-workspace-tab"}
                     >
-                      <div className="native-cart-details-inner">
-                        <div className="cart-tabs-row">
-                          <button type="button" className={nativeCartTab === "cart" ? "active" : ""} onClick={() => setNativeCartTab("cart")}>My List <span>{totalCount}</span></button>
-                          <button type="button" className={nativeCartTab === "pantry" ? "active" : ""} onClick={() => setNativeCartTab("pantry")}>Pantry <span>{pantryStock.length}</span></button>
-                          <button type="button" disabled>Buy Again</button>
-                          <button type="button" disabled>Past Orders</button>
-                        </div>
-
-                      {nativeCartTab === "cart" ? <>
+                      {groceryWorkspaceTab === "cart" ? <>
                       <div className="native-cart-meta">
                         <strong>{totalCount} items</strong>
                         <span>{groceryCategoryCount} categories</span>
@@ -3471,19 +3465,25 @@ export default function Home() {
                           <button type="button" disabled={isProviderSyncing} onClick={() => addCustomGroceryItem(groceryCustomName, groceryCustomCat, groceryCustomAmount, groceryCustomUnit)}>Add item</button>
                         </div>
                       </> : (
-                        <div className="pantry-manager">
+                        <div className="pantry-manager" data-testid="pantry-review-section">
                           <div className="pantry-manager-heading">
-                            <div>
+                            <div className="pantry-manager-title">
+                              <span className="pantry-manager-eyebrow">Pantry review</span>
                               <h3>Household pantry</h3>
-                              <p className={pantryReviewNeedsAttention ? "pantry-review-warning" : ""}>
-                                {pantryReviewedAt
-                                  ? `${pantryReviewNeedsAttention ? "Review recommended · " : ""}Last fully reviewed ${formatRelativeCheckedTime(pantryReviewedAt)}`
-                                  : "Review recommended · This pantry has not been fully reviewed yet."}
+                              <p className={`pantry-review-status ${pantryReviewNeedsAttention ? "needs-attention" : "is-current"}`}>
+                                <span className="pantry-review-status-dot" aria-hidden="true" />
+                                <span>
+                                  <strong>{pantryReviewNeedsAttention ? "Review recommended" : "Pantry reviewed"}</strong>
+                                  <span aria-hidden="true"> · </span>
+                                  {pantryReviewedAt
+                                    ? `Last fully reviewed ${formatRelativeCheckedTime(pantryReviewedAt)}`
+                                    : "This pantry has not been fully reviewed yet."}
+                                </span>
                               </p>
                             </div>
                             <div className="pantry-manager-actions">
-                              <button type="button" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}>Update cart from pantry</button>
-                              <button type="button" className="danger-outline" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
+                              <button type="button" className="pantry-cart-action" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}>Update cart from pantry</button>
+                              <button type="button" className="pantry-empty-action" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
                             </div>
                           </div>
                           {pantryStock.length === 0 ? (
@@ -3509,7 +3509,6 @@ export default function Home() {
                           </div>
                         </div>
                       )}
-                      </div>
                     </div>
                   </section>
 

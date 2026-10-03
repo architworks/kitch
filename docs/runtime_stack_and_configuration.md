@@ -59,9 +59,13 @@ Existing projects must apply every versioned migration in
 `backend/database/migrations/` before the backend starts. The bootstrap schema
 and migrations are both deployment sources and must remain synchronized.
 
-The readiness endpoint verifies elevated database access, required tables and
-columns, and the configured household profile. Missing migrations are startup
-or readiness failures; Kitch does not substitute local persistence.
+`GET /api/health/live` verifies only that the FastAPI process and event loop can
+serve requests. `GET /api/health/ready` verifies elevated database access,
+required tables and columns, and the configured household profile. Missing
+migrations are startup or readiness failures; Kitch does not substitute local
+persistence. Provider states are reported by readiness but do not make core
+Kitch unready. Blocking database validation runs off the event loop, and live
+provider probes have a bounded timeout.
 
 Current structured tables are:
 

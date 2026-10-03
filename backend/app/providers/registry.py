@@ -15,7 +15,38 @@ from app.providers.instamart import InstamartProviderAdapter
 from app.providers.zepto import ZeptoProviderAdapter
 
 
+PROVIDER_READINESS_TIMEOUT_SECONDS = 5.0
+
+
 class ProviderRegistry:
+    async def _readiness_for(
+        self,
+        adapter: GroceryProviderAdapter,
+        descriptor: ProviderDescriptor,
+    ) -> Dict[str, object]:
+        if descriptor.production_gated or descriptor.state == "gated":
+            return {
+                "provider": descriptor.id,
+                "environment": descriptor.environment,
+                "state": "gated",
+                "message": descriptor.message,
+            }
+        if not descriptor.enabled or descriptor.state in {
+            "disabled",
+            "not_connected",
+            "reconnect_required",
+        }:
+            return {
+                "provider": descriptor.id,
+                "environment": descriptor.environment,
+                "state": "disconnected",
+                "message": descriptor.message,
+            }
+        return await asyncio.wait_for(
+            adapter.readiness(),
+            timeout=PROVIDER_READINESS_TIMEOUT_SECONDS,
+        )
+
     def descriptors(self) -> list[Dict[str, object]]:
         zepto = ZeptoProviderAdapter().descriptor()
         instamart = InstamartProviderAdapter().descriptor()
@@ -73,19 +104,29 @@ class ProviderRegistry:
 
     async def readiness(self) -> list[Dict[str, object]]:
         adapters = [ZeptoProviderAdapter(), InstamartProviderAdapter()]
+        descriptors = await asyncio.gather(
+            *(asyncio.to_thread(adapter.descriptor) for adapter in adapters)
+        )
         results = await asyncio.gather(
-            *(adapter.readiness() for adapter in adapters),
+            *(
+                self._readiness_for(adapter, descriptor)
+                for adapter, descriptor in zip(adapters, descriptors)
+            ),
             return_exceptions=True,
         )
         readiness: list[Dict[str, object]] = []
-        for adapter, result in zip(adapters, results):
-            descriptor = adapter.descriptor()
+        for descriptor, result in zip(descriptors, results):
             if isinstance(result, Exception):
+                timed_out = isinstance(result, asyncio.TimeoutError)
                 readiness.append({
                     "provider": descriptor.id,
                     "environment": descriptor.environment,
                     "state": "degraded" if descriptor.enabled else "disconnected",
-                    "message": f"{descriptor.label} readiness could not be verified.",
+                    "message": (
+                        f"{descriptor.label} readiness timed out."
+                        if timed_out
+                        else f"{descriptor.label} readiness could not be verified."
+                    ),
                 })
             else:
                 readiness.append(result)

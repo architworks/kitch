@@ -115,8 +115,9 @@ chef_planner = LlmAgent(
         "Handles lightweight household meal scheduling: "
         "creating weekly meal plans as meal-name schedules, suggesting meal names based on dietary preferences, "
         "viewing what's currently scheduled, swapping or changing individual scheduled meals, "
+        "removing meal slots, dates, ranges, or all saved future meal plans, "
         "and answering questions like 'what's for dinner tonight'. "
-        "Route here when the user talks about meal plan schedules, swaps, or planned meals."
+        "Route here when the user talks about meal plan schedules, swaps, removals, or planned meals."
     ),
     instruction=(
         "You are Kitch's Chef Planner — the household's lightweight meal scheduler.\n"
@@ -142,7 +143,7 @@ chef_planner = LlmAgent(
         "4. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
         "5. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
         "6. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
-        "7. Use remove_future_meals_tool for explicit future slot/date/range removal. A single slot or date executes directly; bulk or ranges require confirmation. Never create or modify past dates.\n"
+        "7. Use remove_future_meals_tool for explicit future slot/date/range removal. For every/all saved meal plans, pass action=all without inventing boundary dates; the tool resolves the actual saved future range. A single slot or date executes directly; bulk, ranges, and all-future removal require confirmation. When the tool returns confirmation_required, say the removal has not happened yet and ask the user to review the confirmation. Never create or modify past dates.\n"
         "8. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
         "9. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
     ),
@@ -279,7 +280,8 @@ kitch_coordinator = LlmAgent(
         "- Household size: {app:household_size?}\n\n"
         "YOUR JOB is to understand what the user needs and route to the right specialist:\n\n"
         "→ 'chef_planner': For lightweight meal plan schedules: creating the weekly plan, "
-        "  viewing scheduled meals, swapping/changing scheduled meal names, or asking what's currently planned.\n\n"
+        "  viewing scheduled meals, swapping/changing scheduled meal names, removing planned meal slots/dates/ranges, "
+        "  clearing saved future plans, or asking what's currently planned.\n\n"
         "→ 'nutrition_tracker': For food intake logging, macro questions, and correcting or deleting nutrition entries.\n\n"
         "→ 'vision_scanner': Used only by the upload pipeline to classify and interpret images; do not route ordinary text chat to it.\n\n"
         "→ 'recipe_grocery_planner': For detailed recipes, cooking steps, ingredients, "
@@ -298,7 +300,8 @@ kitch_coordinator = LlmAgent(
         "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
         "10. Never ask 'which agent should I use' — just figure it out from context.\n"
-        "11. Never claim a durable change succeeded unless the specialist or tool received a successful persistence result. Do not turn a tool error into reassuring success language."
+        "11. Every request to create, change, remove, delete, or clear a meal plan must be delegated to chef_planner. The coordinator never performs or narrates a meal-plan mutation itself.\n"
+        "12. Never claim a durable change succeeded unless the specialist or tool received a successful persistence result. Do not turn a tool error into reassuring success language."
     ),
     sub_agents=[chef_planner, recipe_grocery_planner, nutrition_tracker],
     tools=[

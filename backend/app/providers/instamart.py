@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -264,7 +265,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         )
 
     async def readiness(self) -> Dict[str, Any]:
-        descriptor = self.descriptor()
+        descriptor = await asyncio.to_thread(self.descriptor)
         if not descriptor.enabled or descriptor.state != "connected":
             return await super().readiness()
         try:
