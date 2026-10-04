@@ -1,0 +1,43 @@
+{
+  "run": "section_9_persistent_memory",
+  "timestamp": "2026-10-04T20:16:42+05:30",
+  "environment": "local_chrome_vertex_memory_bank",
+  "counts": {
+    "pass": 3,
+    "fail": 1,
+    "partial": 1,
+    "not_run": 1
+  },
+  "scenarios": [
+    {
+      "id": "9.1",
+      "status": "PASS",
+      "result": "Baker's Dozen whole wheat was recalled after a backend restart."
+    },
+    {
+      "id": "9.2",
+      "status": "FAIL",
+      "result": "The saved cereal/cookie exclusion was not applied after restart; a grocery mutation also failed because generated rows omitted quantities."
+    },
+    {
+      "id": "9.3",
+      "status": "PASS",
+      "result": "Amul butter was recalled after a backend restart."
+    },
+    {
+      "id": "9.4",
+      "status": "PASS",
+      "result": "Nutralite superseded Amul and remained authoritative after restart."
+    },
+    {
+      "id": "9.5",
+      "status": "PARTIAL",
+      "result": "Selective forgetting and item isolation worked, but Kitch incorrectly reported that the milk preference was not saved before later recalling it."
+    },
+    {
+      "id": "9.6",
+      "status": "NOT_RUN",
+      "result": "Credential and service-failure injection was outside this functional-only run."
+    }
+  ]
+}
