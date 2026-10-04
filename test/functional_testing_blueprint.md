@@ -102,7 +102,7 @@ Before running the scenarios, prepare a consistent household test context.
 | Neutral image classification and routing | 5.1–5.3, 7.2, 7.4 |
 | Pantry inspection and mutation through UI, chat, and images | 7.1–7.4 |
 | Native-cart and provider-cart preparation | 6.1–6.3, 8.1–8.4 |
-| Flexible household preference memory | 1.3, 8.2, 9.1–9.3 |
+| Flexible household preference memory | 1.3, 8.2, 9.1–9.6 |
 | Household settings and domain routing | 1.8, 4.4, 7.3, 8.2 |
 | Destructive-action and order authority boundaries | 2.6, 4.4, 7.3, 8.4 |
 

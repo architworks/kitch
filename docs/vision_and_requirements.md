@@ -65,11 +65,12 @@ Chat text can plan groceries and prepare a provider cart. Chat text must not pla
 substitutions, payment state, address state, timeouts, and duplicate orders are
 high-risk. Human-in-the-loop final approval is a product safety requirement.
 
-### 6. Preferences stay flexible in ephemeral memory
+### 6. Household context stays flexible and persistent
 
-Food preferences and brand preferences are stored as household-level plain-text
-memory, not strict preference tables. This memory is intentionally process-local
-until the planned Vertex AI migration, so it must not be described as durable.
+Food, allergy, dietary style, planning style, brand, pack, exclusion, correction,
+and forget statements are stored as household-level natural-language memory,
+not strict preference tables. Deployed Kitch uses Vertex AI Memory Bank so this
+selected context survives backend restarts while chat sessions remain temporary.
 
 Examples:
 
@@ -78,7 +79,11 @@ Examples:
 - "Prefer high-protein dinners."
 - "Always buy Amul butter."
 
-**Why:** preferences are naturally conversational and often messy. A rigid schema would force the agent into brittle syntax and premature product assumptions. Structured storage is reserved for things that must be deterministic, such as meal plans and grocery rows.
+**Why:** household context is naturally conversational and often messy. A
+rigid schema would force the agent into brittle syntax and premature product
+assumptions. Structured storage is reserved for things that must be
+deterministic, such as meal plans and grocery rows. Persistence changes where
+the text lives; it does not turn it into database rules.
 
 ---
 
@@ -153,6 +158,16 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-003 | Keep macro logs individual to the active user. | Nutrition tracking is personal even when the meal plan is shared. |
 | REQ-004 | Defer multi-household registration and authentication-backed membership. | The core planning/cart loop is still being validated. Building registration first would slow the product without proving the main value. |
 
+### Household memory requirements
+
+| ID | Requirement | Why |
+| :--- | :--- | :--- |
+| REQ-005 | Store durable household kitchen context as natural-language Memory Bank facts scoped by app `kitch` and the stable household-owner profile UUID. | Preferences must stay expressive, shared within the household, and isolated from unrelated households. |
+| REQ-006 | Let relevant specialists decide when context is durable and submit one self-contained statement; do not ingest every turn or complete chat session automatically. | Memory generation should remain a deliberate agent action rather than an invisible side effect of every conversation. |
+| REQ-007 | Let Memory Bank consolidate corrections, contradictions, and forget requests through event-based generation without prefix schemas or custom topic taxonomies. | Cohesion belongs to semantic memory management, not brittle application parsing. |
+| REQ-008 | Keep chat sessions temporary while household memory survives backend restarts. | Short Kitch conversations do not justify persistent session infrastructure, but preferences must remain useful later. |
+| REQ-009 | If Memory Bank is unavailable, report that memory was not saved or recalled, keep Supabase-backed features usable, and never fall back silently in deployment. | Personalization failure must not become false success or disable the kitchen workflows. |
+
 ### Meal planning requirements
 
 | ID | Requirement | Why |
@@ -214,7 +229,7 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-057A | Automatically select and display Instamart's sole provider-returned payment method as read-only; show a selector only when Instamart returns multiple supported methods. Keep Zepto payment selection independent. | A one-option dropdown adds no meaningful consent, while provider-specific behavior must not reduce Zepto's supported choices. |
 | REQ-058 | Persist pending, partial, and ambiguous order outcomes and prevent blind checkout retry. | A timeout must not create duplicate-order risk. |
 | REQ-059 | Provider switching preserves the native cart but isolates address, draft, payment, approval, and order state by provider/environment. | Provider-specific checkout state must never leak across integrations. |
-| REQ-060 | Let the Instamart cart agent interpret brands, pack descriptions, and quantity coverage, using explicit process-local household preferences before Swiggy history. | Real catalog variants such as one dozen, 12 pieces, and 2 × 6 cannot be handled reliably by rigid preprocessing. |
+| REQ-060 | Let the Instamart cart agent interpret brands, pack descriptions, and quantity coverage, using explicit persistent household memory before Swiggy history. | Real catalog variants such as one dozen, 12 pieces, and 2 × 6 cannot be handled reliably by rigid preprocessing. |
 | REQ-061 | Permit explicit UI and chat Instamart synchronization, but authorize `checkout` only from the final UI place-order endpoint through server-owned middleware. | Cart preparation is reversible; order placement is consequential and must not be model-triggerable. |
 | REQ-062 | Persist match reasoning but derive durable cart, prices, quantities, and totals only from captured `update_cart`/`get_cart` results. | Agent prose must never become evidence that a provider mutation or price succeeded. |
 
@@ -226,23 +241,29 @@ The floating chat input is the primary mode of interaction. It supports:
 
 Kitch uses Google ADK 2.0 as the app runtime.
 
-**Why:** ADK provides the production agent primitives this app needs: `LlmAgent`, `Runner`, tools, callbacks, session services, memory services, multimodal message handling, and a path toward Vertex AI managed memory/session services. Antigravity SDK was useful as an agent-development environment, but Kitch needs a stable application runtime that can be documented, deployed, and handed to future developers without relying on an experimental development harness as the product substrate.
+**Why:** ADK provides the production agent primitives this app needs:
+`LlmAgent`, `Runner`, tools, callbacks, session services, memory services, and
+multimodal message handling. Antigravity SDK was useful as an agent-development
+environment, but Kitch needs a stable application runtime that can be
+documented, deployed, and handed to future developers without relying on an
+experimental development harness as the product substrate.
 
-### In-memory ADK services for now
+### Temporary sessions and persistent household memory
 
-Kitch currently uses:
+Kitch uses:
 
-- `InMemorySessionService`
-- `InMemoryMemoryService`
+- `InMemorySessionService` for short conversational continuity.
+- `VertexAiMemoryBankService` for deployed household memory.
+- `InMemoryMemoryService` only as an explicit test or optional local-development mode.
 
-**Why:** local development needs fast iteration, easy restarts, and low setup overhead while the product loop is still being tested. The data that must survive now is already stored in Supabase. Conversational memory and sessions can reset on backend restart during this phase.
+**Why:** conversations are short and may reset on restart, while durable
+household context must remain available across conversations. Kitch sends only
+specialist-selected user events to Memory Bank and does not deploy the agent to
+Agent Engine Runtime or use Agent Platform Sessions.
 
-**Deferred path:** after deployment and testing, replace them with:
-
-- `VertexAISessionService`
-- `VertexAIMemoryBank`
-
-This will make sessions and long-term memory persistent without changing the agent topology.
+Persistent memory is authenticated with its own backend-only Vertex AI Express
+Mode key. It does not reuse the Gemini/AI Studio key. Explicit writes wait for
+generation and default consolidation before reporting success.
 
 ### Supabase for deterministic state
 
@@ -250,11 +271,12 @@ Supabase stores structured app state: meal plans, recipe+grocery artifacts, pant
 
 **Why:** these are deterministic product records that the UI must render reliably. They should not live only in LLM memory.
 
-### Plain-text memory for preferences
+### Natural-language memory for household context
 
-ADK memory stores flexible household preference text.
+ADK memory tools store and retrieve flexible household kitchen statements.
 
-**Why:** preferences are not yet stable enough for a strict schema, and the agent benefits from natural-language preference context.
+**Why:** the agent benefits from semantic context without requiring users or
+catalogues to conform to a strict preference schema.
 
 ---
 
@@ -262,7 +284,7 @@ ADK memory stores flexible household preference text.
 
 - Full user auth and household registration.
 - Multiple households.
-- Persistent Vertex AI sessions and memory.
+- Persistent conversation sessions.
 - Blinkit live cart sync.
 - Swiggy Food and Dineout surfaces.
 - Production Instamart ordering before approval and a successful staging soak.

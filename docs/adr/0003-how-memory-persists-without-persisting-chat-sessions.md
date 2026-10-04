@@ -47,7 +47,7 @@ User request
   -> Vercel-hosted ADK runner and in-memory session
   -> specialist calls an explicit preference-memory tool
   -> Kitch submits the preference event with household scope
-  -> Google Memory Bank extracts and consolidates it asynchronously
+  -> Kitch awaits Google Memory Bank extraction and consolidation
   -> later agents retrieve relevant memories using semantic search
 ```
 
