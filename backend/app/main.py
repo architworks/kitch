@@ -313,6 +313,7 @@ async def chat_endpoint(payload: ChatRequest):
         meal_plan_before = get_meal_plan_snapshot()
         pantry_before = get_pantry_stock()
         grocery_cart_before = get_grocery_cart()
+        nutrition_diary_before = get_macro_diary(active_user)
         latest_recipe_plan_before = get_latest_recipe_grocery_plan_metadata()
         provider_environments = {
             provider_id: str(provider_registry.descriptor(provider_id)["environment"])
@@ -350,6 +351,7 @@ async def chat_endpoint(payload: ChatRequest):
         meal_plan_after = get_meal_plan_snapshot()
         pantry_after = get_pantry_stock()
         grocery_cart_after = get_grocery_cart()
+        nutrition_diary_after = get_macro_diary(active_user)
         latest_recipe_plan_after = get_latest_recipe_grocery_plan_metadata()
         provider_drafts_after = {
             provider_id: get_provider_checkout_draft(provider_id, environment)
@@ -374,6 +376,22 @@ async def chat_endpoint(payload: ChatRequest):
             for plan_date in set(meal_plan_before) | set(meal_plan_after)
             if meal_plan_before.get(plan_date) != meal_plan_after.get(plan_date)
         )
+        nutrition_before_by_id = {
+            entry.get("id"): entry for entry in nutrition_diary_before
+        }
+        nutrition_after_by_id = {
+            entry.get("id"): entry for entry in nutrition_diary_after
+        }
+        changed_nutrition_dates = sorted({
+            entry.get("date")
+            for entry_id in set(nutrition_before_by_id) | set(nutrition_after_by_id)
+            if nutrition_before_by_id.get(entry_id) != nutrition_after_by_id.get(entry_id)
+            for entry in (
+                nutrition_before_by_id.get(entry_id),
+                nutrition_after_by_id.get(entry_id),
+            )
+            if entry and entry.get("date")
+        })
         pending_confirmation = requested_confirmation() or tool_confirmation_action
         if pending_confirmation:
             action = pending_confirmation
@@ -386,6 +404,12 @@ async def chat_endpoint(payload: ChatRequest):
                 "type": "UPDATE_PLANNER",
                 "affected_dates": changed_plan_dates,
                 "focus_date": changed_plan_dates[0],
+            }
+        elif changed_nutrition_dates:
+            action = {
+                "type": "UPDATE_NUTRITION",
+                "affected_dates": changed_nutrition_dates,
+                "focus_date": changed_nutrition_dates[0],
             }
         elif pantry_after != pantry_before:
             action = {"type": "UPDATE_PANTRY"}

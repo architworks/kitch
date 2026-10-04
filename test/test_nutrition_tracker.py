@@ -7,6 +7,7 @@ import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -18,6 +19,7 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 
 from app import supabase_client  # noqa: E402
+from app.agent import tools as agent_tools  # noqa: E402
 
 
 class NutritionMealTimingTests(unittest.TestCase):
@@ -38,6 +40,15 @@ class NutritionMealTimingTests(unittest.TestCase):
 
     def test_explicit_meal_context_overrides_time(self):
         self.assertEqual(self.infer(22, "breakfast"), "breakfast")
+
+    def test_agent_nutrition_write_uses_server_scoped_active_user(self):
+        context = SimpleNamespace(state={"user:profile_name": "Naman"})
+        with patch.object(agent_tools, "db_log_macros") as save:
+            agent_tools.log_macros_tool(
+                "Archit", "pear", 100, 1, 25, 0,
+                meal_type="lunch", tool_context=context,
+            )
+        self.assertEqual(save.call_args.args[0], "Naman")
 
     def test_migration_adds_dated_editable_nutrition_fields(self):
         migration = (

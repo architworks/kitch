@@ -5,6 +5,7 @@ import math
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
 from app.household_config import DEFAULT_ACTIVE_USER
+from app.household_config import canonical_user_name
 from app.planning_calendar import calendar_context, parse_iso_date
 from app.supabase_client import (
     apply_meal_plan_edits as db_apply_meal_plan_edits,
@@ -44,6 +45,16 @@ def _ensure_dict(val):
     except _json.JSONDecodeError:
       return val
   return val
+
+
+def _request_user(user_name: str = "", tool_context: ToolContext = None) -> str:
+  """Bind user-specific agent tools to the server-owned active-user session."""
+  scoped_user = ""
+  if tool_context is not None:
+    state = getattr(tool_context, "state", None)
+    if state is not None:
+      scoped_user = str(state.get("user:profile_name", "") or "").strip()
+  return canonical_user_name(scoped_user or user_name or DEFAULT_ACTIVE_USER)
 
 # --- Section 1: Standard Meal Planning & Supabase Helpers ---
 
@@ -639,45 +650,59 @@ def log_macros_tool(
     unit: str = "serving",
     meal_type: str = "",
     consumed_at: str = "",
+    tool_context: ToolContext = None,
 ) -> str:
   """
   Record one food entry. Supply meal_type or consumed_at only when the user states
   that context; otherwise household-local submission time assigns both.
   """
+  active_user = _request_user(user_name, tool_context)
   db_log_macros(
-    user_name, meal_name, calories, protein, carbs, fat, fiber,
+    active_user, meal_name, calories, protein, carbs, fat, fiber,
     quantity, unit, meal_type, consumed_at or None,
   )
-  return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {user_name}'s journal."
+  return f"Successfully logged meal '{meal_name}' ({calories} kcal) to {active_user}'s journal."
 
-def get_macro_diary_tool(user_name: str) -> List[Dict[str, Any]]:
+def get_macro_diary_tool(
+  user_name: str = "", tool_context: ToolContext = None,
+) -> List[Dict[str, Any]]:
   """
   Query Supabase to fetch the daily plate log history and macros for a user.
   """
-  return db_get_macro_diary(user_name)
+  return db_get_macro_diary(_request_user(user_name, tool_context))
 
 
-def update_nutrition_entry_tool(user_name: str, entry_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+def update_nutrition_entry_tool(
+  user_name: str, entry_id: int, updates: Dict[str, Any],
+  tool_context: ToolContext = None,
+) -> Dict[str, Any]:
   """Correct one explicitly identified nutrition entry."""
-  return {"status": "success", "entry": db_update_macro_entry(user_name, entry_id, _ensure_dict(updates))}
+  return {"status": "success", "entry": db_update_macro_entry(
+    _request_user(user_name, tool_context), entry_id, _ensure_dict(updates),
+  )}
 
 
-def delete_nutrition_entry_tool(user_name: str, entry_id: int) -> Dict[str, Any]:
+def delete_nutrition_entry_tool(
+  user_name: str, entry_id: int, tool_context: ToolContext = None,
+) -> Dict[str, Any]:
   """Delete one explicitly identified nutrition entry."""
-  return {"status": "success" if db_delete_macro_entry(user_name, entry_id) else "not_found"}
+  return {"status": "success" if db_delete_macro_entry(
+    _request_user(user_name, tool_context), entry_id,
+  ) else "not_found"}
 
 
 def clear_nutrition_day_tool(
-  user_name: str, diary_date: str = "",
+  user_name: str, diary_date: str = "", tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
   """Request confirmation before clearing all nutrition entries for one day."""
   from app.agent_confirmation import record_confirmation
+  active_user = _request_user(user_name, tool_context)
   pending = db_create_pending_agent_action(
-    active_user=user_name, action_type="clear_nutrition_day",
-    payload={"user_name": user_name, "date": diary_date},
+    active_user=active_user, action_type="clear_nutrition_day",
+    payload={"user_name": active_user, "date": diary_date},
     impact_summary={
       "title": "Clear this nutrition day?",
-      "message": f"This removes every nutrition entry for {user_name} on {diary_date or 'today'}.",
+      "message": f"This removes every nutrition entry for {active_user} on {diary_date or 'today'}.",
     },
   )
   action = {"type": "CONFIRM_DESTRUCTIVE_ACTION", "action_id": pending["id"], "impact": pending["impact_summary"]}
@@ -688,6 +713,7 @@ def clear_nutrition_day_tool(
 def update_nutrition_targets_tool(
   user_name: str, daily_calorie_target: int = 0,
   protein_target_g: int = 0, carbs_target_g: int = 0, fat_target_g: int = 0,
+  tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
   """Update deterministic personal nutrition goals outside the household profile."""
   updates = {
@@ -698,7 +724,9 @@ def update_nutrition_targets_tool(
       "fat_target_g": fat_target_g,
     }.items() if value
   }
-  return {"status": "success", "nutrition_targets": db_update_nutrition_targets(user_name, updates)}
+  return {"status": "success", "nutrition_targets": db_update_nutrition_targets(
+    _request_user(user_name, tool_context), updates,
+  )}
 
 
 def update_household_configuration_tool(

@@ -4481,7 +4481,11 @@ button {
 
 /* Date-aware nutrition workspace */
 .analytics-page {
-  gap: 18px;
+  gap: 12px;
+}
+
+.kitch-workspace:has(.analytics-page) {
+  padding-bottom: 18px;
 }
 
 .nutrition-page-heading,
@@ -4498,10 +4502,10 @@ button {
 }
 
 .nutrition-page-heading h2 {
-  margin: 4px 0 3px;
+  margin: 2px 0;
   color: var(--ink);
   font-family: var(--font-head);
-  font-size: clamp(30px, 3vw, 42px);
+  font-size: clamp(28px, 2.7vw, 38px);
   line-height: 1.08;
 }
 
@@ -4514,7 +4518,7 @@ button {
 
 .nutrition-date-control {
   flex: 0 0 auto;
-  min-height: 48px;
+  min-height: 42px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--line-soft);
@@ -4558,7 +4562,7 @@ button {
 .nutrition-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(390px, 1fr);
-  gap: 14px;
+  gap: 12px;
 }
 
 .nutrition-summary-card,
@@ -4574,8 +4578,8 @@ button {
 
 .nutrition-summary-card,
 .nutrition-trend-card {
-  min-height: 280px;
-  padding: 18px;
+  min-height: 188px;
+  padding: 12px 15px;
 }
 
 .nutrition-summary-card > h3,
@@ -4589,10 +4593,10 @@ button {
 
 .nutrition-summary-body {
   display: grid;
-  grid-template-columns: 205px minmax(0, 1fr);
+  grid-template-columns: 145px minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
-  margin-top: 10px;
+  gap: 14px;
+  margin-top: 3px;
 }
 
 .nutrition-summary-body > div:first-child {
@@ -4602,14 +4606,14 @@ button {
 }
 
 .nutrition-calorie-dial {
-  width: 170px;
-  height: 170px;
+  width: 120px;
+  height: 120px;
   margin: 0;
 }
 
 .nutrition-calorie-dial svg {
-  width: 170px;
-  height: 170px;
+  width: 120px;
+  height: 120px;
 }
 
 .nutrition-calorie-dial .calorie-dial-ring-fill {
@@ -4619,19 +4623,19 @@ button {
 .nutrition-macro-list {
   display: flex;
   flex-direction: column;
-  gap: 17px;
+  gap: 11px;
 }
 
 .nutrition-macro-row {
   display: grid;
-  grid-template-columns: 38px minmax(106px, auto) minmax(90px, 1fr) 42px;
+  grid-template-columns: 34px minmax(100px, auto) minmax(80px, 1fr) 38px;
   align-items: center;
   gap: 10px;
 }
 
 .nutrition-macro-icon {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4675,13 +4679,13 @@ button {
 }
 
 .nutrition-trend-chart {
-  height: 190px;
+  height: 112px;
   display: grid;
   grid-template-columns: repeat(7, minmax(35px, 1fr));
   align-items: end;
   gap: 8px;
-  margin-top: 12px;
-  padding: 8px 4px 0;
+  margin-top: 5px;
+  padding: 4px 4px 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -4699,7 +4703,7 @@ button {
 }
 
 .nutrition-trend-chart button.active { background: rgba(223, 238, 214, 0.68); }
-.nutrition-chart-bars { position: relative; min-height: 120px; display: flex; align-items: flex-end; justify-content: center; }
+.nutrition-chart-bars { position: relative; min-height: 58px; display: flex; align-items: flex-end; justify-content: center; }
 .nutrition-chart-bars i,
 .nutrition-chart-bars b { position: absolute; bottom: 0; width: 32px; border-radius: 7px 7px 2px 2px; }
 .nutrition-chart-bars i { background: #ebe9e3; }
@@ -4711,7 +4715,7 @@ button {
   display: flex;
   justify-content: center;
   gap: 18px;
-  margin-top: 9px;
+  margin-top: 5px;
   color: var(--muted);
   font-size: 10px;
 }
@@ -4724,14 +4728,14 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 250px;
   align-items: start;
-  gap: 14px;
+  gap: 12px;
 }
 
-.nutrition-log-card { min-width: 0; padding: 16px; }
+.nutrition-log-card { min-width: 0; padding: 13px 14px; }
 .nutrition-log-actions { gap: 8px; }
 .nutrition-add-meal-btn,
 .nutrition-clear-day-btn {
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 14px;
   border-radius: 10px;
   cursor: pointer;
@@ -4742,16 +4746,16 @@ button {
 .nutrition-clear-day-btn { color: var(--danger); background: #fff; border: 1px solid rgba(186, 26, 26, 0.2); }
 .nutrition-clear-day-btn:disabled { opacity: 0.42; cursor: default; }
 
-.nutrition-meal-groups { display: flex; flex-direction: column; gap: 8px; margin-top: 13px; }
+.nutrition-meal-groups { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
 .nutrition-meal-group { overflow: hidden; border: 1px solid var(--line-soft); border-radius: 13px; }
 .nutrition-meal-summary {
   width: 100%;
-  min-height: 56px;
+  min-height: 38px;
   display: grid;
   grid-template-columns: 38px 95px 62px minmax(0, 1fr) 22px;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 4px 9px;
   color: var(--ink);
   background: #fff;
   border: 0;
@@ -4760,7 +4764,7 @@ button {
 }
 
 .nutrition-meal-group.expanded .nutrition-meal-summary { background: #fffdfb; }
-.nutrition-meal-icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #cd6d14; background: #fff0df; border-radius: 50%; font-size: 18px; }
+.nutrition-meal-icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: #cd6d14; background: #fff0df; border-radius: 50%; font-size: 14px; }
 .nutrition-meal-icon.lunch { color: #408243; background: #e8f4e2; }
 .nutrition-meal-icon.snack { color: #7352b6; background: #f0eaff; }
 .nutrition-meal-icon.dinner { color: #5846b1; background: #eeeaff; }
@@ -4771,7 +4775,7 @@ button {
 .nutrition-meal-summary > div i { display: inline-block; height: 12px; margin: 0 7px; border-left: 1px solid var(--line-soft); vertical-align: middle; }
 .nutrition-meal-summary > em { color: var(--ink-soft); font-style: normal; text-align: right; }
 
-.nutrition-meal-details { padding: 0 12px 10px; background: #fff; }
+.nutrition-meal-details { padding: 0 10px 4px; background: #fff; }
 .nutrition-entry-head,
 .nutrition-entry-row {
   display: grid;
@@ -4779,15 +4783,15 @@ button {
   align-items: center;
   gap: 8px;
 }
-.nutrition-entry-head { min-height: 30px; color: var(--muted); border-bottom: 1px solid var(--line-soft); font-size: 10px; font-weight: 800; }
-.nutrition-entry-row { min-height: 43px; color: var(--ink-soft); border-bottom: 1px solid rgba(195, 200, 189, 0.38); font-size: 11px; }
+.nutrition-entry-head { min-height: 26px; color: var(--muted); border-bottom: 1px solid var(--line-soft); font-size: 10px; font-weight: 800; }
+.nutrition-entry-row { min-height: 36px; color: var(--ink-soft); border-bottom: 1px solid rgba(195, 200, 189, 0.38); font-size: 11px; }
 .nutrition-entry-row strong { color: var(--ink); font-size: 12px; }
 .nutrition-entry-row > div { display: flex; gap: 5px; justify-content: flex-end; }
 .nutrition-entry-row button { width: 29px; height: 29px; color: var(--ink-soft); background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
 .nutrition-entry-row button:hover { background: var(--surface-low); border-color: var(--line-soft); }
 .nutrition-entry-row button.delete { color: var(--danger); font-size: 18px; }
-.nutrition-add-item-link { margin-top: 8px; padding: 5px 3px; color: var(--sage-deep); background: transparent; border: 0; cursor: pointer; font-size: 11px; font-weight: 800; }
-.nutrition-empty-meal { margin: 10px 2px 3px; color: var(--muted); font-size: 11px; }
+.nutrition-add-item-link { margin-top: 3px; padding: 3px; color: var(--sage-deep); background: transparent; border: 0; cursor: pointer; font-size: 11px; font-weight: 800; }
+.nutrition-empty-meal { margin: 5px 2px 1px; color: var(--muted); font-size: 11px; }
 
 .nutrition-entry-editor {
   display: grid;
@@ -4808,10 +4812,10 @@ button {
 
 .nutrition-side-rail { display: flex; flex-direction: column; gap: 14px; }
 .nutrition-goals-card,
-.nutrition-tip-card { padding: 16px; }
+.nutrition-tip-card { padding: 13px 14px; }
 .nutrition-goals-card .nutrition-card-heading button { width: 32px; height: 32px; background: transparent; border: 0; border-radius: 8px; cursor: pointer; }
 .nutrition-goals-card dl { margin: 10px 0 0; }
-.nutrition-goals-card dl div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; }
+.nutrition-goals-card dl div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; }
 .nutrition-goals-card dl div:last-child { border-bottom: 0; }
 .nutrition-goals-card dt { color: var(--ink); }
 .nutrition-goals-card dd { margin: 0; color: var(--ink-soft); }

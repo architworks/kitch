@@ -2061,6 +2061,12 @@ export default function Home() {
             await loadMealPlanWeek(getWeekStartForDate(focusDate), focusDate);
           }
           triggerBannerAlert("Planner modified by Kitch Agent!");
+        } else if (act.type === "UPDATE_NUTRITION") {
+          const focusDate = act.focus_date || act.affected_dates?.[0] || mealPlan.today;
+          if (focusDate) {
+            await loadNutritionDashboard(activeUser, focusDate);
+          }
+          triggerBannerAlert("Nutrition diary updated by Kitch Agent!");
         } else if (act.type === "UPDATE_PANTRY") {
           triggerBannerAlert("Pantry inventory updated by Kitch Agent!");
         } else if (act.type === "UPDATE_GROCERY_CART") {
