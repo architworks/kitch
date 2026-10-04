@@ -868,7 +868,6 @@ export default function Home() {
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
   const [isCheckingProviderPayment, setIsCheckingProviderPayment] = useState(false);
   const [isProviderOrderComplete, setIsProviderOrderComplete] = useState(false);
-  const [alertBanner, setAlertBanner] = useState({ show: false, text: "" });
   const [scanningOverlay, setScanningOverlay] = useState({
     active: false,
     title: "",
@@ -1273,16 +1272,6 @@ export default function Home() {
     return () => window.cancelAnimationFrame(frame);
   }, [chatHistory.length, isChatTyping, smartDockExpanded]);
 
-  // Sync alert auto-dismiss timer
-  useEffect(() => {
-    if (alertBanner.show) {
-      const timer = setTimeout(() => {
-        setAlertBanner(prev => ({ ...prev, show: false }));
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [alertBanner.show]);
-
   // 2. Computed values - Reactive Shopping Cart List
   const groceryList = useMemo(() => {
     return customGroceryItems;
@@ -1293,9 +1282,9 @@ export default function Home() {
   const providerSelectedCount = groceryList.filter(item => cartPurchaseAmount(item) > 0 && !excludedProviderItemIds.includes(cartItemKey(item))).length;
 
   // 3. Application operations
-  const triggerBannerAlert = useCallback((text) => {
-    setAlertBanner({ show: true, text });
-  }, []);
+  // Routine operations communicate through their owning UI state. Retained as
+  // a temporary compatibility callback while legacy call sites are removed.
+  const triggerBannerAlert = useCallback(() => {}, []);
 
   const beginGroceryMutation = () => {
     groceryMutationCountRef.current += 1;
@@ -4481,12 +4470,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* DYNAMIC ALERT BANNER */}
-      {alertBanner.show && (
-        <div className="ai-banner-alert show">
-          <span>✨ Agent Sync: {alertBanner.text}</span>
-        </div>
-      )}
     </div>
   );
 }
