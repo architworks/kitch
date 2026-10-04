@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List
 from uuid import uuid4
 
@@ -68,6 +69,117 @@ class GroceryCheckoutService:
         if review and not review.get("native_items"):
             review = None
         return {"status": "success", "provider": provider_id, "draft": review}
+
+    async def read_cart_from_chat(self, provider_id: str = "") -> Dict[str, Any]:
+        """Read the live provider cart without changing provider or Kitch state."""
+        canonical_provider = ProviderRegistry.canonical_id(provider_id)
+        if not canonical_provider:
+            canonical_provider = ProviderRegistry.canonical_id(
+                get_selected_grocery_provider()
+            )
+        if canonical_provider not in {"zepto", "swiggy_instamart"}:
+            raise ProviderOperationError(
+                provider=canonical_provider or "unselected",
+                operation="read_cart",
+                code="provider_selection_required",
+                message=(
+                    "Select and connect an ordering app in Groceries before "
+                    "asking about its cart."
+                ),
+                status_code=422,
+            )
+
+        adapter = self.registry.get(canonical_provider)
+        descriptor = adapter.descriptor()
+        operation_id = str(uuid4())
+        with commerce_request_context(
+            source="chat_provider_cart_read",
+            permissions={CommercePermission.READ},
+            operation_id=operation_id,
+        ):
+            result = await adapter.get_cart()
+        self._raise_result_error(canonical_provider, "read_cart", result)
+
+        provider_cart = result.get("provider_cart") or {}
+        raw_items = (
+            provider_cart.get("items")
+            if isinstance(provider_cart, dict)
+            and isinstance(provider_cart.get("items"), list)
+            else []
+        )
+        items = [self._readable_cart_item(item) for item in raw_items]
+        summary = self._readable_cart_summary(result.get("cart_summary") or {})
+        return {
+            "status": "success",
+            "provider": canonical_provider,
+            "provider_label": descriptor.label,
+            "source": "live_provider_cart",
+            "read_at": datetime.now(timezone.utc).isoformat(),
+            "items": items,
+            "item_count": len(items),
+            "cart_summary": summary,
+            "multi_store": bool(
+                isinstance(provider_cart, dict)
+                and provider_cart.get("multi_store")
+            ),
+            "message": (
+                f"Read the current {descriptor.label} cart without changing it."
+            ),
+        }
+
+    @staticmethod
+    def _money_value(value: Any, currency: str = "INR") -> Dict[str, Any] | None:
+        if value is None:
+            return None
+        try:
+            minor = int(value)
+        except (TypeError, ValueError):
+            return None
+        major = minor / 100
+        symbol = "₹" if currency == "INR" else f"{currency} "
+        return {
+            "minor": minor,
+            "amount": major,
+            "display": f"{symbol}{major:,.2f}",
+        }
+
+    @classmethod
+    def _readable_cart_item(cls, item: Any) -> Dict[str, Any]:
+        value = item if isinstance(item, dict) else {}
+        return {
+            "name": str(value.get("name") or "Provider product"),
+            "pack": str(
+                value.get("pack_size") or value.get("packSize") or ""
+            ),
+            "quantity": value.get("quantity"),
+            "unit_price": cls._money_value(
+                value.get("price_minor", value.get("price"))
+            ),
+            "line_total": cls._money_value(
+                value.get("line_total_minor", value.get("lineTotal"))
+            ),
+            "store_name": value.get("store_name") or value.get("storeName"),
+        }
+
+    @classmethod
+    def _readable_cart_summary(cls, summary: Dict[str, Any]) -> Dict[str, Any]:
+        currency = str(summary.get("currency") or "INR")
+        return {
+            "currency": currency,
+            "subtotal": cls._money_value(summary.get("subtotal_minor"), currency),
+            "discount": cls._money_value(summary.get("discount_minor"), currency),
+            "fees": [
+                {
+                    "label": str(fee.get("label") or "Fee"),
+                    "amount": cls._money_value(fee.get("amount_minor"), currency),
+                }
+                for fee in summary.get("fees") or []
+                if isinstance(fee, dict)
+            ],
+            "total": cls._money_value(summary.get("total_minor"), currency),
+            "total_source": summary.get("total_source") or "unavailable",
+            "notice": summary.get("total_notice") or "",
+        }
 
     async def sync(
         self,
@@ -441,13 +553,11 @@ class GroceryCheckoutService:
         native_cart_changes: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Synchronize an explicitly requested or UI-selected provider cart."""
-        provider_id = str(provider_id or "").strip().lower().replace(" ", "_")
-        provider_id = {
-            "swiggy": "swiggy_instamart", "instamart": "swiggy_instamart",
-            "swiggy_instamart": "swiggy_instamart", "zepto": "zepto",
-        }.get(provider_id, provider_id)
+        provider_id = ProviderRegistry.canonical_id(provider_id)
         if not provider_id:
-            provider_id = get_selected_grocery_provider()
+            provider_id = ProviderRegistry.canonical_id(
+                get_selected_grocery_provider()
+            )
         if provider_id not in {"zepto", "swiggy_instamart"}:
             raise ProviderOperationError(
                 provider=provider_id or "unselected", operation="chat_sync_cart",

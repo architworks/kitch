@@ -6,11 +6,8 @@ removed instead of retained as historical compatibility notes. Architectural
 decisions—including rejected agent topologies—belong in
 `ai_agent_topology.md`.
 
-The most recent full functional run is
-[`functional_blueprint_2026-10-02_16-23-46_IST`](./test_artifacts/functional_blueprint_2026-10-02_16-23-46_IST/report.md).
-Its application failures were fixed and targeted retests passed on 2026-10-02.
-Provider scenarios remained blocked by external authentication state and were
-not represented as product failures.
+The most recent provider run is
+[`section_8_grocery_integration_and_hosted_smoke_2026-10-04_21-12-43_IST`](./test_artifacts/section_8_grocery_integration_and_hosted_smoke_2026-10-04_21-12-43_IST/report.md).
 
 ## Open issue summary
 
@@ -19,6 +16,9 @@ not represented as product failures.
 | KI-001 | High | Open | Instamart may omit valid variants or apply a preference belonging to another item. |
 | KI-002 | Medium | Open | Instamart search-candidate prices can contain corrupted minor-unit values. |
 | KI-003 | High | Open | Native-cart drift can be overwritten and a stale provider draft can become `ready` again. |
+| KI-004 | Medium | Open | Instamart unresolved items are duplicated and the displayed not-found count is wrong. |
+| KI-005 | High | Open | A chat checkout request can erase an existing provider review even though checkout is refused. |
+| OP-002 | Critical | Open | The hosted Vercel backend function returns HTTP 500 for liveness, readiness, state, and chat. |
 
 ## KI-001: Instamart matching and preference leakage
 
@@ -117,6 +117,31 @@ snapshot and provider result. The generic refresh can remove the drift blocker.
 - Add a backend regression test that performs invalidation followed by the same
   read/refresh path used by the API.
 
+## KI-004: Duplicate unresolved Instamart rows
+
+- **Area:** Instamart reconciliation and provider review UI
+- **First reproduced:** 2026-10-04
+
+Two genuinely unresolved native items (`cauliflower` and `water (for dough)`)
+were rendered twice and reported as four missing items. The persisted draft
+contains both the agent's omission record and a second reconciliation failure
+for the same native item.
+
+Deduplicate unavailable results by stable native item ID after reconciliation,
+preserving the most useful combined reasoning. Counts and acknowledgement text
+must use unique unresolved native items.
+
+## KI-005: Refused chat checkout can erase the provider draft
+
+- **Area:** Agent routing and durable checkout state
+- **First reproduced:** 2026-10-04
+
+Chat correctly refused “Place my Instamart order now,” but the previously
+reviewed provider draft disappeared immediately afterward. A checkout refusal
+must be completely read-only: it must not synchronize, invalidate, disconnect,
+or delete checkout state. Add a regression test that snapshots the draft,
+submits a chat checkout request, and asserts byte-equivalent durable state.
+
 ## Operational blockers
 
 ### OP-001: Live provider testing requires valid external authentication
@@ -126,6 +151,14 @@ provider UI should show disabled or `reconnect_required`, and live Section 7
 tests cannot exercise address, cart, payment, or revalidation behavior. This is
 an external prerequisite, not a core-readiness failure and not evidence of a
 provider-workflow defect.
+
+### OP-002: Hosted Vercel backend invocation failure
+
+On 2026-10-04 the hosted static UI rendered, but
+`/backend/api/health/live`, `/backend/api/health/ready`, state loading, and chat
+all returned HTTP 500 with `FUNCTION_INVOCATION_FAILED`. The deployed app is
+not operational until the Vercel function startup failure is diagnosed from
+deployment/runtime logs and both health endpoints succeed.
 
 ## Deferred optimisations
 

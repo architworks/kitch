@@ -1,0 +1,19 @@
+{
+  "tested_at": "2026-10-04T21:12:43+05:30",
+  "section_8": {
+    "pass": 0,
+    "fail": 0,
+    "partial": 4,
+    "scenarios": {
+      "8.1": "partial",
+      "8.2": "partial",
+      "8.3": "partial",
+      "8.4": "partial"
+    }
+  },
+  "routing_regression": "pass",
+  "hosted_smoke": "fail",
+  "hosted_backend_status": 500,
+  "focused_automated_tests_passed": 55,
+  "order_placed": false
+}

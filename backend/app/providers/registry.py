@@ -19,6 +19,21 @@ PROVIDER_READINESS_TIMEOUT_SECONDS = 5.0
 
 
 class ProviderRegistry:
+    _ALIASES = {
+        "zepto": "zepto",
+        "swiggy": "swiggy_instamart",
+        "instamart": "swiggy_instamart",
+        "swiggy_instamart": "swiggy_instamart",
+    }
+
+    @classmethod
+    def canonical_id(cls, provider_id: str) -> str:
+        """Resolve user-facing provider names to Kitch's stable provider key."""
+        normalized = "_".join(
+            str(provider_id or "").strip().lower().replace("-", " ").split()
+        )
+        return cls._ALIASES.get(normalized, normalized)
+
     async def _readiness_for(
         self,
         adapter: GroceryProviderAdapter,
@@ -65,6 +80,7 @@ class ProviderRegistry:
         return [zepto.as_dict(), instamart.as_dict(), blinkit.as_dict()]
 
     def get(self, provider_id: str) -> GroceryProviderAdapter:
+        provider_id = self.canonical_id(provider_id)
         factories = {
             "zepto": ZeptoProviderAdapter,
             "swiggy_instamart": InstamartProviderAdapter,
@@ -91,6 +107,7 @@ class ProviderRegistry:
         return adapter
 
     def descriptor(self, provider_id: str) -> Dict[str, object]:
+        provider_id = self.canonical_id(provider_id)
         for descriptor in self.descriptors():
             if descriptor["id"] == provider_id:
                 return descriptor

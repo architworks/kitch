@@ -44,7 +44,7 @@ from .tools import (
     delete_recipe_grocery_plan_tool,
     get_current_datetime,
     list_grocery_providers_tool,
-    get_grocery_checkout_status_tool,
+    get_provider_cart_tool,
     sync_provider_cart_tool,
     update_household_configuration_tool,
     update_nutrition_targets_tool,
@@ -248,8 +248,9 @@ recipe_grocery_planner = LlmAgent(
         "7. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
         "8. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
         "9. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
-        "10. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
-        "11. Never describe memory, a recipe artifact, or a cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
+        "10. Provider availability, current ordering-app cart contents, quantities, prices, and totals also belong to you. Use list_grocery_providers_tool or get_provider_cart_tool for these read-only questions. Reading a provider cart must never synchronize, repair, or otherwise mutate it.\n"
+        "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
+        "12. Never describe memory, a recipe artifact, or a cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         get_meal_schedule_tool,
@@ -267,6 +268,8 @@ recipe_grocery_planner = LlmAgent(
         patch_pantry_tool,
         replace_pantry_tool,
         reconcile_native_cart_with_pantry_tool,
+        list_grocery_providers_tool,
+        get_provider_cart_tool,
         sync_provider_cart_tool,
         get_current_datetime
     ],
@@ -296,7 +299,7 @@ kitch_coordinator = LlmAgent(
         "→ 'recipe_grocery_planner': For detailed recipes, cooking steps, ingredients, "
         "  groceries, shopping lists, 'what do I need to buy', pantry-aware grocery planning, "
         "  standalone add/update/remove requests for the Kitch grocery cart, and household "
-        "  food preferences or exclusions.\n\n"
+        "  food preferences or exclusions, ordering-app availability, provider-cart contents, totals, or explicit provider synchronization.\n\n"
         "GUIDELINES:\n"
         "1. Be warm and conversational. You're the household's kitchen buddy, not a robot.\n"
         "2. Route naturally — don't tell the user which agent you're using.\n"
@@ -305,7 +308,7 @@ kitch_coordinator = LlmAgent(
         "5. For nutrition intake, macro tracking, food-log corrections, or nutrition goals, delegate the "
         "complete request to nutrition_tracker. The coordinator must not estimate, log, modify, or claim "
         "success for nutrition records itself.\n"
-        "6. All recipes, pantry, native grocery cart, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
+        "6. All recipes, pantry, native grocery cart, provider availability, provider-cart reads, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
         "7. Factual household size and timezone may be changed with update_household_configuration_tool. Dietary, food, allergy, planning-style, and brand preferences are natural-language agent memories and must never be written to the household profile. Personal calorie and macro goals belong to nutrition_tracker. Provider authentication and provider selection remain UI-only.\n"
         "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"
@@ -315,8 +318,6 @@ kitch_coordinator = LlmAgent(
     ),
     sub_agents=[chef_planner, recipe_grocery_planner, nutrition_tracker],
     tools=[
-        list_grocery_providers_tool,
-        get_grocery_checkout_status_tool,
         update_household_configuration_tool,
     ],
     on_tool_error_callback=recover_unknown_tool_error,

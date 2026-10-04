@@ -79,6 +79,26 @@ class NativeGroceryCartMutationTests(unittest.TestCase):
 
 
 class ProviderChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_cart_read_accepts_natural_provider_name(self):
+        service = AsyncMock()
+        service.read_cart_from_chat.return_value = {
+            "status": "success",
+            "provider": "swiggy_instamart",
+            "items": [{"name": "Eggs", "quantity": 1}],
+            "cart_summary": {"total": {"display": "₹120.00"}},
+        }
+        fake_main = ModuleType("app.main")
+        fake_main.grocery_checkout_service = service
+
+        with patch.dict(sys.modules, {"app.main": fake_main}):
+            result = await tools.get_provider_cart_tool("Instamart")
+
+        service.read_cart_from_chat.assert_awaited_once_with(
+            provider_id="Instamart",
+        )
+        self.assertEqual(result["provider"], "swiggy_instamart")
+        self.assertEqual(result["cart_summary"]["total"]["display"], "₹120.00")
+
     async def test_combined_request_mutates_native_cart_before_existing_sync_path(self):
         service = AsyncMock()
         service.sync_from_chat.return_value = {
@@ -156,9 +176,12 @@ class AgentTopologyContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("sync_provider_cart_tool", core)
+        self.assertIn("get_provider_cart_tool", core)
         self.assertIn("modify_native_grocery_cart_tool", core)
         coordinator = core.split("kitch_coordinator =", 1)[1]
         self.assertNotIn("sync_provider_cart_tool,", coordinator.split("before_agent_callback", 1)[0])
+        self.assertNotIn("get_provider_cart_tool,", coordinator.split("before_agent_callback", 1)[0])
+        self.assertNotIn("list_grocery_providers_tool,", coordinator.split("before_agent_callback", 1)[0])
         self.assertIn("All recipes, pantry, native grocery cart", coordinator)
 
     def test_atomic_native_cart_migration_is_backend_only(self):

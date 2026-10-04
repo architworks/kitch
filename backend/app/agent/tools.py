@@ -32,9 +32,7 @@ from app.supabase_client import (
     update_recipe_grocery_plan as db_update_recipe_grocery_plan,
     delete_recipe_grocery_plan as db_delete_recipe_grocery_plan,
 )
-from app.checkout_drafts import draft_row_to_review
 from app.providers.registry import provider_registry
-from app.supabase_client import get_provider_checkout_draft
 from app.agent.memory import search_household_memory_tool
 
 # --- Safety Parsing Helper ---
@@ -410,24 +408,18 @@ def list_grocery_providers_tool() -> Dict[str, Any]:
   return {"status": "success", "providers": provider_registry.descriptors()}
 
 
-def get_grocery_checkout_status_tool(provider: str) -> Dict[str, Any]:
-  """Read a sanitized durable checkout status for the requested provider."""
-  descriptor = provider_registry.descriptor(provider)
-  if provider not in {"zepto", "swiggy_instamart"}:
-    return {"status": "unavailable", "provider": provider}
-  row = get_provider_checkout_draft(provider, str(descriptor["environment"]))
-  review = draft_row_to_review(row)
-  if not review or not review.get("native_items"):
-    return {"status": "empty", "provider": provider}
-  return {
-    "status": review.get("status"),
-    "provider": provider,
-    "last_validated_at": review.get("last_validated_at"),
-    "matched_item_count": len(review.get("matched_items") or []),
-    "unavailable_item_count": len(review.get("unavailable_items") or []),
-    "can_place_order": bool(review.get("can_place_order")),
-    "order_blockers": review.get("order_blockers") or [],
-  }
+async def get_provider_cart_tool(provider: str = "") -> Dict[str, Any]:
+  """
+  Read the current ordering-app cart without changing it. The provider is
+  optional; omit it to use the ordering app most recently selected in the UI.
+  Canonical provider IDs are `swiggy_instamart` and `zepto`; natural aliases
+  such as `Instamart` and `Swiggy` are also accepted by the backend.
+  """
+  from app.main import grocery_checkout_service
+
+  return await grocery_checkout_service.read_cart_from_chat(
+    provider_id=str(provider or "").strip(),
+  )
 
 async def sync_provider_cart_tool(
   user_request: str,

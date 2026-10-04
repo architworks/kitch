@@ -76,6 +76,45 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             instamart_agent=instamart_agent,
         )
 
+    async def test_read_cart_from_chat_normalizes_alias_and_returns_live_values(self):
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(
+                environment="local",
+                label="Swiggy Instamart",
+            ),
+            get_cart=AsyncMock(return_value={
+                "status": "success",
+                "provider": "swiggy_instamart",
+                "provider_cart": {
+                    "items": [{
+                        "name": "Farm Eggs",
+                        "pack_size": "12 pieces",
+                        "quantity": 1,
+                        "price_minor": 12000,
+                        "line_total_minor": 12000,
+                    }],
+                    "multi_store": False,
+                },
+                "cart_summary": {
+                    "currency": "INR",
+                    "subtotal_minor": 12000,
+                    "fees": [{"label": "Handling Fee", "amount_minor": 1200}],
+                    "total_minor": 13200,
+                    "total_source": "provider",
+                },
+            }),
+        )
+        service = self.service(adapter)
+
+        response = await service.read_cart_from_chat("Instamart")
+
+        adapter.get_cart.assert_awaited_once()
+        self.assertEqual(response["provider"], "swiggy_instamart")
+        self.assertEqual(response["items"][0]["name"], "Farm Eggs")
+        self.assertEqual(response["items"][0]["line_total"]["display"], "₹120.00")
+        self.assertEqual(response["cart_summary"]["total"]["display"], "₹132.00")
+        self.assertEqual(response["source"], "live_provider_cart")
+
     async def test_instamart_sync_uses_cart_agent_and_persists_confirmed_result(self):
         native_item = self.draft_row()["native_items"][0]
         capture = SimpleNamespace(marker="captured")

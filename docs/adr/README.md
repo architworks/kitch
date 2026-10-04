@@ -17,3 +17,4 @@ describes the intended architecture even when implementation is still pending.
 | [0001](0001-what-kitch-stores-in-memory-vs-database.md) | Accepted | What Kitch stores in agent memory and what it stores in the database. |
 | [0002](0002-what-triggers-memory-generation.md) | Accepted | What causes Kitch to generate or update a memory. |
 | [0003](0003-how-memory-persists-without-persisting-chat-sessions.md) | Accepted | How long-term memory persists while chat sessions remain temporary. |
+| [0004](0004-why-grocery-provider-agents-use-mcp-tools-directly.md) | Accepted | Why provider cart agents use MCP tools directly instead of deterministic product-matching adapters. |
