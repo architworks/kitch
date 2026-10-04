@@ -10,6 +10,51 @@ from app.telemetry import provider_operation_span
 from app.commerce_policy import CommerceToolPolicy
 
 
+@asynccontextmanager
+async def streamable_http_transport(
+    url: str,
+    *,
+    headers: Dict[str, str] | None = None,
+    timeout_seconds: int = 30,
+    sse_read_timeout_seconds: int = 300,
+) -> AsyncIterator[tuple[Any, Any]]:
+    """Open streamable HTTP across the MCP 1.x and 2.x client APIs."""
+    try:
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared._httpx_utils import create_mcp_http_client
+        import httpx2
+    except ImportError:
+        try:
+            from mcp.client.streamable_http import streamablehttp_client
+        except ImportError as exc:
+            raise RuntimeError(
+                "Python MCP streamable HTTP support is not installed."
+            ) from exc
+
+        async with streamablehttp_client(
+            url,
+            headers=headers,
+            timeout=timedelta(seconds=timeout_seconds),
+            sse_read_timeout=timedelta(seconds=sse_read_timeout_seconds),
+        ) as streams:
+            yield streams[0], streams[1]
+        return
+
+    http_client = create_mcp_http_client(
+        headers=headers,
+        timeout=httpx2.Timeout(
+            timeout_seconds,
+            read=sse_read_timeout_seconds,
+        ),
+    )
+    async with http_client:
+        async with streamable_http_client(
+            url,
+            http_client=http_client,
+        ) as streams:
+            yield streams[0], streams[1]
+
+
 def to_plain(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -40,18 +85,16 @@ class McpProviderClient:
     async def session(self) -> AsyncIterator[Any]:
         try:
             from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
         except ImportError as exc:
             raise RuntimeError("Python MCP streamable HTTP support is not installed.") from exc
 
         headers = {"Authorization": f"Bearer {self.access_token}"}
-        client_context = streamablehttp_client(
+        async with streamable_http_transport(
             self.url,
             headers=headers,
-            timeout=timedelta(seconds=self.timeout_seconds),
-            sse_read_timeout=timedelta(seconds=300),
-        )
-        async with client_context as (read, write, _):
+            timeout_seconds=self.timeout_seconds,
+            sse_read_timeout_seconds=300,
+        ) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session

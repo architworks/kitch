@@ -12,7 +12,6 @@ import os
 import re
 import shlex
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from datetime import timedelta
 from typing import Any, Dict, List
 
 from app.providers.base import (
@@ -1041,23 +1040,20 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
         return self._http_session(ClientSession)
 
     def _http_session(self, ClientSession):
-        try:
-            from mcp.client.streamable_http import streamablehttp_client
-        except ImportError as exc:
-            raise RuntimeError("Python MCP streamable HTTP client is not installed.") from exc
+        from app.providers.mcp_client import streamable_http_transport
 
         headers = self._headers()
-        client_ctx = streamablehttp_client(
+        client_ctx = streamable_http_transport(
             self.url,
             headers=headers or None,
-            timeout=timedelta(seconds=30),
-            sse_read_timeout=timedelta(seconds=300),
+            timeout_seconds=30,
+            sse_read_timeout_seconds=300,
         )
 
         class _SessionContext:
             async def __aenter__(inner_self):
                 inner_self.client = client_ctx
-                inner_self.read, inner_self.write, _ = await inner_self.client.__aenter__()
+                inner_self.read, inner_self.write = await inner_self.client.__aenter__()
                 inner_self.session = ClientSession(inner_self.read, inner_self.write)
                 await inner_self.session.__aenter__()
                 await inner_self.session.initialize()
