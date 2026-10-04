@@ -44,7 +44,7 @@ flowchart LR
    accesses Supabase, and guards provider operations.
 3. Supabase stores structured product state behind backend-only RLS.
 4. ADK chat sessions are process-local; selected household context is stored in
-   Vertex AI Memory Bank when `vertex_express` is configured.
+   Vertex AI Memory Bank when `vertex` is configured.
 5. A provider-neutral checkout service prepares and revalidates external carts;
    final ordering remains an explicit UI-only action.
 
@@ -88,8 +88,9 @@ Ensure the prototype household profiles exist, or update their IDs in:
 
 Copy `backend/.env.example` to `backend/.env.local` (or `backend/.env`), then
 set the Supabase and Gemini credentials. Persistent household memory also needs
-a dedicated Vertex AI Express Mode key and Memory Bank ID. The full variable
-reference—including Memory Bank setup, provider OAuth, and telemetry—is in
+standard Google Cloud credentials and a Memory Bank ID. For local development,
+run `gcloud auth application-default login`; Vercel uses OIDC federation. The
+full variable reference—including Memory Bank setup, provider OAuth, and telemetry—is in
 `docs/runtime_stack_and_configuration.md`.
 
 ```bash

@@ -15,7 +15,11 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service, vision_runner
-from app.agent.memory import memory_readiness
+from app.agent.memory import (
+    begin_memory_auth_scope,
+    end_memory_auth_scope,
+    memory_readiness,
+)
 from app.agent.structured_models import PhotoAnalysis
 from app.agent.tools import apply_zepto_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
@@ -249,6 +253,9 @@ async def persistence_postcondition(request: Request, call_next):
     """
     token = begin_persistence_scope()
     confirmation_token = begin_confirmation_scope()
+    memory_auth_token = begin_memory_auth_scope(
+        request.headers.get("x-vercel-oidc-token")
+    )
     try:
         response = await call_next(request)
         raise_recorded_persistence_failure()
@@ -266,6 +273,7 @@ async def persistence_postcondition(request: Request, call_next):
     finally:
         end_persistence_scope(token)
         end_confirmation_scope(confirmation_token)
+        end_memory_auth_scope(memory_auth_token)
 
 @app.exception_handler(PersistenceError)
 async def persistence_exception_handler(

@@ -145,9 +145,11 @@ for rejecting it are documented in `ai_agent_topology.md`.
 
 Persistent household memory is implemented with Vertex AI Memory Bank while
 conversation sessions intentionally remain in `InMemorySessionService`. The
-production environment still needs its dedicated Express Mode key and empty
-Memory Bank resource, followed by preview-environment save/restart/recall,
-correction, forget, and item-isolation tests. Observe real retrieval before
+Memory Bank resource, service account, and Vercel Workload Identity Federation
+are configured for the production subject; the remaining rollout work is to
+set the non-secret Vercel resource variables and run save/restart/recall,
+correction, forget, and item-isolation tests. A preview deployment needs its own
+explicit WIF subject binding before it can run the same tests. Observe real retrieval before
 adding custom topics or few-shot extraction rules; do not pre-emptively replace
 flexible memory with structured preference fields.
 

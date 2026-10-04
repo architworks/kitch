@@ -441,7 +441,7 @@ behavior are documented in `ux_user_flows.md`, not duplicated here.
 ## Known Boundaries
 
 - Backend restarts clear short-lived ADK conversation sessions. With
-  `vertex_express` configured, selected household memories remain durable.
+  `vertex` configured, selected household memories remain durable.
 - Apply versioned Supabase migrations before starting FastAPI in every
   environment. The bootstrap schema must remain synchronized with them.
 - Provider OAuth and production approval remain externally controlled.

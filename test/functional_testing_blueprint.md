@@ -82,7 +82,7 @@ Before running the scenarios, prepare a consistent household test context.
   household profile while reporting provider and memory degradation separately.
 - Confirm the app can read and write user profile, meal plan, pantry, food
   diary, grocery, and recipe-artifact state. Before preference scenarios,
-  confirm readiness reports memory backend `vertex_express` and state `ready`.
+  confirm readiness reports memory backend `vertex` and state `ready`.
 - Use a stable local date and timezone in the artifact. Relative-date scenarios
   must record the actual calendar date used during the test.
 - Use known image fixtures for image scenarios and link or copy them into the
@@ -926,7 +926,7 @@ degradation. They do not require conversation-session continuity.
 
 ### Scenario 9.6 - Memory Failure Does Not Disable Core Kitch
 
-- Setup: In an isolated test deployment, configure an invalid Express Mode key
+- Setup: In an isolated test deployment, configure invalid ADC/WIF credentials
   or simulate Memory Bank timeout/unavailability.
 - Prompt/action: Ask Kitch to remember a durable preference, then perform a
   Supabase-backed pantry read and dated meal-plan read.

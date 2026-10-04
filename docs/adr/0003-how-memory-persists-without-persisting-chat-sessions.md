@@ -35,8 +35,12 @@ its events to be submitted to Memory Bank.
 - Await successful submission to the Google API before a Vercel request ends.
   Google may perform generation asynchronously, but Kitch must not rely on an
   unawaited process-local background task surviving after the response.
-- Authenticate Memory Bank with a dedicated Vertex AI Express Mode API key,
-  separate from the Google AI Studio key used for Gemini inference.
+- Authenticate standard Vertex Memory Bank with Application Default
+  Credentials locally and Vercel OIDC Workload Identity Federation in
+  production. Gemini inference may independently keep using its Google AI
+  Studio API key.
+- Impersonate the dedicated Kitch service account with short-lived credentials;
+  do not store a service-account key or Memory Bank API key in Vercel.
 - If persistent memory is unavailable, return explicit memory-tool errors and
   degrade only the memory health component; never fall back silently.
 

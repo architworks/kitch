@@ -59,22 +59,23 @@ class MemoryFactoryTests(unittest.TestCase):
 
     def test_vercel_never_defaults_to_process_local_memory(self):
         runtime = memory_module.MemoryRuntime.from_environment({"VERCEL": "1"})
-        self.assertEqual(runtime.backend, "vertex_express")
+        self.assertEqual(runtime.backend, "vertex")
         self.assertFalse(runtime.configured)
         self.assertTrue(runtime.durable)
         self.assertIsInstance(runtime.service, memory_module.UnavailableMemoryService)
 
     def test_vertex_missing_configuration_degrades_without_fallback(self):
         runtime = memory_module.MemoryRuntime.from_environment({
-            "KITCH_MEMORY_SERVICE": "vertex_express",
+            "KITCH_MEMORY_SERVICE": "vertex",
         })
         self.assertIsInstance(runtime.service, memory_module.UnavailableMemoryService)
         self.assertFalse(runtime.configured)
         self.assertTrue(runtime.durable)
         self.assertIn("KITCH_MEMORY_BANK_ID", runtime.diagnostic)
-        self.assertIn("KITCH_MEMORY_BANK_API_KEY", runtime.diagnostic)
+        self.assertIn("GOOGLE_CLOUD_PROJECT", runtime.diagnostic)
+        self.assertIn("GOOGLE_CLOUD_LOCATION", runtime.diagnostic)
 
-    def test_vertex_uses_dedicated_key_and_normalizes_resource_name(self):
+    def test_local_vertex_uses_adc_configuration_and_normalizes_resource_name(self):
         calls = []
         sentinel = CapturingMemoryService()
 
@@ -84,18 +85,58 @@ class MemoryFactoryTests(unittest.TestCase):
 
         runtime = memory_module.MemoryRuntime.from_environment(
             {
-                "KITCH_MEMORY_SERVICE": "vertex_express",
+                "KITCH_MEMORY_SERVICE": "vertex",
                 "KITCH_MEMORY_BANK_ID": "projects/p/locations/global/reasoningEngines/12345",
-                "KITCH_MEMORY_BANK_API_KEY": "dedicated-express-key",
-                "GOOGLE_API_KEY": "unrelated-ai-studio-key",
+                "GOOGLE_CLOUD_PROJECT": "kitch-project",
+                "GOOGLE_CLOUD_LOCATION": "global",
             },
             vertex_factory=factory,
         )
         self.assertIs(runtime.service, sentinel)
         self.assertEqual(calls, [{
+            "project": "kitch-project",
+            "location": "global",
             "agent_engine_id": "12345",
-            "express_mode_api_key": "dedicated-express-key",
+            "credentials_factory": None,
         }])
+
+    def test_vercel_vertex_requires_workload_identity_configuration(self):
+        runtime = memory_module.MemoryRuntime.from_environment({
+            "VERCEL": "1",
+            "KITCH_MEMORY_SERVICE": "vertex",
+            "KITCH_MEMORY_BANK_ID": "12345",
+            "GOOGLE_CLOUD_PROJECT": "kitch-project",
+            "GOOGLE_CLOUD_LOCATION": "global",
+        })
+        self.assertFalse(runtime.configured)
+        self.assertIn("GCP_PROJECT_NUMBER", runtime.diagnostic)
+        self.assertIn("GCP_SERVICE_ACCOUNT_EMAIL", runtime.diagnostic)
+
+    def test_vercel_vertex_supplies_request_scoped_credentials_factory(self):
+        calls = []
+        sentinel = CapturingMemoryService()
+
+        def factory(**kwargs):
+            calls.append(kwargs)
+            return sentinel
+
+        runtime = memory_module.MemoryRuntime.from_environment(
+            {
+                "VERCEL": "1",
+                "KITCH_MEMORY_SERVICE": "vertex",
+                "KITCH_MEMORY_BANK_ID": "12345",
+                "GOOGLE_CLOUD_PROJECT": "kitch-project",
+                "GOOGLE_CLOUD_LOCATION": "global",
+                "GCP_PROJECT_NUMBER": "611852448175",
+                "GCP_WORKLOAD_IDENTITY_POOL_ID": "vercel",
+                "GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID": "vercel-kitch",
+                "GCP_SERVICE_ACCOUNT_EMAIL": "kitch-service-account@example.iam.gserviceaccount.com",
+            },
+            vertex_factory=factory,
+        )
+        self.assertTrue(runtime.configured)
+        self.assertIs(runtime.service, sentinel)
+        self.assertTrue(callable(calls[0]["credentials_factory"]))
 
     def test_invalid_backend_is_not_silently_changed(self):
         runtime = memory_module.MemoryRuntime.from_environment({
@@ -105,19 +146,27 @@ class MemoryFactoryTests(unittest.TestCase):
         self.assertFalse(runtime.configured)
         self.assertIsInstance(runtime.service, memory_module.UnavailableMemoryService)
 
-    def test_real_vertex_factory_keeps_key_separate_from_gemini_auth_mode(self):
+    def test_real_vertex_factory_uses_standard_vertex_even_in_ai_studio_mode(self):
         runtime = memory_module.MemoryRuntime.from_environment({
-            "KITCH_MEMORY_SERVICE": "vertex_express",
+            "KITCH_MEMORY_SERVICE": "vertex",
             "KITCH_MEMORY_BANK_ID": "12345",
-            "KITCH_MEMORY_BANK_API_KEY": "dedicated-express-key",
+            "GOOGLE_CLOUD_PROJECT": "kitch-project",
+            "GOOGLE_CLOUD_LOCATION": "global",
             "GOOGLE_GENAI_USE_VERTEXAI": "FALSE",
             "GOOGLE_API_KEY": "unrelated-ai-studio-key",
         })
         self.assertTrue(runtime.configured)
-        self.assertEqual(
-            getattr(runtime.service, "_express_mode_api_key", None),
-            "dedicated-express-key",
-        )
+        self.assertEqual(getattr(runtime.service, "_project", None), "kitch-project")
+        self.assertEqual(getattr(runtime.service, "_location", None), "global")
+        self.assertIsNone(getattr(runtime.service, "_express_mode_api_key", None))
+
+    def test_vercel_token_supplier_is_request_scoped(self):
+        supplier = memory_module._VercelOidcTokenSupplier()
+        token = memory_module.begin_memory_auth_scope("signed-vercel-token")
+        try:
+            self.assertEqual(supplier.get_subject_token(None, None), "signed-vercel-token")
+        finally:
+            memory_module.end_memory_auth_scope(token)
 
     def test_specialists_share_memory_tools_but_coordinator_does_not(self):
         from app.agent.core import (

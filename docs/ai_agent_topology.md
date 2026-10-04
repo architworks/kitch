@@ -115,7 +115,7 @@ ingest every chat turn or session. Current-message context is applied directly,
 so a task never depends on an immediate write-then-search round trip.
 
 `InMemoryMemoryService` remains available only as an explicit test or optional
-local-development mode. If `vertex_express` is selected but unavailable, memory
+local-development mode. If `vertex` is selected but unavailable, memory
 tools return an error and agents must not claim that context was saved or
 recalled. Kitch never silently falls back to process-local memory.
 

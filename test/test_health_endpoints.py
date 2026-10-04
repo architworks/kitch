@@ -103,7 +103,7 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 main,
                 "memory_readiness",
-                new=AsyncMock(return_value={"backend": "vertex_express", "state": "degraded"}),
+                new=AsyncMock(return_value={"backend": "vertex", "state": "degraded"}),
             ),
         ):
             response = await main.readiness_check()
@@ -128,7 +128,7 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 main,
                 "memory_readiness",
                 new=AsyncMock(return_value={
-                    "backend": "vertex_express",
+                    "backend": "vertex",
                     "state": "degraded",
                     "durable": True,
                     "diagnostic": "Memory Bank authentication failed.",

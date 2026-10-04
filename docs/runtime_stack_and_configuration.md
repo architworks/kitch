@@ -100,7 +100,17 @@ Table ownership and transaction boundaries are documented once in
 | `GOOGLE_CLOUD_LOCATION` | Required in Vertex AI mode. |
 
 All Kitch agents and the event compactor use the native ADK Gemini adapter.
-There is no OpenAI/LiteLLM runtime path.
+There is no OpenAI/LiteLLM runtime path. The current local and Vercel setup may
+continue using AI Studio mode (`GOOGLE_GENAI_USE_VERTEXAI=FALSE`) with
+`GOOGLE_API_KEY`. Setting `GOOGLE_GENAI_USE_VERTEXAI=TRUE` is an optional move
+of **Gemini inference** to standard Vertex AI and also requires Google Cloud
+Application Default Credentials; it is not required for deployment or for
+Memory Bank.
+
+Gemini inference and household memory have separate authentication paths. A
+deployment may therefore use `GOOGLE_API_KEY` for Gemini while Memory Bank uses
+standard Google Cloud credentials. Locally those credentials come from ADC;
+on Vercel they are short-lived credentials obtained through OIDC federation.
 
 ### Supabase
 
@@ -137,16 +147,22 @@ Household kitchen context uses a configurable ADK memory service:
 
 | Variable | Purpose |
 | --- | --- |
-| `KITCH_MEMORY_SERVICE` | `in_memory` for tests/optional local work, or `vertex_express` for persistent Memory Bank. |
-| `KITCH_MEMORY_BANK_ID` | Bare reasoning-engine ID or full resource name created for Memory Bank. Required for `vertex_express`. |
-| `KITCH_MEMORY_BANK_API_KEY` | Dedicated backend-only Vertex AI Express Mode key. Required for `vertex_express`; never reuse or expose the Gemini `GOOGLE_API_KEY`. |
+| `KITCH_MEMORY_SERVICE` | `in_memory` for tests/optional local work, or `vertex` for persistent Memory Bank. |
+| `KITCH_MEMORY_BANK_ID` | Bare reasoning-engine ID or full resource name created for Memory Bank. Required for `vertex`. |
+| `GOOGLE_CLOUD_PROJECT` | Google Cloud project that owns the Memory Bank. |
+| `GOOGLE_CLOUD_LOCATION` | Memory Bank location, currently `global`. |
+| `GCP_PROJECT_NUMBER` | Numeric Google Cloud project ID used in the Vercel WIF audience. Vercel only. |
+| `GCP_SERVICE_ACCOUNT_EMAIL` | Service account impersonated by Vercel. Vercel only. |
+| `GCP_WORKLOAD_IDENTITY_POOL_ID` | Workload Identity Pool ID. Vercel only. |
+| `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Vercel OIDC provider ID in that pool. Vercel only. |
 
 Local processes default to `in_memory` only when the service variable is
-omitted. Vercel defaults to `vertex_express`, so a deployment missing the ID or
-dedicated key reports degraded memory rather than silently creating a local
-memory store. Set the service variable explicitly in every environment.
+omitted. Vercel defaults to `vertex`, so a deployment missing its Memory Bank
+or federation configuration reports degraded memory rather than silently
+creating a local memory store. Set the service variable explicitly in every
+environment.
 
-With `vertex_express`, Kitch uses `VertexAiMemoryBankService`; selected
+With `vertex`, Kitch uses `VertexAiMemoryBankService`; selected
 specialists submit deliberate natural-language user events and await Google’s
 generation/consolidation result. It does not ingest every turn. Searches and
 writes are scoped to app `kitch` plus the stable household-owner profile UUID.
@@ -167,6 +183,17 @@ environment. `GET /api/health/ready` reports the memory backend, durability,
 state, and a credential-safe diagnostic. The resource starts empty; old
 process-local preferences have no durable source and are intentionally not
 migrated.
+
+For local development, authenticate ADC once before starting Kitch:
+
+```bash
+gcloud auth application-default login
+```
+
+For Vercel, the backend reads the signed `x-vercel-oidc-token` request header,
+exchanges it through the configured Workload Identity Provider, and
+impersonates the configured service account. No long-lived Google credential
+or Memory Bank API key is stored in Vercel.
 
 ## Telemetry
 
@@ -257,7 +284,8 @@ HTTP 401 moves the connection to `reconnect_required`.
 - Backend: Vercel-hosted FastAPI with ADK and MCP client support.
 - Database: Supabase with migrations applied before backend rollout.
 - Household preference durability: Vertex AI Agent Engine Memory Bank through
-  a dedicated Express Mode key; conversations remain intentionally ephemeral.
+  local ADC or Vercel OIDC federation; conversations remain intentionally
+  ephemeral.
 
 Provider outages degrade only that provider; they do not make core Supabase
 readiness fail. Instamart production remains gated by provider approval and

@@ -1,7 +1,8 @@
-"""Create or print Kitch's Vertex AI Express Mode Memory Bank resource.
+"""Create or print Kitch's standard Vertex AI Memory Bank resource.
 
 This creates an empty Agent Engine resource, which provides Memory Bank.  It
-does not upload or deploy the Kitch agent to Agent Engine Runtime.
+does not upload or deploy the Kitch agent to Agent Engine Runtime. Authentication
+uses Google Application Default Credentials.
 """
 
 from __future__ import annotations
@@ -42,11 +43,12 @@ def main() -> None:
             "create an empty Memory Bank."
         )
 
-    api_key = os.environ.get("KITCH_MEMORY_BANK_API_KEY", "").strip()
-    if not api_key:
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global").strip()
+    if not project:
         raise SystemExit(
-            "KITCH_MEMORY_BANK_API_KEY is required and must be a dedicated "
-            "Vertex AI Express Mode API key."
+            "GOOGLE_CLOUD_PROJECT is required. Authenticate first with "
+            "'gcloud auth application-default login'."
         )
 
     try:
@@ -54,7 +56,7 @@ def main() -> None:
     except ImportError:  # Compatibility with older supported 1.x SDK releases.
         import vertexai as agentplatform
 
-    client = agentplatform.Client(api_key=api_key)
+    client = agentplatform.Client(project=project, location=location)
     agent_engine = client.agent_engines.create()
     resource_name = str(agent_engine.api_resource.name)
     memory_bank_id = resource_name.rstrip("/").split("/")[-1]

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 import logging
 import os
@@ -27,8 +28,14 @@ from app.household_config import get_household_profile_id
 
 
 MEMORY_APP_NAME = "kitch"
-MEMORY_BACKENDS = frozenset({"in_memory", "vertex_express"})
-MEMORY_READINESS_TIMEOUT_SECONDS = 8.0
+MEMORY_BACKENDS = frozenset({"in_memory", "vertex"})
+# The first ADC/WIF token exchange after a cold start can take several seconds.
+# Keep the probe bounded without reporting a healthy Memory Bank as degraded.
+MEMORY_READINESS_TIMEOUT_SECONDS = 20.0
+
+_vercel_oidc_token: ContextVar[str | None] = ContextVar(
+    "kitch_vercel_oidc_token", default=None
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +99,87 @@ def _memory_bank_engine_id(resource_id: str) -> str:
     return resource_id.rstrip("/").split("/")[-1]
 
 
-def _build_vertex_express_service(
-    *, agent_engine_id: str, express_mode_api_key: str
-) -> BaseMemoryService:
-    """Build ADK Memory Bank without coupling Gemini's auth mode to memory.
+class _VercelOidcTokenSupplier:
+    """Supply the signed Vercel token associated with the current request."""
 
-    ADK 2.1.0's public constructor accepts a dedicated Express key but drops it
-    when GOOGLE_GENAI_USE_VERTEXAI is false. Kitch intentionally uses AI Studio
-    for Gemini and Vertex Express for memory at the same time. Because the ADK
-    version is pinned, keep the compatibility adjustment isolated here until
-    ADK decouples those credentials.
-    """
+    def get_subject_token(self, context: Any, request: Any) -> str:
+        del context, request
+        token = _vercel_oidc_token.get() or os.environ.get("VERCEL_OIDC_TOKEN", "")
+        if not token:
+            from google.auth.exceptions import RefreshError
+
+            raise RefreshError("The Vercel OIDC token is unavailable for this request.")
+        return token
+
+
+def begin_memory_auth_scope(vercel_oidc_token: str | None) -> Token:
+    """Bind an optional Vercel identity token to the current HTTP request."""
+    return _vercel_oidc_token.set(vercel_oidc_token or None)
+
+
+def end_memory_auth_scope(token: Token) -> None:
+    _vercel_oidc_token.reset(token)
+
+
+def _build_vercel_credentials(
+    *,
+    project_number: str,
+    pool_id: str,
+    provider_id: str,
+    service_account_email: str,
+) -> Any:
+    """Exchange Vercel OIDC for short-lived Google service-account access."""
+    from google.auth import identity_pool
+
+    audience = (
+        "//iam.googleapis.com/projects/"
+        f"{project_number}/locations/global/workloadIdentityPools/"
+        f"{pool_id}/providers/{provider_id}"
+    )
+    return identity_pool.Credentials(
+        audience=audience,
+        subject_token_type="urn:ietf:params:oauth:token-type:jwt",
+        subject_token_supplier=_VercelOidcTokenSupplier(),
+        service_account_impersonation_url=(
+            "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+            f"{service_account_email}:generateAccessToken"
+        ),
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+
+
+def _build_vertex_service(
+    *,
+    project: str,
+    location: str,
+    agent_engine_id: str,
+    credentials_factory: Callable[[], Any] | None = None,
+) -> BaseMemoryService:
+    """Build standard Vertex Memory Bank with ADC or request-scoped WIF."""
     from google.adk.memory import VertexAiMemoryBankService
 
-    service = VertexAiMemoryBankService(
+    if credentials_factory is None:
+        return VertexAiMemoryBankService(
+            project=project,
+            location=location,
+            agent_engine_id=agent_engine_id,
+        )
+
+    class RequestScopedVertexMemoryBankService(VertexAiMemoryBankService):
+        def _get_api_client(self):
+            import vertexai
+
+            return vertexai.Client(
+                project=self._project,
+                location=self._location,
+                credentials=credentials_factory(),
+            ).aio
+
+    return RequestScopedVertexMemoryBankService(
+        project=project,
+        location=location,
         agent_engine_id=agent_engine_id,
-        express_mode_api_key=express_mode_api_key,
     )
-    if getattr(service, "_express_mode_api_key", None) != express_mode_api_key:
-        service._express_mode_api_key = express_mode_api_key
-    return service
 
 
 @dataclass(frozen=True)
@@ -136,13 +204,11 @@ class MemoryRuntime:
             "true",
             "yes",
         }
-        default_backend = (
-            "vertex_express" if is_vercel else "in_memory"
-        )
+        default_backend = "vertex" if is_vercel else "in_memory"
         backend = (configured_backend or default_backend).lower()
         if backend not in MEMORY_BACKENDS:
             diagnostic = (
-                "KITCH_MEMORY_SERVICE must be either in_memory or vertex_express."
+                "KITCH_MEMORY_SERVICE must be either in_memory or vertex."
             )
             return cls(
                 backend=backend or "invalid",
@@ -162,15 +228,43 @@ class MemoryRuntime:
             )
 
         memory_bank_id = str(env.get("KITCH_MEMORY_BANK_ID", "") or "").strip()
-        api_key = str(env.get("KITCH_MEMORY_BANK_API_KEY", "") or "").strip()
+        project = str(
+            env.get("GOOGLE_CLOUD_PROJECT", "")
+            or env.get("GCP_PROJECT_ID", "")
+            or ""
+        ).strip()
+        location = str(env.get("GOOGLE_CLOUD_LOCATION", "") or "").strip()
         missing = [
             name
             for name, value in (
                 ("KITCH_MEMORY_BANK_ID", memory_bank_id),
-                ("KITCH_MEMORY_BANK_API_KEY", api_key),
+                ("GOOGLE_CLOUD_PROJECT", project),
+                ("GOOGLE_CLOUD_LOCATION", location),
             )
             if not value
         ]
+        credentials_factory: Callable[[], Any] | None = None
+        if is_vercel:
+            wif_values = {
+                "GCP_PROJECT_NUMBER": str(env.get("GCP_PROJECT_NUMBER", "") or "").strip(),
+                "GCP_WORKLOAD_IDENTITY_POOL_ID": str(
+                    env.get("GCP_WORKLOAD_IDENTITY_POOL_ID", "") or ""
+                ).strip(),
+                "GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID": str(
+                    env.get("GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID", "") or ""
+                ).strip(),
+                "GCP_SERVICE_ACCOUNT_EMAIL": str(
+                    env.get("GCP_SERVICE_ACCOUNT_EMAIL", "") or ""
+                ).strip(),
+            }
+            missing.extend(name for name, value in wif_values.items() if not value)
+            if not missing:
+                credentials_factory = lambda: _build_vercel_credentials(
+                    project_number=wif_values["GCP_PROJECT_NUMBER"],
+                    pool_id=wif_values["GCP_WORKLOAD_IDENTITY_POOL_ID"],
+                    provider_id=wif_values["GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID"],
+                    service_account_email=wif_values["GCP_SERVICE_ACCOUNT_EMAIL"],
+                )
         if missing:
             diagnostic = "Persistent memory is missing required configuration: " + ", ".join(missing) + "."
             return cls(
@@ -183,10 +277,12 @@ class MemoryRuntime:
 
         try:
             if vertex_factory is None:
-                vertex_factory = _build_vertex_express_service
+                vertex_factory = _build_vertex_service
             service = vertex_factory(
+                project=project,
+                location=location,
                 agent_engine_id=_memory_bank_engine_id(memory_bank_id),
-                express_mode_api_key=api_key,
+                credentials_factory=credentials_factory,
             )
         except Exception as error:  # configuration/dependency errors degrade memory only
             diagnostic = _safe_diagnostic(error)
