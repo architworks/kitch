@@ -35,6 +35,7 @@ from app.supabase_client import (
 from app.checkout_drafts import draft_row_to_review
 from app.providers.registry import provider_registry
 from app.supabase_client import get_provider_checkout_draft
+from app.agent.memory import search_household_memory_tool
 
 # --- Safety Parsing Helper ---
 def _ensure_dict(val):
@@ -380,89 +381,6 @@ def delete_recipe_grocery_plan_tool(plan_id: str) -> Dict[str, Any]:
   """Delete one explicitly identified recipe and its linked agent-generated cart rows."""
   return {"status": "success" if db_delete_recipe_grocery_plan(plan_id) else "not_found"}
 
-def _resolve_memory_service(tool_context: ToolContext = None):
-  mem_svc = None
-  if tool_context:
-    if hasattr(tool_context, "get_invocation_context"):
-      try:
-        mem_svc = tool_context.get_invocation_context().memory_service
-      except Exception:
-        pass
-    elif hasattr(tool_context, "_invocation_context"):
-      try:
-        mem_svc = tool_context._invocation_context.memory_service
-      except Exception:
-        pass
-
-  if not mem_svc:
-    try:
-      from app.agent.core import memory_service as fallback_mem_svc
-      mem_svc = fallback_mem_svc
-    except ImportError:
-      pass
-  return mem_svc
-
-async def set_household_food_preference_tool(preference_text: str, tool_context: ToolContext = None) -> Dict[str, Any]:
-  """
-  Store a household-level food preference, dislike, exclusion, or planning style
-  in intentionally ephemeral, process-local ADK memory as plain text.
-  """
-  preference = str(preference_text or "").strip()
-  if not preference:
-    return {"status": "error", "message": "No preference text was provided."}
-
-  try:
-    from google.adk.events import Event
-    from google.genai.types import Content, Part
-    import time
-
-    mem_svc = _resolve_memory_service(tool_context)
-    if mem_svc:
-      event = Event(
-          id=f"food_pref_{int(time.time())}",
-          content=Content(parts=[Part(text=f"food_preference: {preference}")]),
-          author="system",
-          timestamp=time.time()
-      )
-      await mem_svc.add_events_to_memory(
-          app_name="kitch",
-          user_id="shared_household",
-          events=[event]
-      )
-
-    return {
-      "status": "success",
-      "message": f"Stored household food preference in ephemeral process-local memory: {preference}"
-    }
-  except Exception as e:
-    return {"status": "error", "message": f"Failed to save household food preference: {str(e)}"}
-
-async def search_household_food_preferences_tool(query: str, tool_context: ToolContext = None) -> Dict[str, Any]:
-  """
-  Search household food preferences before recipe and grocery generation.
-  """
-  mem_svc = _resolve_memory_service(tool_context)
-  if not mem_svc:
-    return {"status": "success", "preferences": []}
-
-  try:
-    memory_result = await mem_svc.search_memory(
-        app_name="kitch",
-        user_id="shared_household",
-        query=f"household food preference recipe grocery dislike avoid prefer {query}"
-    )
-    preferences = []
-    for memory in memory_result.memories or []:
-      try:
-        text = memory.content.parts[0].text
-      except Exception:
-        text = ""
-      if text:
-        preferences.append(text)
-    return {"status": "success", "preferences": preferences}
-  except Exception as e:
-    return {"status": "error", "message": f"Failed to search household food preferences: {str(e)}", "preferences": []}
-
 async def apply_zepto_brand_memory_to_cart_items(
   items: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -471,27 +389,19 @@ async def apply_zepto_brand_memory_to_cart_items(
   Instamart never calls this mapper; its dedicated cart agent reads ordering
   preferences directly and reasons over the live MCP catalogue.
   """
-  mem_svc = _resolve_memory_service(None)
   mapped_items: List[Dict[str, Any]] = []
   for item in items:
     item_name = str(item.get("name") or item.get("item") or "").strip()
     mapped = dict(item)
     mapped["search_name"] = item_name
-    if mem_svc and item_name:
-      try:
-        memory_result = await mem_svc.search_memory(
-          app_name="kitch",
-          user_id="shared_household",
-          query=f"preferred brand for {item_name.lower()}",
-        )
-        if memory_result.memories:
-          text = str(memory_result.memories[0].content.parts[0].text or "").strip()
-          if text and len(text) < 160:
-            mapped["search_name"] = text.split(":", 1)[1].strip() if ":" in text else text
-      except Exception:
-        # Preference memory is advisory and ephemeral. Its unavailability must
-        # not become a substitute for or failure of Zepto's durable cart path.
-        pass
+    if item_name:
+      memory_result = await search_household_memory_tool(
+        f"Household brand, pack, or product preference specifically relevant to {item_name}"
+      )
+      if memory_result.get("status") == "success" and memory_result.get("memories"):
+        text = str(memory_result["memories"][0].get("text") or "").strip()
+        if text and len(text) < 160:
+          mapped["search_name"] = f"{item_name} {text}"
     mapped_items.append(mapped)
   return mapped_items
 

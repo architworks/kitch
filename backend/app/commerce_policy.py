@@ -81,8 +81,8 @@ class CommerceToolPolicy:
     CHECKOUT_TOOLS: Set[str] = {"checkout", "confirm_order"}
     AGENT_LOCAL_TOOLS: Set[str] = {
         "read_scoped_native_cart_tool",
-        "search_ordering_preferences_tool",
-        "store_ordering_preference_tool",
+        "search_household_memory_tool",
+        "update_household_memory_tool",
         "record_instamart_cart_result_tool",
     }
 

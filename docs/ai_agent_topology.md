@@ -20,13 +20,15 @@ flowchart TB
     MainRunner --> Coordinator
     Coordinator --> Settings[TOOL: household settings]
     Chef --> MealTools[TOOLS: dated meal-plan read/write/remove]
-    Recipe --> KitchenTools[TOOLS: recipe, pantry, native cart, preference, provider sync]
+    Recipe --> KitchenTools[TOOLS: recipe, pantry, native cart, provider sync]
     Nutrition --> NutritionTools[TOOLS: diary read/log/correct/delete]
     Settings --> Supabase[(Supabase)]
     MealTools --> Supabase
     KitchenTools --> Supabase
     NutritionTools --> Supabase
-    Recipe --> Memory[(Ephemeral ADK text memory)]
+    Chef --> MemoryTools[TOOLS: household memory search/update]
+    Recipe --> MemoryTools
+    MemoryTools --> Memory[(Vertex AI Memory Bank)]
     subgraph VisionRuntime[One-shot non-mutating image runtime]
         Vision[AGENT: vision_scanner]
     end
@@ -36,13 +38,17 @@ flowchart TB
     Vision -->|ambiguous| Clarify[No mutation; ask user]
     Recipe --> Checkout[GroceryCheckoutService]
     Checkout --> InstamartAgent[AGENT: instamart_cart_agent]
+    InstamartAgent --> MemoryTools
     InstamartAgent --> Policy[CommerceToolPolicy]
     Policy --> InstamartMCP[Swiggy Instamart MCP]
     Checkout --> ZeptoAdapter[Zepto adapter]
     ZeptoAdapter --> ZeptoMCP[Zepto MCP]
 ```
 
-Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and services are ordinary Python. Supabase is durable structured state. ADK memory is intentionally process-local flexible text until the Vertex AI memory migration.
+Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and
+services are ordinary Python. Supabase is durable structured state. Vertex AI
+Memory Bank is durable, flexible household context. Conversation sessions
+remain process-local and intentionally temporary.
 
 The three domain specialists run in ADK `task` mode. Every new household chat turn therefore begins at `kitch_coordinator`; a previous specialist cannot retain routing control over the next message. The coordinator can complete its own household-setting operation and then invoke the appropriate specialist in the same turn.
 
@@ -94,7 +100,24 @@ The retired `already_stocked` and `stock_note` snapshots must not return.
 
 ## Memory
 
-Household dietary style, food, allergy, brand, pack, and ordering preferences remain natural-language ADK memory, not profile columns or relational catalogue rules. Agents access it through tools. The current `InMemoryMemoryService` is ephemeral across backend restarts; Vertex AI is the planned durability layer.
+Household dietary style, food, allergy, planning style, brand, pack, and
+ordering context remains natural-language ADK memory, not profile columns or
+relational catalogue rules. Chef Planner, Recipe/Grocery Planner, and the
+Instamart Cart Agent share `search_household_memory_tool` and
+`update_household_memory_tool`. The coordinator routes preference-related work
+instead of owning another memory tool.
+
+In deployed mode those tools use `VertexAiMemoryBankService`, scoped by app
+`kitch` and the stable household-owner profile UUID. Updates are valid ADK
+user-role events and wait for Memory Bank generation/consolidation to finish.
+The agent decides what durable context is worth submitting; Kitch does not
+ingest every chat turn or session. Current-message context is applied directly,
+so a task never depends on an immediate write-then-search round trip.
+
+`InMemoryMemoryService` remains available only as an explicit test or optional
+local-development mode. If `vertex_express` is selected but unavailable, memory
+tools return an error and agents must not claim that context was saved or
+recalled. Kitch never silently falls back to process-local memory.
 
 Structured product state—pantry, meal plans, recipes, grocery rows, nutrition logs and goals, factual household configuration, provider workflow state, and checkout drafts—belongs in Supabase. Memory never substitutes for failed persistence, and Supabase never substitutes for preference memory.
 

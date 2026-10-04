@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
-- **Implementation:** Current trigger model retained; Memory Bank migration pending
+- **Implementation:** Implemented with deliberate event-based Memory Bank writes
 
 ## Context
 
@@ -24,8 +24,8 @@ sessions would still require a reliable definition of when a session ends.
 Preserve the current memory trigger model:
 
 1. The relevant specialist agent interprets the user's request.
-2. If it identifies a durable food or ordering preference, it calls the
-   relevant memory-update tool.
+2. If it identifies durable household kitchen context, a correction, or a
+   request to forget, it calls the shared natural-language memory-update tool.
 3. The tool submits an explicit preference event to the memory service.
 4. The memory service extracts and maintains the resulting memory.
 
@@ -40,12 +40,22 @@ Memory retrieval remains tool-mediated. Agents search preference memory when
 it is relevant to meal planning, recipes, groceries, or provider matching; the
 entire memory corpus is not injected into every prompt.
 
+The shared update tool accepts one self-contained natural-language statement.
+It does not translate the statement into enums, prefixes, or rigid preference
+categories. The initial Memory Bank uses its default broad preference and
+explicit-instruction behavior; custom topics and few-shot extraction rules are
+deferred until observed failures justify them.
+
 ## Consolidation semantics
 
-The current Kitch write path uses `add_events_to_memory`. With
+The Kitch write path uses `add_events_to_memory`. With
 `VertexAiMemoryBankService`, event and session ingestion already use Memory
 Bank generation and consolidation by default. Kitch must not set
 `disable_consolidation=True`.
+
+Explicit writes add `wait_for_completion=True`, which selects the Generate
+Memories path and prevents a Vercel request from depending on a process-local
+background task after it returns.
 
 `enable_consolidation=True` applies specifically to the separate `add_memory`
 API, whose default behavior is direct creation of independent memory entries.

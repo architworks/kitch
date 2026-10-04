@@ -3,7 +3,8 @@ name = "kitch-backend"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-  "google-adk[db]>=2.0.0",
+  "google-adk[db]==2.1.0",
+  "google-cloud-aiplatform[agent-engines]>=1.148.1,<2.0.0",
   "fastapi>=0.100.0",
   "uvicorn>=0.22.0",
   "supabase>=1.0.0",

@@ -2,13 +2,15 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
-- **Implementation:** Pending
+- **Implementation:** Implemented; production resource configuration remains an environment rollout step
 
 ## Context
 
-Kitch currently uses `InMemorySessionService` and `InMemoryMemoryService`.
-Preference memory therefore disappears whenever the backend process restarts.
-The application is intended to run on Vercel rather than Google Agent Runtime.
+Kitch uses `InMemorySessionService` for conversations and a configurable memory
+service for household context. Deployed environments use Vertex AI Memory
+Bank; tests and optional local development may explicitly use
+`InMemoryMemoryService`. The application runs on Vercel rather than Google
+Agent Runtime.
 
 Kitch conversations are expected to be short and do not need to survive a
 deployment or process restart. Preferences do need to survive and remain
@@ -33,6 +35,10 @@ its events to be submitted to Memory Bank.
 - Await successful submission to the Google API before a Vercel request ends.
   Google may perform generation asynchronously, but Kitch must not rely on an
   unawaited process-local background task surviving after the response.
+- Authenticate Memory Bank with a dedicated Vertex AI Express Mode API key,
+  separate from the Google AI Studio key used for Gemini inference.
+- If persistent memory is unavailable, return explicit memory-tool errors and
+  degrade only the memory health component; never fall back silently.
 
 ## How data moves
 

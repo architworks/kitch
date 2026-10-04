@@ -141,13 +141,15 @@ Do not pre-emptively add a conversational `grocery_ordering_agent`, provider
 sub-agent hierarchy, or plugin framework. The rejected topology and the reason
 for rejecting it are documented in `ai_agent_topology.md`.
 
-### OPT-002: Durable ADK sessions and preference memory
+### OPT-002: Observe Memory Bank extraction and retrieval quality
 
-The current `InMemorySessionService` and `InMemoryMemoryService` lose
-conversation and natural-language household preferences on backend restart.
-Migrate to Vertex AI session and memory services before treating the deployment
-as production-durable. Preserve the flexible text-memory model; durability does
-not imply converting preferences into rigid relational rules.
+Persistent household memory is implemented with Vertex AI Memory Bank while
+conversation sessions intentionally remain in `InMemorySessionService`. The
+production environment still needs its dedicated Express Mode key and empty
+Memory Bank resource, followed by preview-environment save/restart/recall,
+correction, forget, and item-isolation tests. Observe real retrieval before
+adding custom topics or few-shot extraction rules; do not pre-emptively replace
+flexible memory with structured preference fields.
 
 ### OPT-003: Auth-backed households
 

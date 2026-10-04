@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, List
@@ -10,10 +9,8 @@ from uuid import uuid4
 
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.apps.app import App
-from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.tools import ToolContext
 from google.adk.tools.mcp_tool.mcp_session_manager import (
     StreamableHTTPConnectionParams,
 )
@@ -30,6 +27,12 @@ from app.commerce_policy import (
 )
 from app.providers.base import ProviderOperationError
 from app.providers.mcp_client import to_plain
+from app.household_config import get_household_profile_id
+from app.agent.memory import (
+    memory_service,
+    search_household_memory_tool,
+    update_household_memory_tool,
+)
 
 
 INSTAMART_AGENT_MCP_TOOLS = [
@@ -99,82 +102,6 @@ def read_scoped_native_cart_tool() -> Dict[str, Any]:
     }
 
 
-async def search_ordering_preferences_tool(
-    native_item_name: str,
-    tool_context: ToolContext | None = None,
-) -> Dict[str, Any]:
-    """Search explicit process-local household ordering preferences."""
-    CommerceToolPolicy.authorize("search_ordering_preferences_tool")
-    from app.agent.core import memory_service
-
-    query = str(native_item_name or "").strip()
-    if not query:
-        return {"status": "success", "preferences": []}
-    result = await memory_service.search_memory(
-        app_name="kitch",
-        user_id="shared_household",
-        query=f"explicit grocery ordering preference for {query}",
-    )
-    preferences: List[str] = []
-    for memory in result.memories or []:
-        try:
-            text = str(memory.content.parts[0].text or "").strip()
-        except Exception:
-            text = ""
-        if text.startswith("ordering_preference:"):
-            preferences.append(text.removeprefix("ordering_preference:").strip())
-        elif text.startswith("food_preference:"):
-            # Existing explicit household preferences remain usable by the
-            # commerce specialist; provider history is still a weaker signal.
-            preferences.append(text.removeprefix("food_preference:").strip())
-    return {"status": "success", "preferences": preferences}
-
-
-async def store_ordering_preference_tool(
-    native_item_name: str,
-    preferred_product: str,
-    explicit_user_statement: str,
-    tool_context: ToolContext | None = None,
-) -> Dict[str, Any]:
-    """Store an explicitly stated product/brand ordering preference ephemerally."""
-    CommerceToolPolicy.authorize("store_ordering_preference_tool")
-    capture = current_commerce_capture()
-    item = str(native_item_name or "").strip()
-    product = str(preferred_product or "").strip()
-    statement = str(explicit_user_statement or "").strip()
-    if (
-        not item
-        or not product
-        or not statement
-        or not capture.user_instruction
-        or statement.casefold() not in capture.user_instruction.casefold()
-    ):
-        return {
-            "status": "error",
-            "message": "An explicit preference from the current user instruction is required.",
-        }
-    from app.agent.core import memory_service
-
-    event = Event(
-        id=f"ordering_pref_{uuid4()}",
-        content=Content(
-            parts=[Part(text=f"ordering_preference: {item}: {product}")]
-        ),
-        author="system",
-        timestamp=time.time(),
-    )
-    await memory_service.add_events_to_memory(
-        app_name="kitch",
-        user_id="shared_household",
-        events=[event],
-    )
-    return {
-        "status": "success",
-        "memory": "ephemeral_process_local",
-        "message": f"Stored the explicit ordering preference for {item}.",
-    }
-
-
 def record_instamart_cart_result_tool(
     matches: List[Dict[str, Any]],
     unresolved_items: List[Dict[str, Any]],
@@ -237,7 +164,7 @@ class InstamartCartAgentService:
                 status_code=422,
             )
 
-        from app.agent.core import configured_llm, memory_service
+        from app.agent.core import configured_llm
 
         capture = CommerceRunCapture(
             native_items=[dict(item) for item in native_items],
@@ -274,10 +201,11 @@ class InstamartCartAgentService:
                 "WORKFLOW:\n"
                 "1. Call read_scoped_native_cart_tool. Use exactly its selected address and native items.\n"
                 "2. Call get_addresses and verify that address exists. Never select or mutate an address.\n"
-                "3. For every native item, call search_ordering_preferences_tool. Explicit household preference "
-                "is the strongest signal. Call your_go_to_items as a weaker purchase-history signal. Do not turn "
-                "your own choice into a stored preference. Store a preference only if the current user instruction "
-                "explicitly states one.\n"
+                "3. Consult household memory when durable kitchen or ordering context could materially improve a "
+                "match. Context explicitly stated in the current request is strongest; apply it directly. Treat "
+                "your_go_to_items as a weaker history signal. Preserve durable user-stated context, corrections, "
+                "and requests to forget in natural language, but never turn provider history or your own selection "
+                "into household memory. A memory error must not be described as a successful save or recall.\n"
                 "4. Search the selected address catalogue. Reformulate an item's search at most three times. Treat "
                 "multiple results as normal: choose the best reasonable orderable match. Interpret dozen, 12 pieces, "
                 "2 x 6, 6 x 2, trays, bundles, weights, and volumes semantically. Rank by explicit preference, product "
@@ -298,8 +226,8 @@ class InstamartCartAgentService:
             ),
             tools=[
                 read_scoped_native_cart_tool,
-                search_ordering_preferences_tool,
-                store_ordering_preference_tool,
+                search_household_memory_tool,
+                update_household_memory_tool,
                 record_instamart_cart_result_tool,
                 toolset,
             ],
@@ -314,9 +242,10 @@ class InstamartCartAgentService:
         )
         run_id = operation_id or str(uuid4())
         session_id = f"instamart_cart_{run_id}"
+        household_user_id = get_household_profile_id()
         await session_service.create_session(
             app_name="kitch_instamart_cart",
-            user_id="shared_household",
+            user_id=household_user_id,
             session_id=session_id,
             state={
                 "selected_address_id": selected_address_id,
@@ -341,7 +270,7 @@ class InstamartCartAgentService:
                 capture=capture,
             ):
                 async for event in runner.run_async(
-                    user_id="shared_household",
+                    user_id=household_user_id,
                     session_id=session_id,
                     new_message=prompt,
                 ):

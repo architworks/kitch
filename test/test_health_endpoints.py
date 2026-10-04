@@ -47,12 +47,14 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(main, "validate_persistence_readiness") as persistence,
             patch.object(main.provider_registry, "readiness", new=AsyncMock()) as providers,
+            patch.object(main, "memory_readiness", new=AsyncMock()) as memory,
         ):
             result = await main.liveness_check()
 
         self.assertEqual(result, {"status": "alive", "service": "kitch-backend"})
         persistence.assert_not_called()
         providers.assert_not_awaited()
+        memory.assert_not_awaited()
 
     async def test_readiness_runs_blocking_persistence_check_off_event_loop(self):
         event_loop_thread = threading.get_ident()
@@ -70,11 +72,17 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "readiness",
                 new=AsyncMock(return_value=providers),
             ),
+            patch.object(
+                main,
+                "memory_readiness",
+                new=AsyncMock(return_value={"backend": "in_memory", "state": "ready"}),
+            ),
         ):
             result = await main.readiness_check()
 
         self.assertEqual(result["status"], "ready")
         self.assertEqual(result["providers"], providers)
+        self.assertEqual(result["memory"]["state"], "ready")
         self.assertTrue(worker_threads)
         self.assertNotEqual(worker_threads[0], event_loop_thread)
 
@@ -92,12 +100,45 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "readiness",
                 new=AsyncMock(return_value=[]),
             ),
+            patch.object(
+                main,
+                "memory_readiness",
+                new=AsyncMock(return_value={"backend": "vertex_express", "state": "degraded"}),
+            ),
         ):
             response = await main.readiness_check()
 
         self.assertEqual(response.status_code, 503)
         payload = json.loads(response.body)
         self.assertEqual(payload["detail"]["code"], "persistence_unavailable")
+
+    async def test_memory_failure_is_degraded_without_making_core_unready(self):
+        with (
+            patch.object(
+                main,
+                "validate_persistence_readiness",
+                return_value={"status": "ready"},
+            ),
+            patch.object(
+                main.provider_registry,
+                "readiness",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                main,
+                "memory_readiness",
+                new=AsyncMock(return_value={
+                    "backend": "vertex_express",
+                    "state": "degraded",
+                    "durable": True,
+                    "diagnostic": "Memory Bank authentication failed.",
+                }),
+            ),
+        ):
+            result = await main.readiness_check()
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["memory"]["state"], "degraded")
 
 
 class ProviderReadinessTimeoutTests(unittest.IsolatedAsyncioTestCase):

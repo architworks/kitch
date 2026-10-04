@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service, vision_runner
+from app.agent.memory import memory_readiness
 from app.agent.structured_models import PhotoAnalysis
 from app.agent.tools import apply_zepto_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
@@ -1032,16 +1033,17 @@ async def liveness_check():
 
 @app.get("/api/health/ready")
 async def readiness_check():
-    """Verify core persistence and report provider readiness separately."""
+    """Verify core persistence and report optional components separately."""
     try:
-        persistence, providers = await asyncio.gather(
+        persistence, providers, memory = await asyncio.gather(
             asyncio.to_thread(validate_persistence_readiness),
             provider_registry.readiness(),
+            memory_readiness(),
         )
         return {
             "status": "ready",
             "engine": "google-adk",
-            "memory": "ephemeral-process-local",
+            "memory": memory,
             "persistence": persistence,
             "providers": providers,
         }

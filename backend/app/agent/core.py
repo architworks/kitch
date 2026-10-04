@@ -1,10 +1,18 @@
 # Kitch: ADK 2.0 Multi-Agent Assembly & Session Orchestrator Core
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load gitignored backend configuration before constructing model or memory
+# services imported below.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(_BACKEND_DIR / ".env.local")
+load_dotenv(_BACKEND_DIR / ".env")
+
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.memory import InMemoryMemoryService
 from google.adk.apps.app import App, EventsCompactionConfig
 from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models.google_llm import Gemini
@@ -34,8 +42,6 @@ from .tools import (
     list_recipe_grocery_plans_tool,
     update_recipe_grocery_plan_tool,
     delete_recipe_grocery_plan_tool,
-    set_household_food_preference_tool,
-    search_household_food_preferences_tool,
     get_current_datetime,
     list_grocery_providers_tool,
     get_grocery_checkout_status_tool,
@@ -43,15 +49,15 @@ from .tools import (
     update_household_configuration_tool,
     update_nutrition_targets_tool,
 )
+from .memory import (
+    memory_service,
+    search_household_memory_tool,
+    update_household_memory_tool,
+)
 from .structured_models import PhotoAnalysis, PantryReconciliation
 from .tool_error_policy import recover_unknown_tool_error
 from google.adk.agents.callback_context import CallbackContext
 from typing import Optional
-
-from dotenv import load_dotenv
-
-# 0. Load model provider credentials dynamically from gitignored .env file
-load_dotenv()
 
 from app.telemetry import configure_adk_tracing
 
@@ -78,11 +84,9 @@ def build_llm_model():
 
 configured_llm = build_llm_model()
 
-# 1. Intentionally ephemeral ADK services.
-# These are process-local until the Vertex AI migration and must never be used
-# as substitutes for structured Supabase state.
+# 1. Chat sessions intentionally remain process-local. Household memory uses
+# the configured memory backend and never substitutes for Supabase state.
 session_service = InMemorySessionService()
-memory_service = InMemoryMemoryService()
 
 # 1.5 Datetime Injection Callback
 def inject_datetime_callback(callback_context: CallbackContext) -> Optional[Content]:
@@ -138,7 +142,7 @@ chef_planner = LlmAgent(
         "1. Meal plans store dynamically generated MEAL NAME STRINGS only. Do not pull from a static database, and do not use recipe IDs (like b1, d2).\n"
         "2. Resolve every scope to exact ISO dates before reading or writing: tomorrow is tomorrow_date; this week is current_date through current_week_end; next week/the next week/coming week is planning_week_start through planning_week_end; next N days starts current_date unless the user says starting tomorrow.\n"
         "3. A bare weekday refers to that weekday in the visible planner week when supplied. Otherwise use the nearest non-past occurrence. State the resolved exact date in the response.\n"
-        "4. Before creating or suggesting meals, search household preference memory. If the user explicitly states a new dietary preference, exclusion, or planning style, store that natural-language statement in memory before continuing.\n"
+        "4. Use household memory when earlier kitchen preferences or constraints could materially improve this task. Preserve durable context, corrections, and requests to forget in the user's natural language. Do not remember one-off requests or deterministic application state. Apply context stated in the current request directly rather than depending on an immediate read after saving it. If memory is unavailable, continue the planning task when possible but do not claim that context was saved or recalled.\n"
         "5. For a NEW plan, call replace_meal_plan_range_tool with exactly one plan object per date and breakfast, lunch, and dinner meal-name strings. It replaces only that explicit range; never rewrite another week. Do not plan snacks.\n"
         "6. For a targeted change, first call get_meal_schedule_tool for the exact affected range, then call update_dated_meals_tool once with all requested edits. Never use a range replacement for a narrow edit.\n"
         "7. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
@@ -151,8 +155,8 @@ chef_planner = LlmAgent(
         replace_meal_plan_range_tool,
         update_dated_meals_tool,
         remove_future_meals_tool,
-        set_household_food_preference_tool,
-        search_household_food_preferences_tool,
+        update_household_memory_tool,
+        search_household_memory_tool,
         get_current_datetime
     ],
     mode="task",
@@ -235,18 +239,17 @@ recipe_grocery_planner = LlmAgent(
         "- Household members: {app:household_members?}\n"
         "- Household size: {app:household_size?}\n\n"
         "CRITICAL RULES:\n"
-        "1. Before generating recipes or recipe-derived groceries, call 'search_household_food_preferences_tool' with the user's request and apply any household preferences, dislikes, exclusions, or planning styles you find.\n"
-        "2. If the user states a new household food preference or exclusion (for example 'we prefer not to use tofu', 'avoid mushrooms', or 'prefer high protein dinners'), call 'set_household_food_preference_tool' to store it in explicitly ephemeral process-local ADK memory. If the same message also asks for a recipe or groceries, store the preference first, then continue. Never describe this memory as durable.\n"
-        "3. Resolve only a recipe or meal-based request's scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
-        "4. For every recipe or recipe-derived grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
-        "5. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
-        "6. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
-        "7. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
-        "8. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
-        "9. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
-        "10. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
-        "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
-        "12. Never describe a recipe artifact or cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
+        "1. Use household memory when earlier kitchen context could materially affect recipes, groceries, pantry work, or product matching. Preserve durable household preferences, constraints, corrections, and requests to forget as self-contained natural-language statements. Do not remember transient requests, deterministic app state, provider history, or choices you inferred yourself. Apply context stated in the current message directly without relying on an immediate memory read after writing it.\n"
+        "2. Resolve only a recipe or meal-based request's scope to exact ISO dates. Examples: tonight's dinner, tomorrow's meals, next 2 days, a named saved meal, or a standalone dish like paneer butter masala. For schedule-based scopes, call 'get_meal_schedule_tool' with the exact start and end date and select only those slots. Do not process another week.\n"
+        "3. For every recipe or recipe-derived grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
+        "4. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
+        "5. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
+        "6. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
+        "7. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
+        "8. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
+        "9. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
+        "10. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
+        "11. Never describe memory, a recipe artifact, or a cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
     tools=[
         get_meal_schedule_tool,
@@ -258,8 +261,8 @@ recipe_grocery_planner = LlmAgent(
         list_recipe_grocery_plans_tool,
         update_recipe_grocery_plan_tool,
         delete_recipe_grocery_plan_tool,
-        set_household_food_preference_tool,
-        search_household_food_preferences_tool,
+        update_household_memory_tool,
+        search_household_memory_tool,
         get_pantry_state_tool,
         patch_pantry_tool,
         replace_pantry_tool,

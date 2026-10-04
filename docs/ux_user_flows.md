@@ -448,9 +448,11 @@ Example prompts:
 
 1. User states a preference naturally.
 2. Kitch identifies the target item or category.
-3. Kitch stores the preference in explicitly ephemeral household memory.
-4. Kitch confirms the preference in plain language without implying that it
-   survives a backend restart.
+3. The relevant specialist submits the complete natural-language statement to
+   persistent household memory when it represents durable context.
+4. Kitch confirms the update only after Memory Bank completes extraction and
+   consolidation. If memory is unavailable, it says the context was not saved
+   while leaving unrelated planning and grocery functions usable.
 5. Future grocery preparation uses the preference.
 
 ### Functional UX Requirements
@@ -460,6 +462,8 @@ Example prompts:
 - If a preference is ambiguous, Kitch should ask what item or category it applies to.
 - Users should be able to overwrite or remove old preferences.
 - Preferences should influence grocery preparation without requiring strict form entry.
+- Corrections and requests to forget should replace or remove conflicting
+  context instead of accumulating prefix-tagged facts.
 
 ---
 
@@ -618,7 +622,6 @@ These are future product areas:
 
 - Multi-household registration.
 - Auth-backed household membership.
-- Persistent Vertex AI memory.
 - Blinkit MCP cart insertion.
 - Richer provider substitution review.
 

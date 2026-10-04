@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
-- **Implementation:** Existing boundary retained; durable memory migration pending
+- **Implementation:** Implemented with shared Memory Bank tools
 
 ## Context
 
@@ -20,8 +20,9 @@ payments, and orders.
 ## Decision
 
 Natural-language food, dietary, allergy, planning-style, brand, pack, and
-ordering preferences belong to the ADK memory service. Agents access that
-memory through explicit search and update tools.
+ordering preferences belong to the ADK memory service. Chef Planner,
+Recipe/Grocery Planner, and Instamart Cart Agent access it through the shared
+`search_household_memory_tool` and `update_household_memory_tool` capabilities.
 
 Deterministic application state belongs to Supabase. Profile rows must not be
 used as a second preference store or as a temporary persistence substitute for

@@ -10,6 +10,7 @@ from uuid import uuid4
 from google.genai.types import Content, Part
 
 from app.agent.structured_models import PantryReconciliation
+from app.household_config import get_household_profile_id
 from app.supabase_client import (
     apply_pantry_inventory_change,
     apply_pantry_cart_reconciliation,
@@ -86,7 +87,7 @@ async def _reconcile_with_agent(
     )
     text = ""
     async for event in pantry_reconciliation_runner.run_async(
-        user_id="shared_household", session_id=session_id,
+        user_id=get_household_profile_id(), session_id=session_id,
         new_message=Content(parts=[Part(text=prompt)], role="user"),
     ):
         if event.is_final_response() and event.content and event.content.parts:

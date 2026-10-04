@@ -24,7 +24,8 @@ The current design separates responsibilities deliberately:
   reversible cart preparation.
 - Python tools perform deterministic side effects.
 - Supabase stores authoritative structured product state.
-- ADK memory stores explicitly ephemeral household food and brand preferences.
+- Vertex AI Memory Bank stores selected natural-language household kitchen
+  context; ADK conversation sessions remain process-local.
 - The commerce layer translates Kitch's native cart into provider carts through
   provider-specific execution behind one checkout service.
 
@@ -34,7 +35,8 @@ flowchart LR
     API -->|agent requests| AgentRuntime[Gemini + ADK head-chef runtime]
     AgentRuntime --> Tools[Application tool layer]
     Tools --> Supabase[(Supabase PostgreSQL)]
-    AgentRuntime --> Memory[Ephemeral ADK sessions and text memory]
+    AgentRuntime --> Sessions[Process-local ADK sessions]
+    AgentRuntime --> Memory[Vertex AI Memory Bank]
 
     API --> Checkout[GroceryCheckoutService]
     AgentRuntime -->|authorized reversible sync| Checkout
@@ -69,11 +71,20 @@ Supabase stores meal plans, recipe+grocery artifacts, pantry stock, native cart 
 
 **Why:** these are deterministic records that the UI must render and users must be able to review. They should not live only in chat memory.
 
-### ADK memory stores flexible preference text
+### Memory Bank stores flexible household context
 
-Household food and brand preferences are stored in ADK memory as flexible text.
+Household food, allergy, planning-style, brand, pack, and ordering context is
+stored as flexible natural language in Vertex AI Memory Bank. Specialists
+decide when a statement is durable and use shared search/update tools. The
+memory service performs semantic retrieval and consolidates corrections or
+forget requests. It does not receive every turn or full chat sessions.
 
 **Why:** preferences are naturally conversational and can be fuzzy. A strict schema would prematurely constrain how users express preferences and how agents apply them.
+
+Memory Bank is advisory, household-scoped context. Supabase remains the source
+of truth for every exact plan, pantry row, recipe, cart, nutrition record,
+provider draft, payment, and order. A memory outage degrades personalization,
+not core application readiness.
 
 ### Provider sync is backend-authorized and provider-specific
 
@@ -429,7 +440,8 @@ behavior are documented in `ux_user_flows.md`, not duplicated here.
 
 ## Known Boundaries
 
-- Local backend restarts clear ephemeral ADK sessions and preferences.
+- Backend restarts clear short-lived ADK conversation sessions. With
+  `vertex_express` configured, selected household memories remain durable.
 - Apply versioned Supabase migrations before starting FastAPI in every
   environment. The bootstrap schema must remain synchronized with them.
 - Provider OAuth and production approval remain externally controlled.

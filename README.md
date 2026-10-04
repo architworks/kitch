@@ -21,8 +21,8 @@ auth-backed household registration is deferred.
 - Prepares Zepto or Swiggy Instamart carts for review without allowing chat to
   place an order.
 - Logs and corrects personal nutrition entries from text or meal photos.
-- Remembers natural-language food and brand preferences for the lifetime of the
-  current backend process.
+- Remembers selected natural-language household kitchen context persistently
+  through Vertex AI Memory Bank.
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,8 @@ flowchart LR
 2. FastAPI exposes the browser API, invokes the Gemini/Google ADK runtime,
    accesses Supabase, and guards provider operations.
 3. Supabase stores structured product state behind backend-only RLS.
-4. ADK session and preference memory is currently process-local.
+4. ADK chat sessions are process-local; selected household context is stored in
+   Vertex AI Memory Bank when `vertex_express` is configured.
 5. A provider-neutral checkout service prepares and revalidates external carts;
    final ordering remains an explicit UI-only action.
 
@@ -85,9 +86,10 @@ Ensure the prototype household profiles exist, or update their IDs in:
 
 ### 3. Configure and start the backend
 
-Copy `backend/.env.example` to `backend/.env`, then set the Supabase and Gemini
-credentials. The full variable reference—including
-provider OAuth and telemetry—is in
+Copy `backend/.env.example` to `backend/.env.local` (or `backend/.env`), then
+set the Supabase and Gemini credentials. Persistent household memory also needs
+a dedicated Vertex AI Express Mode key and Memory Bank ID. The full variable
+reference—including Memory Bank setup, provider OAuth, and telemetry—is in
 `docs/runtime_stack_and_configuration.md`.
 
 ```bash

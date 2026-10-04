@@ -13,9 +13,10 @@ images, updating pantry state, requesting grocery lists, and checking whether
 the app remembers preferences.
 
 Structured product state is durable only after FastAPI receives a confirmed
-Supabase result. Food and brand preferences currently use intentionally
-ephemeral process-local ADK memory, so they are tested for same-process recall,
-not persistence across a backend restart.
+Supabase result. Selected natural-language household context is durable only
+after the specialist receives a successful Vertex AI Memory Bank tool result.
+Chat sessions remain process-local and are not required for cross-restart
+preference recall.
 
 ## Artifact Reporting Standard
 
@@ -78,10 +79,10 @@ Before running the scenarios, prepare a consistent household test context.
 - Confirm `/api/health/live` responds immediately, then confirm
   `/api/health/ready` reports ready before starting. Readiness verifies the
   elevated backend credential, required tables/columns, and configured
-  household profile while reporting provider degradation separately.
+  household profile while reporting provider and memory degradation separately.
 - Confirm the app can read and write user profile, meal plan, pantry, food
-  diary, grocery, and recipe-artifact state. Preference memory is explicitly
-  ephemeral in this release.
+  diary, grocery, and recipe-artifact state. Before preference scenarios,
+  confirm readiness reports memory backend `vertex_express` and state `ready`.
 - Use a stable local date and timezone in the artifact. Relative-date scenarios
   must record the actual calendar date used during the test.
 - Use known image fixtures for image scenarios and link or copy them into the
@@ -196,9 +197,10 @@ explicitly requests next week.
 - Observe: Meals should be plausibly keto: eggs, avocado, paneer, chicken,
   fish, tofu, salads, low-carb vegetables, nuts, chia, or similar items. Heavy
   carb staples should not dominate the plan.
-- Persistence and recall check: Confirm the weekly plan and structured diet
-  profile remain after refresh and backend restart. Free-form food and brand
-  preferences remain separately tested as process-local memory in Section 9.
+- Persistence and recall check: Confirm the weekly plan remains after refresh
+  and the keto statement is absent from profile columns. Restart the backend,
+  request a later meal suggestion, and confirm persistent household memory
+  still guides the response.
 - Pass criteria: Complete keto plan is saved and later behavior respects keto.
 - Fail criteria: Incomplete plan, non-keto plan, preference not remembered, or
   old cuisine plan remains.
@@ -266,14 +268,14 @@ explicitly requests next week.
 - Isolation check: Provider authentication and the checkout UI's selected
   ordering app remain unchanged.
 - Persistence check: Refresh the page and confirm factual configuration,
-  nutrition goals, and provider workflow state remain. Confirm the dietary
-  preference remains usable during the current backend process but is honestly
-  lost after a backend restart while memory is intentionally process-local.
+  nutrition goals, and provider workflow state remain. Restart the backend and
+  confirm the dietary preference remains usable through Memory Bank even
+  though the chat session itself is gone.
 - Pass criteria: Each value affects its owning domain, no semantic preference is
   written to `profiles`, and no unrelated state changes.
 - Fail criteria: A preference appears in profile storage, stale UI state
-  overwrites confirmed data, the agent claims ephemeral memory is durable, or a
-  setting change alters provider authentication/selection.
+  overwrites confirmed data, the preference is lost after restart, or a setting
+  change alters provider authentication/selection.
 
 ## Section 2: Plan Modification
 
@@ -761,7 +763,7 @@ automated or browser-test order against production.
   eggs. The agent should choose the best reasonable option—not 12 packs—and
   persist requested quantity, selected pack, fulfilled quantity, excess,
   preference source, alternatives, confidence, and reasoning.
-- Preference check: Explicit process-local preferences such as Amul milk or
+- Preference check: Explicit persistent preferences such as Amul milk or
   Nutralite butter outrank `your_go_to_items` history. History may guide a
   selection only when no explicit preference exists. Agent selections must
   never silently become preferences.
@@ -851,19 +853,20 @@ automated or browser-test order against production.
   blindly retried, a changed snapshot orders, partial outcomes are flattened,
   or the UI reports success without confirmed backend/provider state.
 
-## Section 9: Ephemeral Preference Recall
+## Section 9: Persistent Household Memory
 
-These scenarios verify that brand and category preferences affect later grocery
-or delivery-preparation behavior within the running backend process. They do
-not claim persistence across a backend restart until Vertex AI memory is used.
+These scenarios verify deliberate agent-triggered Memory Bank generation,
+semantic recall, correction, forgetting, scope isolation, and graceful
+degradation. They do not require conversation-session continuity.
 
 ### Scenario 9.1 - Bread Brand Preference
 
 - Prompt/action: "For bread, always get Baker's Dozen whole wheat"
 - Expected behavior: The assistant stores a bread brand/type preference.
 - Observe: The response should acknowledge the specific brand and bread type.
-- Recall check: Later ask for or preview a bread grocery item in the same
-  backend process and confirm the preference is recalled or applied.
+- Recall check: Restart the backend, begin a new conversation, then ask for or
+  preview a bread grocery item and confirm the preference is recalled or
+  applied.
 - Pass criteria: Bread preference is remembered and used in later grocery or
   provider payload preparation.
 - Fail criteria: Preference not acknowledged, not remembered, or later bread
@@ -877,8 +880,8 @@ not claim persistence across a backend restart until Vertex AI memory is used.
   grocery guidance respects it.
 - Observe: The response should acknowledge cereals and cookies as excluded and
   the allowed categories as dairy, fruits, and vegetables.
-- Recall check: Later grocery list requests in the same backend process should
-  not include cereals or cookies unless the user explicitly overrides the
+- Recall check: After a backend restart, later grocery list requests should not
+  include cereals or cookies unless the user explicitly overrides the
   preference.
 - Pass criteria: The exclusion is remembered and applied.
 - Fail criteria: Preference not saved, ignored later, or grocery lists include
@@ -889,12 +892,52 @@ not claim persistence across a backend restart until Vertex AI memory is used.
 - Prompt/action: "I prefer Amul butter over any other brand"
 - Expected behavior: The assistant stores an Amul butter brand preference.
 - Observe: The response should clearly acknowledge Amul butter.
-- Recall check: Later ask for butter or preview a butter grocery item in the
-  same backend process and confirm Amul is recalled or applied.
+- Recall check: Restart the backend, then ask for butter or preview a butter
+  grocery item and confirm Amul is recalled or applied.
 - Pass criteria: Amul butter preference is remembered and used in later grocery
   or provider payload preparation.
 - Fail criteria: Preference not acknowledged, not remembered, or provider
   payload/grocery preview uses generic butter without applying the preference.
+
+### Scenario 9.4 - Correct a Preference Without Applying the Contradiction
+
+- Prompt/action: After 9.3, say "Actually, for butter prefer Nutralite instead
+  of Amul."
+- Expected behavior: Kitch confirms the correction only after memory succeeds.
+- Recall check: Restart the backend and request butter in a recipe/grocery or
+  provider-matching flow.
+- Pass criteria: Nutralite governs the later task and the superseded Amul
+  preference is not simultaneously applied.
+- Fail criteria: Both brands are treated as active, the older preference wins,
+  or Kitch claims the correction was saved after a memory error.
+
+### Scenario 9.5 - Forget and Item-Specific Isolation
+
+- Prompt/action: Store unrelated milk and bread preferences, then ask Kitch to
+  forget only the bread preference.
+- Expected behavior: The natural-language forget request succeeds without
+  deleting unrelated household context.
+- Recall check: Restart the backend. Ask separately about bread, milk, and an
+  unrelated product such as butter.
+- Pass criteria: Bread no longer uses the forgotten preference, milk still uses
+  its own preference, and neither product's memory leaks into butter matching.
+- Fail criteria: Forgotten context remains active, unrelated memory disappears,
+  or one product's preference is applied to another product.
+
+### Scenario 9.6 - Memory Failure Does Not Disable Core Kitch
+
+- Setup: In an isolated test deployment, configure an invalid Express Mode key
+  or simulate Memory Bank timeout/unavailability.
+- Prompt/action: Ask Kitch to remember a durable preference, then perform a
+  Supabase-backed pantry read and dated meal-plan read.
+- Expected behavior: The memory operation explicitly says the context was not
+  saved or recalled. Readiness reports memory `degraded`, uses no in-memory
+  fallback, and still reports core status `ready` when Supabase is healthy.
+- Pass criteria: No false memory-success claim appears and the pantry/meal-plan
+  operations remain usable.
+- Fail criteria: Kitch silently stores the preference process-locally, exposes
+  credentials/raw memory in diagnostics, claims success, or takes down core
+  product functionality.
 
 ## Section 10: Datetime Awareness
 
@@ -999,7 +1042,7 @@ Close every artifact with a functional summary.
 - Grocery generation:
 - Pantry-aware groceries:
 - Provider checkout integration:
-- Ephemeral preference recall:
+- Persistent household memory:
 - Datetime awareness:
 
 ## Regressions Found

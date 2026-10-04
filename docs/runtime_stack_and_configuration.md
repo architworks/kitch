@@ -16,6 +16,7 @@ not describe component flows or agent topology.
 | Frontend | Next.js 16.2.6, React 19.2.4, ESLint 9 | `frontend/` |
 | API | FastAPI, Uvicorn, Pydantic | `backend/app/main.py` |
 | Agent runtime | Google ADK 2.x with native Gemini models | `backend/app/agent/` |
+| Household memory | Vertex AI Agent Engine Memory Bank, or process-local test mode | `backend/app/agent/memory.py` |
 | Database | Supabase PostgreSQL | `backend/database/` |
 | Provider transport | MCP SDK, HTTPX, provider adapters | `backend/app/providers/` |
 | Token protection | `cryptography` Fernet | `backend/app/providers/credential_crypto.py` |
@@ -63,9 +64,9 @@ and migrations are both deployment sources and must remain synchronized.
 serve requests. `GET /api/health/ready` verifies elevated database access,
 required tables and columns, and the configured household profile. Missing
 migrations are startup or readiness failures; Kitch does not substitute local
-persistence. Provider states are reported by readiness but do not make core
-Kitch unready. Blocking database validation runs off the event loop, and live
-provider probes have a bounded timeout.
+persistence. Provider and memory states are reported independently by
+readiness but do not make core Kitch unready. Blocking database validation runs
+off the event loop, and live provider and memory probes have bounded timeouts.
 
 Current structured tables are:
 
@@ -128,20 +129,53 @@ households are not implemented yet.
 
 ## Session and memory services
 
-Local development uses:
+Chat sessions use `InMemorySessionService` in every environment. A backend
+restart can therefore end a short conversation, by design; Kitch does not use
+Agent Platform Sessions or submit whole sessions to memory.
 
-- `InMemorySessionService`
-- `InMemoryMemoryService`
+Household kitchen context uses a configurable ADK memory service:
 
-Backend restarts therefore clear conversations and natural-language household
-preferences. Structured product state remains in Supabase. The planned cloud
-replacement is `VertexAISessionService` plus `VertexAIMemoryBank`; this changes
-durability, not the agent topology or the flexible-text memory model.
+| Variable | Purpose |
+| --- | --- |
+| `KITCH_MEMORY_SERVICE` | `in_memory` for tests/optional local work, or `vertex_express` for persistent Memory Bank. |
+| `KITCH_MEMORY_BANK_ID` | Bare reasoning-engine ID or full resource name created for Memory Bank. Required for `vertex_express`. |
+| `KITCH_MEMORY_BANK_API_KEY` | Dedicated backend-only Vertex AI Express Mode key. Required for `vertex_express`; never reuse or expose the Gemini `GOOGLE_API_KEY`. |
+
+Local processes default to `in_memory` only when the service variable is
+omitted. Vercel defaults to `vertex_express`, so a deployment missing the ID or
+dedicated key reports degraded memory rather than silently creating a local
+memory store. Set the service variable explicitly in every environment.
+
+With `vertex_express`, Kitch uses `VertexAiMemoryBankService`; selected
+specialists submit deliberate natural-language user events and await Google’s
+generation/consolidation result. It does not ingest every turn. Searches and
+writes are scoped to app `kitch` plus the stable household-owner profile UUID.
+No automatic fallback to process-local memory occurs when persistent memory is
+misconfigured or unavailable. Memory tools report the failure explicitly while
+Supabase-backed features remain usable.
+
+Create or identify the empty Memory Bank once (this does not deploy an agent
+runtime):
+
+```bash
+cd backend
+venv/bin/python scripts/setup_memory_bank.py --create
+```
+
+Copy the printed `KITCH_MEMORY_BANK_ID` into the local or Vercel backend
+environment. `GET /api/health/ready` reports the memory backend, durability,
+state, and a credential-safe diagnostic. The resource starts empty; old
+process-local preferences have no durable source and are intentionally not
+migrated.
 
 ## Telemetry
 
 Tracing is off by default and is initialized programmatically before the ADK
 runner is created.
+
+Memory operations emit only operation type, backend, normalized outcome, and
+latency. API keys, submitted statements, search queries, and returned memory
+facts are never written by Kitch telemetry.
 
 | Variable | Purpose |
 | --- | --- |
@@ -220,10 +254,10 @@ HTTP 401 moves the connection to `reconnect_required`.
 ## Deployment direction
 
 - Frontend: Vercel or equivalent Next.js hosting.
-- Backend: a persistent Python runtime capable of FastAPI, ADK, and MCP client
-  processes.
+- Backend: Vercel-hosted FastAPI with ADK and MCP client support.
 - Database: Supabase with migrations applied before backend rollout.
-- Future session/memory durability: Vertex AI managed services.
+- Household preference durability: Vertex AI Agent Engine Memory Bank through
+  a dedicated Express Mode key; conversations remain intentionally ephemeral.
 
 Provider outages degrade only that provider; they do not make core Supabase
 readiness fail. Instamart production remains gated by provider approval and

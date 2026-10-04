@@ -45,6 +45,20 @@ class CommerceToolPolicyTests(unittest.TestCase):
     def test_cart_write_requires_server_owned_cart_authority(self):
         with self.assertRaises(CommercePolicyError):
             CommerceToolPolicy.authorize("update_cart")
+
+    def test_instamart_memory_tools_require_commerce_run_authority(self):
+        for tool_name in (
+            "search_household_memory_tool",
+            "update_household_memory_tool",
+        ):
+            with self.assertRaises(CommercePolicyError):
+                CommerceToolPolicy.authorize(tool_name)
+            with commerce_request_context(
+                source="ui_sync",
+                permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+                operation_id=f"{tool_name}-1",
+            ):
+                CommerceToolPolicy.authorize(tool_name)
         with commerce_request_context(
             source="chat_sync",
             permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
