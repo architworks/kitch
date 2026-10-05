@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
-from app.supabase_client import save_provider_checkout_draft
+from app.storage import save_provider_checkout_draft
 
 
 def _now_iso() -> str:

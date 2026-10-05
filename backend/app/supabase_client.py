@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -37,12 +38,28 @@ from app.planning_calendar import (
 )
 
 
-load_dotenv()
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(_BACKEND_DIR / ".env.local")
+load_dotenv(_BACKEND_DIR / ".env")
 
-SUPABASE_URL, _SUPABASE_ELEVATED_KEY, SUPABASE_KEY_TYPE = (
-    resolve_supabase_credentials(os.environ)
-)
-supabase: Client = create_client(SUPABASE_URL, _SUPABASE_ELEVATED_KEY)
+DATABASE_BACKEND = str(
+    os.environ.get("KITCH_DATABASE_BACKEND", "supabase") or "supabase"
+).strip().lower()
+if DATABASE_BACKEND == "sqlite":
+    from app.sqlite_supabase import create_sqlite_client
+
+    SUPABASE_URL = ""
+    SUPABASE_KEY_TYPE = "sqlite"
+    supabase = create_sqlite_client()
+elif DATABASE_BACKEND == "supabase":
+    SUPABASE_URL, _SUPABASE_ELEVATED_KEY, SUPABASE_KEY_TYPE = (
+        resolve_supabase_credentials(os.environ)
+    )
+    supabase: Client = create_client(SUPABASE_URL, _SUPABASE_ELEVATED_KEY)
+else:
+    raise PersistenceConfigurationError(
+        "KITCH_DATABASE_BACKEND must be either sqlite or supabase."
+    )
 
 REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "profiles": (
@@ -561,6 +578,29 @@ def get_household_members() -> List[Dict[str, Any]]:
         ({"id": row["id"], "name": row["full_name"]} for row in rows),
         key=lambda row: (row["id"] != owner_id, row["name"].lower()),
     )
+
+
+def get_household_bootstrap() -> Dict[str, Any]:
+    """Return initialization state without requiring a local profile first."""
+    if DATABASE_BACKEND == "sqlite":
+        return supabase.bootstrap_status()
+    members = get_household_members()
+    profile = get_household_profile()
+    return {
+        "initialized": True,
+        "owner_profile_id": profile["id"],
+        "timezone": profile.get("timezone_name"),
+        "members": members,
+    }
+
+
+def bootstrap_household(members: List[str], timezone_name: str) -> Dict[str, Any]:
+    """Create one empty local household from user-entered member names."""
+    if DATABASE_BACKEND != "sqlite":
+        raise PersistenceConfigurationError(
+            "Browser household bootstrap is available only with SQLite storage."
+        )
+    return supabase.bootstrap_household(members, timezone_name)
 
 
 def get_nutrition_targets(user_name: str) -> Dict[str, Any]:
@@ -1871,6 +1911,8 @@ def validate_persistence_readiness() -> Dict[str, Any]:
         raise
     return {
         "status": "ready",
+        "backend": DATABASE_BACKEND,
+        "durable": True,
         "credential_type": SUPABASE_KEY_TYPE,
         "tables": list(REQUIRED_TABLE_COLUMNS),
         "household_profile_id": profile["id"],

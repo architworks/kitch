@@ -10,7 +10,11 @@ It intentionally does not prescribe screens, page layouts, components, or visual
 
 Kitch is an AI-powered household meal planning, nutrition logging, pantry tracking, and grocery preparation assistant.
 
-The app is designed for a shared household where multiple people eat from the same meal plan and pantry, but still track their own personal nutrition. In the current prototype, the household is prefilled with three members: Archit, Anubhav, and Naman.
+The app is designed for a shared household where multiple people eat from the
+same meal plan and pantry but track personal nutrition separately. An empty
+local installation first asks for the household-member names; every entered
+name becomes a member, the first is active by default, and timezone is detected
+from the browser without another field.
 
 Kitch should feel like a practical kitchen companion:
 

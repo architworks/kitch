@@ -19,7 +19,7 @@ from app.providers.credential_crypto import (
     encrypt_provider_secret,
     validate_provider_credential_encryption,
 )
-from app.supabase_client import (
+from app.storage import (
     consume_provider_oauth_flow,
     create_provider_oauth_flow,
     delete_provider_connection,
@@ -308,6 +308,6 @@ class SwiggyOAuthBroker:
 
 def get_provider_checkout_draft_safe(provider: str, environment: str) -> Dict[str, Any] | None:
     # Local import avoids expanding the public persistence surface of the broker.
-    from app.supabase_client import get_provider_checkout_draft
+    from app.storage import get_provider_checkout_draft
 
     return get_provider_checkout_draft(provider, environment)

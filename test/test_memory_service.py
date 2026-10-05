@@ -49,6 +49,29 @@ class ToolContextFixture:
 
 
 class MemoryFactoryTests(unittest.TestCase):
+    def test_database_and_memory_backends_are_independently_selectable(self):
+        vertex_service = CapturingMemoryService()
+
+        for database_backend in ("sqlite", "supabase"):
+            in_memory = memory_module.MemoryRuntime.from_environment({
+                "KITCH_DATABASE_BACKEND": database_backend,
+                "KITCH_MEMORY_SERVICE": "in_memory",
+            })
+            self.assertIsInstance(in_memory.service, InMemoryMemoryService)
+
+            vertex = memory_module.MemoryRuntime.from_environment(
+                {
+                    "KITCH_DATABASE_BACKEND": database_backend,
+                    "KITCH_MEMORY_SERVICE": "vertex",
+                    "KITCH_MEMORY_BANK_ID": "12345",
+                    "GOOGLE_CLOUD_PROJECT": "kitch-project",
+                    "GOOGLE_CLOUD_LOCATION": "global",
+                },
+                vertex_factory=lambda **_: vertex_service,
+            )
+            self.assertIs(vertex.service, vertex_service)
+            self.assertTrue(vertex.durable)
+
     def test_in_memory_is_an_explicit_non_durable_mode(self):
         runtime = memory_module.MemoryRuntime.from_environment({
             "KITCH_MEMORY_SERVICE": "in_memory",

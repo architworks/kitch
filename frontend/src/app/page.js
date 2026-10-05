@@ -830,6 +830,10 @@ export default function Home() {
   const confirmedGroceryItemsRef = useRef([]);
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [liveStateUser, setLiveStateUser] = useState("");
+  const [householdBootstrap, setHouseholdBootstrap] = useState(null);
+  const [onboardingMembers, setOnboardingMembers] = useState([""]);
+  const [isOnboardingSaving, setIsOnboardingSaving] = useState(false);
+  const [onboardingError, setOnboardingError] = useState("");
 
   // UI state variables
   const [chatInput, setChatInput] = useState("");
@@ -965,9 +969,9 @@ export default function Home() {
       }
     }
     if (Array.isArray(data.household_members) && data.household_members.length > 0) {
-      const members = data.household_members.map(member => ({
+      const members = data.household_members.map((member, index) => ({
         value: member.name,
-        label: member.name === DEFAULT_ACTIVE_USER ? `${member.name} (me)` : member.name
+        label: index === 0 ? `${member.name} (me)` : member.name
       }));
       setHouseholdMembers(members);
       setUserProfiles(prev => members.reduce((profiles, member) => ({
@@ -1135,12 +1139,72 @@ export default function Home() {
       await syncLatestRecipeGroceryPlan();
       return data;
     } catch (e) {
-      console.error("Failed to sync live state with Supabase backend", e);
+      console.error("Failed to sync live state with Kitch storage", e);
       return null;
     }
   };
 
+  const applyBootstrappedHousehold = useCallback((data) => {
+    const members = (data?.members || []).map((member, index) => ({
+      value: member.name,
+      label: index === 0 ? `${member.name} (me)` : member.name
+    }));
+    if (members.length > 0) {
+      setHouseholdMembers(members);
+      setHouseholdSize(members.length);
+      setActiveUser(members[0].value);
+      setUserProfiles(members.reduce((profiles, member) => ({
+        ...profiles,
+        [member.value]: { name: member.value, loggedMeals: [] }
+      }), {}));
+    }
+    setHouseholdBootstrap(data);
+  }, []);
+
+  const submitHouseholdOnboarding = async (event) => {
+    event.preventDefault();
+    const members = onboardingMembers.map(name => name.trim()).filter(Boolean);
+    if (members.length === 0) {
+      setOnboardingError("Add at least one household member.");
+      return;
+    }
+    setIsOnboardingSaving(true);
+    setOnboardingError("");
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const response = await fetch(apiUrl("/api/household/bootstrap"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ members, timezone })
+      });
+      await requireSuccessfulResponse(response);
+      applyBootstrappedHousehold(await response.json());
+    } catch (error) {
+      setOnboardingError(apiErrorMessage(error, "Kitch could not create the household."));
+    } finally {
+      setIsOnboardingSaving(false);
+    }
+  };
+
   useEffect(() => {
+    let ignore = false;
+    fetch(apiUrl("/api/household/bootstrap"))
+      .then(requireSuccessfulResponse)
+      .then(response => response.json())
+      .then(data => {
+        if (!ignore) applyBootstrappedHousehold(data);
+      })
+      .catch(error => {
+        if (!ignore) {
+          setOnboardingError(apiErrorMessage(error, "Kitch could not inspect household storage."));
+          setHouseholdBootstrap({ initialized: false, unavailable: true });
+        }
+      });
+    return () => { ignore = true; };
+  }, [applyBootstrappedHousehold]);
+
+  useEffect(() => {
+    if (!householdBootstrap?.initialized) return undefined;
     let ignore = false;
 
     async function loadState() {
@@ -1152,7 +1216,7 @@ export default function Home() {
           await syncLatestRecipeGroceryPlan();
         }
       } catch (e) {
-        console.error("Failed to sync live state with Supabase backend", e);
+        console.error("Failed to sync live state with Kitch storage", e);
       }
     }
 
@@ -1160,7 +1224,7 @@ export default function Home() {
     return () => {
       ignore = true;
     };
-  }, [activeUser, applyLiveState, syncLatestRecipeGroceryPlan]);
+  }, [activeUser, applyLiveState, householdBootstrap?.initialized, syncLatestRecipeGroceryPlan]);
 
   useEffect(() => {
     if (activeTab !== "groceries") return undefined;
@@ -2577,6 +2641,60 @@ export default function Home() {
     }
   };
 
+  if (householdBootstrap === null) {
+    return (
+      <main className="household-onboarding-shell" aria-busy="true">
+        <section className="household-onboarding-card">
+          <Image src="/kitch-chef-hat.svg" alt="" width={64} height={64} aria-hidden="true" />
+          <span className="eyebrow">Preparing Kitch</span>
+          <h1>Opening your kitchen…</h1>
+        </section>
+      </main>
+    );
+  }
+
+  if (!householdBootstrap.initialized) {
+    return (
+      <main className="household-onboarding-shell">
+        <form className="household-onboarding-card" onSubmit={submitHouseholdOnboarding}>
+          <Image src="/kitch-chef-hat.svg" alt="" width={64} height={64} aria-hidden="true" />
+          <span className="eyebrow">Welcome to Kitch</span>
+          <h1>Who shares this kitchen?</h1>
+          <p>Add each household member. The first person will be the default active member.</p>
+          <div className="household-onboarding-members">
+            {onboardingMembers.map((name, index) => (
+              <label key={index}>
+                <span>{index === 0 ? "Your name" : `Member ${index + 1}`}</span>
+                <div>
+                  <input
+                    autoFocus={index === 0}
+                    value={name}
+                    placeholder="Member name"
+                    onChange={event => setOnboardingMembers(current => current.map((item, itemIndex) => (
+                      itemIndex === index ? event.target.value : item
+                    )))}
+                  />
+                  {index > 0 && (
+                    <button type="button" aria-label={`Remove member ${index + 1}`} onClick={() => (
+                      setOnboardingMembers(current => current.filter((_, itemIndex) => itemIndex !== index))
+                    )}>×</button>
+                  )}
+                </div>
+              </label>
+            ))}
+          </div>
+          <button type="button" className="household-onboarding-add" onClick={() => (
+            setOnboardingMembers(current => [...current, ""])
+          )}>＋ Add another member</button>
+          {onboardingError && <p className="household-onboarding-error" role="alert">{onboardingError}</p>}
+          <button type="submit" className="household-onboarding-submit" disabled={isOnboardingSaving || householdBootstrap.unavailable}>
+            {isOnboardingSaving ? "Creating household…" : "Enter Kitch"}
+          </button>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <div id="app">
       {/* SVG gradients for visual nutrition dial */}
@@ -3265,12 +3383,24 @@ export default function Home() {
                 <article className="nutrition-trend-card">
                   <div className="nutrition-card-heading">
                     <h3>Weekly Intake Trend</h3>
-                    <select value={nutritionTrendMetric} onChange={event => setNutritionTrendMetric(event.target.value)} aria-label="Trend metric">
-                      <option value="calories">Calories</option>
-                      <option value="protein">Protein</option>
-                      <option value="carbs">Carbs</option>
-                      <option value="fat">Fats</option>
-                    </select>
+                    <div className="nutrition-trend-metrics" role="group" aria-label="Trend metric">
+                      {[
+                        ["calories", "Calories"],
+                        ["protein", "Protein"],
+                        ["carbs", "Carbs"],
+                        ["fat", "Fats"],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={nutritionTrendMetric === value ? "active" : ""}
+                          aria-pressed={nutritionTrendMetric === value}
+                          onClick={() => setNutritionTrendMetric(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="nutrition-trend-chart">
                     {(nutritionDashboard.days || []).map(day => {

@@ -24,9 +24,10 @@ ordering preferences belong to the ADK memory service. Chef Planner,
 Recipe/Grocery Planner, and Instamart Cart Agent access it through the shared
 `search_household_memory_tool` and `update_household_memory_tool` capabilities.
 
-Deterministic application state belongs to Supabase. Profile rows must not be
-used as a second preference store or as a temporary persistence substitute for
-agent memory.
+Deterministic application state belongs to the selected structured database:
+SQLite for a local single-household installation or Supabase for hosted Kitch.
+Profile rows must not be used as a second preference store or as a temporary
+persistence substitute for agent memory.
 
 Memory may influence an agent's reasoning, but it is not authoritative for
 pantry quantities, plans, carts, nutrition records, payment, or orders.

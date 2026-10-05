@@ -11,7 +11,7 @@ from google.genai.types import Content, Part
 
 from app.agent.structured_models import PantryReconciliation
 from app.household_config import get_household_profile_id
-from app.supabase_client import (
+from app.storage import (
     apply_pantry_inventory_change,
     apply_pantry_cart_reconciliation,
     get_grocery_cart,

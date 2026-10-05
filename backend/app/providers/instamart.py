@@ -19,7 +19,7 @@ from app.providers.base import (
 from app.providers.mcp_client import McpProviderClient, to_plain
 from app.commerce_policy import CommerceToolPolicy
 from app.providers.swiggy_oauth import SwiggyOAuthBroker
-from app.supabase_client import update_provider_connection_status
+from app.storage import update_provider_connection_status
 
 
 REQUIRED_INSTAMART_TOOLS = {

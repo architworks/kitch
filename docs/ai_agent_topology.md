@@ -22,13 +22,13 @@ flowchart TB
     Chef --> MealTools[TOOLS: dated meal-plan read/write/remove]
     Recipe --> KitchenTools[TOOLS: recipe, pantry, native cart, provider sync]
     Nutrition --> NutritionTools[TOOLS: diary read/log/correct/delete]
-    Settings --> Supabase[(Supabase)]
-    MealTools --> Supabase
-    KitchenTools --> Supabase
-    NutritionTools --> Supabase
+    Settings --> Storage[(Selected structured storage)]
+    MealTools --> Storage
+    KitchenTools --> Storage
+    NutritionTools --> Storage
     Chef --> MemoryTools[TOOLS: household memory search/update]
     Recipe --> MemoryTools
-    MemoryTools --> Memory[(Vertex AI Memory Bank)]
+    MemoryTools --> Memory[(Selected ADK memory service)]
     subgraph VisionRuntime[One-shot non-mutating image runtime]
         Vision[AGENT: vision_scanner]
     end
@@ -46,9 +46,10 @@ flowchart TB
 ```
 
 Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and
-services are ordinary Python. Supabase is durable structured state. Vertex AI
-Memory Bank is durable, flexible household context. Conversation sessions
-remain process-local and intentionally temporary.
+services are ordinary Python. SQLite or Supabase provides durable structured
+state. ADK in-memory memory or Vertex AI Memory Bank provides flexible
+household context. Conversation sessions remain process-local and
+intentionally temporary.
 
 The three domain specialists run in ADK `task` mode. Every new household chat turn therefore begins at `kitch_coordinator`; a previous specialist cannot retain routing control over the next message. The coordinator can complete its own household-setting operation and then invoke the appropriate specialist in the same turn.
 
@@ -114,12 +115,16 @@ The agent decides what durable context is worth submitting; Kitch does not
 ingest every chat turn or session. Current-message context is applied directly,
 so a task never depends on an immediate write-then-search round trip.
 
-`InMemoryMemoryService` remains available only as an explicit test or optional
-local-development mode. If `vertex` is selected but unavailable, memory
+`InMemoryMemoryService` is the supported local mode and deliberately loses its
+contents on backend restart. If `vertex` is selected but unavailable, memory
 tools return an error and agents must not claim that context was saved or
 recalled. Kitch never silently falls back to process-local memory.
 
-Structured product state—pantry, meal plans, recipes, grocery rows, nutrition logs and goals, factual household configuration, provider workflow state, and checkout drafts—belongs in Supabase. Memory never substitutes for failed persistence, and Supabase never substitutes for preference memory.
+Structured product state—pantry, meal plans, recipes, grocery rows, nutrition
+logs and goals, factual household configuration, provider workflow state, and
+checkout drafts—belongs in the selected SQLite or Supabase backend. Memory
+never substitutes for failed persistence, and structured persistence never
+substitutes for preference memory.
 
 ## Commerce safety
 

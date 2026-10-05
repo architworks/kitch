@@ -31,8 +31,8 @@ from app.household_config import canonical_user_name
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
 
-# Import direct database CRUD functions
-from app.supabase_client import (
+# Import backend-neutral structured-state operations.
+from app.storage import (
     get_pantry_stock,
     get_macro_diary,
     get_nutrition_dashboard,
@@ -51,6 +51,8 @@ from app.supabase_client import (
     get_latest_recipe_grocery_plan_metadata,
     get_household_profile,
     get_household_members,
+    get_household_bootstrap,
+    bootstrap_household,
     get_nutrition_targets,
     update_nutrition_targets,
     get_selected_grocery_provider,
@@ -211,20 +213,24 @@ async def lifespan(app: FastAPI):
     """
     Refuse startup unless durable storage is correctly configured and ready.
     """
-    await asyncio.to_thread(validate_persistence_readiness)
-    deleted_count = await asyncio.to_thread(delete_past_meal_plans)
-    if deleted_count:
-        print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
-    retention_task = asyncio.create_task(delete_past_meal_plans_at_household_midnight())
+    bootstrap = await asyncio.to_thread(get_household_bootstrap)
+    retention_task = None
+    if bootstrap.get("initialized"):
+        await asyncio.to_thread(validate_persistence_readiness)
+        deleted_count = await asyncio.to_thread(delete_past_meal_plans)
+        if deleted_count:
+            print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
+        retention_task = asyncio.create_task(delete_past_meal_plans_at_household_midnight())
     print("🚀 Starting Kitch ADK 2.0 Backend Gateway Service...")
     try:
         yield
     finally:
-        retention_task.cancel()
-        try:
-            await retention_task
-        except asyncio.CancelledError:
-            pass
+        if retention_task is not None:
+            retention_task.cancel()
+            try:
+                await retention_task
+            except asyncio.CancelledError:
+                pass
         print("💤 Stopped Kitch ADK 2.0 Backend Gateway Service.")
 
 app = FastAPI(
@@ -560,11 +566,33 @@ async def upload_photo_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 3. Live DB Synchronization State Routes
+@app.get("/api/household/bootstrap")
+async def household_bootstrap_status_endpoint():
+    """Report whether the selected persistence backend has a household."""
+    return get_household_bootstrap()
+
+
+@app.post("/api/household/bootstrap")
+async def household_bootstrap_endpoint(payload: Dict[str, Any]):
+    """Initialize one empty local household from explicitly entered members."""
+    members = payload.get("members")
+    timezone_name = str(payload.get("timezone") or "").strip()
+    if not isinstance(members, list):
+        raise HTTPException(status_code=422, detail="members must be an array of names")
+    try:
+        household_zone(timezone_name)
+        return bootstrap_household(members, timezone_name)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ValueError, PersistenceConfigurationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.get("/api/state/{user_name}")
 async def get_state_endpoint(user_name: str):
     """
-    Returns live DB state (Pantry stock levels, Macro diary records, profile settings) 
-    directly from Supabase for initial dashboard sync.
+    Return live pantry, nutrition, planning, and household state from the
+    selected persistence backend for initial dashboard synchronization.
     """
     try:
         active_user = canonical_user_name(user_name)

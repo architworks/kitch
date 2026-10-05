@@ -1,7 +1,8 @@
-# Kitch local household bootstrap configuration.
+# Kitch household identity configuration.
 #
-# Multi-household registration is intentionally deferred. Until then, this file
-# is the single place where the prototype household and its seeded members live.
+# SQLite resolves these values from the locally bootstrapped household. These
+# constants retain the existing hosted Supabase household until registration is
+# made first-class there as well.
 
 HOUSEHOLD_MEMBERS = ("Archit", "Anubhav", "Naman")
 DEFAULT_ACTIVE_USER = HOUSEHOLD_MEMBERS[0]
@@ -23,8 +24,21 @@ USER_ID_MAP = {
 HOUSEHOLD_OWNER_NAME = DEFAULT_ACTIVE_USER
 
 
+def _local_client():
+    import os
+
+    if str(os.environ.get("KITCH_DATABASE_BACKEND", "supabase")).strip().lower() != "sqlite":
+        return None
+    from app.sqlite_supabase import create_sqlite_client
+
+    return create_sqlite_client()
+
+
 def canonical_user_name(user_name: str | None) -> str:
     """Return a configured household member name, falling back to the default."""
+    local = _local_client()
+    if local is not None:
+        return local.canonical_name(user_name)
     if not user_name:
         return DEFAULT_ACTIVE_USER
 
@@ -35,14 +49,24 @@ def canonical_user_name(user_name: str | None) -> str:
 
 def get_user_id(user_name: str | None) -> str:
     """Return the configured prototype UUID for a household member."""
+    local = _local_client()
+    if local is not None:
+        return local.user_id(user_name)
     return USER_ID_MAP[canonical_user_name(user_name)]
 
 
 def get_household_profile_id() -> str:
     """Return the profile id used for shared household resources."""
+    local = _local_client()
+    if local is not None:
+        return local.owner_id()
     return USER_ID_MAP[HOUSEHOLD_OWNER_NAME]
 
 
 def household_members_text() -> str:
     """Return a prompt-friendly household member list."""
+    local = _local_client()
+    if local is not None:
+        state = local.bootstrap_status()
+        return ", ".join(member["name"] for member in state["members"])
     return ", ".join(HOUSEHOLD_MEMBERS)

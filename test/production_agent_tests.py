@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 # Add backend directory to path to import supabase client directly for database side-effect verification
 sys.path.insert(0, "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/backend")
-from app.supabase_client import supabase, get_user_id
+from app.storage import supabase, get_user_id
 
 BASE_URL = "http://localhost:8000"
 ACTIVE_USER = "Archit(me)"

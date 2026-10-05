@@ -7,9 +7,9 @@ nutrition logging.
 ![Kitch product demo](static/Product%20Demo.png)
 
 Meal plans, pantry stock, recipes, and grocery carts are shared household
-state. Nutrition logs remain personal to the active household member. The
-current prototype household is configured as Archit, Anubhav, and Naman while
-auth-backed household registration is deferred.
+state. Nutrition logs remain personal to the active household member. An empty
+local installation asks for household-member names once and starts without
+seeded kitchen activity.
 
 ## What Kitch does
 
@@ -21,8 +21,8 @@ auth-backed household registration is deferred.
 - Prepares Zepto or Swiggy Instamart carts for review without allowing chat to
   place an order.
 - Logs and corrects personal nutrition entries from text or meal photos.
-- Remembers selected natural-language household kitchen context persistently
-  through Vertex AI Memory Bank.
+- Remembers selected natural-language household kitchen context through the
+  configured ADK memory backend.
 
 ```mermaid
 flowchart LR
@@ -41,10 +41,11 @@ flowchart LR
 1. The Next.js frontend renders confirmed product state and collects explicit
    user actions.
 2. FastAPI exposes the browser API, invokes the Gemini/Google ADK runtime,
-   accesses Supabase, and guards provider operations.
-3. Supabase stores structured product state behind backend-only RLS.
-4. ADK chat sessions are process-local; selected household context is stored in
-   Vertex AI Memory Bank when `vertex` is configured.
+   accesses the selected persistence backend, and guards provider operations.
+3. SQLite stores local structured state; Supabase stores hosted structured state
+   behind backend-only RLS.
+4. ADK chat sessions are process-local. Household memory is process-local with
+   `in_memory` and persistent with Vertex AI Memory Bank when `vertex` is configured.
 5. A provider-neutral checkout service prepares and revalidates external carts;
    final ordering remains an explicit UI-only action.
 
@@ -61,72 +62,31 @@ Prerequisites:
 
 - Python 3.12+
 - Node.js and npm
-- A Supabase project
-- A Gemini API key, or Vertex AI credentials
+- A Gemini API key
 
-### 1. Install the backend
-
-```bash
-cd backend
-python3.12 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Prepare Supabase
-
-For a new project, run `backend/database/supabase_schema.sql`. For an existing
-project, apply every unapplied migration in `backend/database/migrations/` in
-filename order. Migrations must be applied before the backend starts.
-
-Ensure the prototype household profiles exist, or update their IDs in:
-
-- `backend/app/household_config.py`
-- `frontend/src/app/householdConfig.js`
-
-### 3. Configure and start the backend
-
-Copy `backend/.env.example` to `backend/.env.local` (or `backend/.env`), then
-set the Supabase and Gemini credentials. Persistent household memory also needs
-standard Google Cloud credentials and a Memory Bank ID. For local development,
-run `gcloud auth application-default login`; Vercel uses OIDC federation. The
-full variable reference—including Memory Bank setup, provider OAuth, and telemetry—is in
-`docs/runtime_stack_and_configuration.md`.
+### 1. Configure local Kitch
 
 ```bash
-cd backend
-venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+cp backend/.env.local.example backend/.env.local
 ```
 
-Health checks:
+Replace `GOOGLE_API_KEY` in `backend/.env.local`.
+
+### 2. Install and start
 
 ```bash
-curl http://127.0.0.1:8000/api/health/live
-curl http://127.0.0.1:8000/api/health/ready
+python3.12 scripts/kitch.py setup
+python3.12 scripts/kitch.py start
 ```
 
-### 4. Configure and start the frontend
+On Windows use `py -3.12`. Open `http://localhost:3000`, enter the household
+member names, and begin with an empty kitchen. SQLite is created automatically
+under `.kitch/`; local agent memory resets whenever the backend restarts.
 
-```bash
-cd frontend
-npm install
-```
-
-Create `frontend/.env.local`:
-
-```bash
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-```
-
-```bash
-npm run dev -- --hostname 127.0.0.1 --port 3000
-```
-
-Open `http://127.0.0.1:3000`.
-
-Zepto and Swiggy Instamart are optional for core local development. Their
-configuration, OAuth requirements, production gates, and safe test boundaries
-are documented in `docs/runtime_stack_and_configuration.md`.
+Swiggy Instamart uses its real OAuth and MCP services. Click Connect in the
+Groceries UI and authenticate on Swiggy with the normal phone/OTP flow. See
+[`docs/local_setup.md`](docs/local_setup.md) for troubleshooting and optional
+manual commands.
 
 ## Project structure
 
@@ -137,7 +97,8 @@ backend/
     providers/          Provider contracts, MCP/OAuth clients, and adapters
     grocery_checkout.py Synchronization, review, revalidation, and ordering service
     main.py             FastAPI gateway and browser-facing routes
-    supabase_client.py  Supabase data-access layer
+    storage.py          Backend-neutral persistence facade
+    sqlite_supabase.py  Local SQLite adapter
   database/
     supabase_schema.sql Bootstrap schema
     migrations/         Versioned deployment migrations
@@ -174,6 +135,11 @@ test/                   Functional blueprint, fixtures, and automated tests
   memory, routing, and authority.
 - `docs/runtime_stack_and_configuration.md` — dependencies, local startup,
   environment variables, migrations, telemetry, and deployment.
+- `docs/local_setup.md` — terminal-based SQLite and in-memory setup.
+- `docs/supabase_setup.md` — hosted structured-persistence setup.
+- `docs/vertex_memory_setup.md` — persistent Memory Bank setup.
+- `docs/vercel_wif_setup.md` — keyless Vercel-to-Google authentication.
+- `docs/swiggy_setup.md` — localhost OAuth and hosted Swiggy onboarding.
 - `docs/known_issues_and_optimisations.md` — current defects, operational
   blockers, and deferred engineering work.
 - `test/functional_testing_blueprint.md` — functional scenarios and expected

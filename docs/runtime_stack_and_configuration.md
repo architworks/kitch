@@ -16,8 +16,8 @@ not describe component flows or agent topology.
 | Frontend | Next.js 16.2.6, React 19.2.4, ESLint 9 | `frontend/` |
 | API | FastAPI, Uvicorn, Pydantic | `backend/app/main.py` |
 | Agent runtime | Google ADK 2.x with native Gemini models | `backend/app/agent/` |
-| Household memory | Vertex AI Agent Engine Memory Bank, or process-local test mode | `backend/app/agent/memory.py` |
-| Database | Supabase PostgreSQL | `backend/database/` |
+| Household memory | Vertex AI Memory Bank or ADK in-memory memory | `backend/app/agent/memory.py` |
+| Database | Supabase PostgreSQL or local SQLite | `backend/app/storage.py` |
 | Provider transport | MCP SDK, HTTPX, provider adapters | `backend/app/providers/` |
 | Token protection | `cryptography` Fernet | `backend/app/providers/credential_crypto.py` |
 | Observability | ADK OpenTelemetry, optional Jaeger/LangSmith | `backend/app/telemetry.py` |
@@ -27,19 +27,16 @@ packages and exact scripts are in `frontend/package.json`.
 
 ## Local startup
 
-Backend:
+The supported local path is documented in `local_setup.md`:
 
 ```bash
-cd backend
-venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+cp backend/.env.local.example backend/.env.local
+python3.12 scripts/kitch.py setup
+python3.12 scripts/kitch.py start
 ```
 
-Frontend development server:
-
-```bash
-cd frontend
-npm run dev -- --hostname 127.0.0.1 --port 3000
-```
+The terminal command runs both servers and performs local SQLite migrations.
+Manual backend/frontend commands remain useful for development.
 
 Frontend production-mode validation:
 
@@ -54,6 +51,16 @@ The frontend reads `NEXT_PUBLIC_API_BASE_URL`; its local default is
 `http://localhost:8000`.
 
 ## Database deployment
+
+`KITCH_DATABASE_BACKEND=sqlite|supabase` selects structured persistence without
+affecting memory. It defaults to `supabase` to preserve hosted deployments.
+SQLite uses `KITCH_SQLITE_PATH` (default `.kitch/kitch.sqlite3`), migrates
+automatically, and never falls back to Supabase. The hosted procedure is in
+`supabase_setup.md`.
+
+Database and memory selection are independent. SQLite + in-memory is the easy
+local default, while Supabase + Vertex is the hosted default; SQLite + Vertex
+and Supabase + in-memory are also supported when explicitly configured.
 
 The checked-in bootstrap schema is `backend/database/supabase_schema.sql`.
 Existing projects must apply every versioned migration in
@@ -112,6 +119,13 @@ deployment may therefore use `GOOGLE_API_KEY` for Gemini while Memory Bank uses
 standard Google Cloud credentials. Locally those credentials come from ADC;
 on Vercel they are short-lived credentials obtained through OIDC federation.
 
+### Structured persistence
+
+| Variable | Purpose |
+| --- | --- |
+| `KITCH_DATABASE_BACKEND` | `sqlite` for local state or `supabase` for hosted state. Defaults to `supabase`. |
+| `KITCH_SQLITE_PATH` | SQLite file path, used only by the SQLite backend. |
+
 ### Supabase
 
 | Variable | Purpose |
@@ -124,18 +138,13 @@ on Vercel they are short-lived credentials obtained through OIDC federation.
 are rejected. Configure exactly one elevated credential. Browser code never
 receives it.
 
-### Prototype household
+### Household identity
 
-Prototype member IDs are bootstrapped in:
-
-- `backend/app/household_config.py`
-- `frontend/src/app/householdConfig.js`
-
-Member names are factual `profiles.full_name` values returned by the backend;
-the local files provide the prototype IDs and initial UI bootstrap only. Shared
-resources currently use the configured household-owner profile; nutrition rows
-and targets remain member-specific. Auth-backed registration and multiple
-households are not implemented yet.
+An empty SQLite installation uses first-run household bootstrap. Every entered
+name creates a profile, the first profile owns shared state, household size is
+the number of profiles, and the browser supplies its system IANA timezone.
+Hosted Supabase retains its configured household. In both cases the frontend
+hydrates member names from backend state.
 
 ## Session and memory services
 
@@ -156,8 +165,9 @@ Household kitchen context uses a configurable ADK memory service:
 | `GCP_WORKLOAD_IDENTITY_POOL_ID` | Workload Identity Pool ID. Vercel only. |
 | `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | Vercel OIDC provider ID in that pool. Vercel only. |
 
-Local processes default to `in_memory` only when the service variable is
-omitted. Vercel defaults to `vertex`, so a deployment missing its Memory Bank
+Local processes default to `in_memory` when the service variable is omitted;
+that supported local memory intentionally resets on backend restart. Vercel
+defaults to `vertex`, so a deployment missing its Memory Bank
 or federation configuration reports degraded memory rather than silently
 creating a local memory store. Set the service variable explicitly in every
 environment.
@@ -168,7 +178,7 @@ generation/consolidation result. It does not ingest every turn. Searches and
 writes are scoped to app `kitch` plus the stable household-owner profile UUID.
 No automatic fallback to process-local memory occurs when persistent memory is
 misconfigured or unavailable. Memory tools report the failure explicitly while
-Supabase-backed features remain usable.
+structured-persistence features remain usable.
 
 Create or identify the empty Memory Bank once (this does not deploy an agent
 runtime):
@@ -278,6 +288,9 @@ connection per household/provider/environment. OAuth state is single-use and
 expires after ten minutes. With no usable refresh-token flow, token expiry or
 HTTP 401 moves the connection to `reconnect_required`.
 
+Canonical console procedures are in `vertex_memory_setup.md` and
+`vercel_wif_setup.md`; this reference defines runtime behavior and variables.
+
 ## Deployment direction
 
 - Frontend: Vercel or equivalent Next.js hosting.
@@ -287,7 +300,7 @@ HTTP 401 moves the connection to `reconnect_required`.
   local ADC or Vercel OIDC federation; conversations remain intentionally
   ephemeral.
 
-Provider outages degrade only that provider; they do not make core Supabase
+Provider outages degrade only that provider; they do not make core persistence
 readiness fail. Instamart production remains gated by provider approval and
 staging validation. Blinkit remains a disabled `Coming soon` descriptor.
 

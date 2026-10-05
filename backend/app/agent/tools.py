@@ -7,7 +7,7 @@ from google.adk.tools import ToolContext
 from app.household_config import DEFAULT_ACTIVE_USER
 from app.household_config import canonical_user_name
 from app.planning_calendar import calendar_context, parse_iso_date
-from app.supabase_client import (
+from app.storage import (
     apply_meal_plan_edits as db_apply_meal_plan_edits,
     get_household_timezone,
     get_meal_schedule as db_get_meal_schedule,

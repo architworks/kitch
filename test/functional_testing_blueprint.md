@@ -1027,6 +1027,45 @@ section. The expected weekday depends on the run date.
 - Fail criteria: Past rows remain, current/future rows are removed, cleanup uses
   the browser timezone, or empty weekday placeholders return.
 
+## Section 11: Local Runtime and Persistence
+
+### Scenario 11.1 - Empty Local First Run
+
+- Setup: Point Kitch at a new SQLite file with `KITCH_MEMORY_SERVICE=in_memory`.
+- Action: Start the app and open the browser.
+- Expected behavior: Normal household onboarding appears. No meal, pantry,
+  recipe, grocery, nutrition, provider, address, cart, or order data is seeded.
+- Action: Enter two member names and continue.
+- Pass criteria: Exactly two members exist, the first is active, household size
+  is two, and the stored timezone matches the browser's IANA timezone.
+- Fail criteria: Prototype people or kitchen/provider activity appear, a
+  timezone field is requested, or household size differs from the name count.
+
+### Scenario 11.2 - SQLite Restart and Ephemeral Memory
+
+- Setup: In local mode, create representative meal, pantry, recipe, native-cart
+  and nutrition records. State a household preference that the agent saves.
+- Action: Restart both servers and reload the browser.
+- Expected behavior: All structured records and any encrypted provider
+  connection metadata remain. The process-local preference memory is empty.
+- Pass criteria: SQLite state survives exactly while ADK in-memory memory does
+  not claim cross-restart recall.
+- Fail criteria: Structured state disappears, memory incorrectly survives, or
+  the app silently switches to Supabase or Vertex.
+
+### Scenario 11.3 - Real Local Swiggy Connection
+
+- Setup: Use the localhost callback and a real Swiggy consumer account.
+- Action: Connect from the Groceries UI, complete phone/OTP on Swiggy, return to
+  Kitch, select a real saved address, and synchronize selected native items.
+- Expected behavior: Dynamic registration, OAuth state, encrypted token,
+  addresses, products, cart and payment information all come from Swiggy.
+- Pass criteria: The connection survives a backend restart and can read the
+  confirmed cart without reconnecting while the token remains valid.
+- Safety: Do not place a production order.
+- Fail criteria: Any simulated catalogue/cart data appears, OAuth state can be
+  reused, or the callback uses an origin other than exact localhost.
+
 ## Final Run Summary Template
 
 Close every artifact with a functional summary.
@@ -1044,6 +1083,7 @@ Close every artifact with a functional summary.
 - Provider checkout integration:
 - Persistent household memory:
 - Datetime awareness:
+- Local runtime and persistence:
 
 ## Regressions Found
 

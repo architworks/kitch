@@ -18,7 +18,7 @@ from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
 from google.adk.models.google_llm import Gemini
 from google.genai.types import Content, Part
 from app.planning_calendar import calendar_context
-from app.supabase_client import get_household_timezone
+from app.storage import get_household_timezone
 
 from .tools import (
     get_meal_schedule_tool,

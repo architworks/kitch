@@ -23,9 +23,9 @@ The current design separates responsibilities deliberately:
 - Provider-specific executors perform authorized catalogue matching and
   reversible cart preparation.
 - Python tools perform deterministic side effects.
-- Supabase stores authoritative structured product state.
-- Vertex AI Memory Bank stores selected natural-language household kitchen
-  context; ADK conversation sessions remain process-local.
+- The selected SQLite or Supabase adapter stores authoritative structured state.
+- The selected ADK memory service stores natural-language household context;
+  ADK conversation sessions remain process-local.
 - The commerce layer translates Kitch's native cart into provider carts through
   provider-specific execution behind one checkout service.
 
@@ -34,9 +34,11 @@ flowchart LR
     Browser[Browser / Next.js UI] -->|HTTP| API[FastAPI Gateway]
     API -->|agent requests| AgentRuntime[Gemini + ADK head-chef runtime]
     AgentRuntime --> Tools[Application tool layer]
-    Tools --> Supabase[(Supabase PostgreSQL)]
+    Tools --> Storage[Persistence facade]
+    Storage --> SQLite[(Local SQLite)]
+    Storage --> Supabase[(Supabase PostgreSQL)]
     AgentRuntime --> Sessions[Process-local ADK sessions]
-    AgentRuntime --> Memory[Vertex AI Memory Bank]
+    AgentRuntime --> Memory[In-memory or Vertex memory]
 
     API --> Checkout[GroceryCheckoutService]
     AgentRuntime -->|authorized reversible sync| Checkout
@@ -65,23 +67,26 @@ The browser never calls agents directly. It calls FastAPI.
 
 **Why:** FastAPI can normalize payloads, sync session state, orchestrate photo-plus-text flows, guard provider/order actions, and return a stable API shape to the frontend. This keeps the frontend free of ADK runtime details.
 
-### Supabase stores structured product records
+### SQLite or Supabase stores structured product records
 
-Supabase stores meal plans, recipe+grocery artifacts, pantry stock, native cart rows, profiles, and macro logs.
+Both adapters store the same meal-plan, recipe, pantry, native-cart, profile,
+nutrition and provider workflow contract. SQLite is the single-process local
+backend; Supabase is the backend-only hosted backend.
 
 **Why:** these are deterministic records that the UI must render and users must be able to review. They should not live only in chat memory.
 
-### Memory Bank stores flexible household context
+### The configured memory service stores flexible household context
 
 Household food, allergy, planning-style, brand, pack, and ordering context is
-stored as flexible natural language in Vertex AI Memory Bank. Specialists
+stored as flexible natural language. Specialists
 decide when a statement is durable and use shared search/update tools. The
-memory service performs semantic retrieval and consolidates corrections or
-forget requests. It does not receive every turn or full chat sessions.
+Vertex Memory Bank performs semantic retrieval and consolidation. Local
+`InMemoryMemoryService` preserves the deliberate agent write/read tools but
+resets on restart. Neither mode receives every turn or full chat sessions.
 
 **Why:** preferences are naturally conversational and can be fuzzy. A strict schema would prematurely constrain how users express preferences and how agents apply them.
 
-Memory Bank is advisory, household-scoped context. Supabase remains the source
+Memory is advisory, household-scoped context. Structured persistence remains the source
 of truth for every exact plan, pantry row, recipe, cart, nutrition record,
 provider draft, payment, and order. A memory outage degrades personalization,
 not core application readiness.
@@ -230,10 +235,11 @@ rejected topology decisions are documented only in
 
 ## Persistence Design
 
-Location: `backend/app/supabase_client.py`
-Schema: `backend/database/supabase_schema.sql`
+Facade: `backend/app/storage.py`
+Hosted schema: `backend/database/supabase_schema.sql`
+Local adapter and schema: `backend/app/sqlite_supabase.py`
 
-Supabase tables:
+Logical tables in both adapters:
 
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
@@ -295,7 +301,7 @@ Why this model:
   response, and unconfirmed-write failures are not empty state: they become a
   safe HTTP 503 response and no success action is returned to the UI.
 - Saving a recipe artifact and replacing agent-generated cart rows is one
-  PostgreSQL transaction. A cart failure rolls back the artifact write and
+  storage transaction. A cart failure rolls back the artifact write and
   leaves the previous cart unchanged.
 - Frontend state changes only after a confirmed 2xx response. A persistence
   failure preserves the last confirmed state and shows that nothing was saved.
@@ -313,7 +319,7 @@ sequenceDiagram
     autonumber
     participant UI as Groceries UI
     participant API as FastAPI
-    participant DB as Supabase
+    participant DB as Selected storage backend
     participant Service as GroceryCheckoutService
     participant Adapter as Selected provider adapter
     participant MCP as Provider MCP
@@ -442,14 +448,16 @@ behavior are documented in `ux_user_flows.md`, not duplicated here.
 
 - Backend restarts clear short-lived ADK conversation sessions. With
   `vertex` configured, selected household memories remain durable.
-- Apply versioned Supabase migrations before starting FastAPI in every
-  environment. The bootstrap schema must remain synchronized with them.
+- SQLite migrations run automatically. Hosted Supabase deployments apply the
+  versioned SQL migrations before starting FastAPI; bootstrap DDL stays aligned.
 - Provider OAuth and production approval remain externally controlled.
 - Blinkit live integration is not implemented.
 - Instamart production is gated until explicit approval and staging validation.
-- Multi-household registration is not implemented.
+- Hosted multi-household registration is not implemented. A local SQLite
+  installation bootstraps one household and its members on first use.
 - Provider order placement is live and must remain guarded.
-- The current household is configured in code until real registration exists.
+- The hosted household remains configured until registration exists; local
+  household identity comes from the first-run SQLite onboarding flow.
 
 Reproducible defects, operational blockers, and deliberately deferred
 optimisations are maintained in `known_issues_and_optimisations.md`.

@@ -8,7 +8,9 @@ This document describes what Kitch is trying to become, what the product does to
 
 Kitch is an AI household kitchen companion for planning meals, preparing recipes, managing pantry-aware groceries, syncing a reviewed cart to delivery providers, and tracking individual nutrition.
 
-The app is designed for a shared household where people eat from the same meal plan and pantry, but still keep individual nutrition logs. The current prototype household is prefilled as Archit, Anubhav, and Naman. Multi-household registration is intentionally deferred until the core household workflow is stable.
+The app is designed for a shared household where people eat from the same meal
+plan and pantry but keep individual nutrition logs. Empty local installations
+create the household from the names entered during first-run onboarding.
 
 Kitch should reduce the day-to-day cognitive load of:
 
@@ -153,7 +155,7 @@ The floating chat input is the primary mode of interaction. It supports:
 
 | ID | Requirement | Why |
 | :--- | :--- | :--- |
-| REQ-001 | Prefill prototype members as Archit, Anubhav, and Naman through configuration, not hardcoded UI logic. | Keeps the prototype useful while leaving room for real household registration later. |
+| REQ-001 | On an empty local database, create one member profile per entered name, use the first as household owner, derive household size from the count, and detect timezone from the browser. | Makes local Kitch usable without seeded identities or cloud setup. |
 | REQ-002 | Use one shared household profile id for meal plans, pantry, recipe+grocery artifacts, and native cart until household entities exist. | The product needs shared household state before it needs full account management. |
 | REQ-003 | Keep macro logs individual to the active user. | Nutrition tracking is personal even when the meal plan is shared. |
 | REQ-004 | Defer multi-household registration and authentication-backed membership. | The core planning/cart loop is still being validated. Building registration first would slow the product without proving the main value. |
@@ -166,7 +168,7 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-006 | Let relevant specialists decide when context is durable and submit one self-contained statement; do not ingest every turn or complete chat session automatically. | Memory generation should remain a deliberate agent action rather than an invisible side effect of every conversation. |
 | REQ-007 | Let Memory Bank consolidate corrections, contradictions, and forget requests through event-based generation without prefix schemas or custom topic taxonomies. | Cohesion belongs to semantic memory management, not brittle application parsing. |
 | REQ-008 | Keep chat sessions temporary while household memory survives backend restarts. | Short Kitch conversations do not justify persistent session infrastructure, but preferences must remain useful later. |
-| REQ-009 | If Memory Bank is unavailable, report that memory was not saved or recalled, keep Supabase-backed features usable, and never fall back silently in deployment. | Personalization failure must not become false success or disable the kitchen workflows. |
+| REQ-009 | If configured memory is unavailable, report that memory was not saved or recalled, keep structured-persistence features usable, and never fall back silently from Vertex. | Personalization failure must not become false success or disable the kitchen workflows. |
 
 ### Meal planning requirements
 
@@ -219,7 +221,7 @@ The floating chat input is the primary mode of interaction. It supports:
 | REQ-048 | Invalidate a provider review when its native-cart inputs or delivery context change. | A user must never place an order from a stale cart, address, or total snapshot. |
 | REQ-049 | Keep provider cart items full-width in the main workflow and put the financial order summary in the information sidebar. | The summary must stay visible without consuming the horizontal space needed to review product mappings. |
 | REQ-050 | Use minimal numbered vertical stage markers and make the native cart collapsible. Pending markers are light green; completed markers are dark green and must revert when their underlying state is invalidated. | The checkout sequence should remain obvious while accurately reflecting whether a transfer or review is still valid. |
-| REQ-051 | Persist provider checkout drafts in backend-only Supabase state and restore them across browser/backend restarts. | Provider cart approval must not depend on misleading process-local or browser-local state. |
+| REQ-051 | Persist provider checkout drafts in the selected backend-only structured store and restore them across browser/backend restarts. | Provider cart approval must not depend on misleading process-local or browser-local state. |
 | REQ-052 | Reconcile every initial provider update against the confirmed cart and treat ambiguous availability as unverified. | A search result is not proof that the requested product and quantity were added or remain orderable. |
 | REQ-053 | Mark drafts stale after five minutes without automatic cart search, mutation, or revalidation on page entry, focus, or provider switching; allow read-only saved-address discovery, require explicit cart refresh before payment, and revalidate immediately before ordering. | Address selection should remain effortless while every operation that can inspect or change the provider cart stays intentional and visible. |
 | REQ-054 | Permit a confirmed partial provider cart while prominently listing every unresolved native item as omitted from the order; block only when no selected item is confirmed or another checkout prerequisite fails. | Missing groceries must never be silently dropped, but one unavailable item should not prevent ordering the confirmed remainder. |
@@ -254,20 +256,24 @@ Kitch uses:
 
 - `InMemorySessionService` for short conversational continuity.
 - `VertexAiMemoryBankService` for deployed household memory.
-- `InMemoryMemoryService` only as an explicit test or optional local-development mode.
+- `InMemoryMemoryService` as the supported ephemeral local mode.
 
 **Why:** conversations are short and may reset on restart, while durable
 household context must remain available across conversations. Kitch sends only
 specialist-selected user events to Memory Bank and does not deploy the agent to
 Agent Engine Runtime or use Agent Platform Sessions.
 
-Persistent memory is authenticated with its own backend-only Vertex AI Express
-Mode key. It does not reuse the Gemini/AI Studio key. Explicit writes wait for
-generation and default consolidation before reporting success.
+Persistent memory authenticates through Application Default Credentials
+locally or Vercel Workload Identity Federation when hosted. It does not reuse
+the Gemini/AI Studio key. Explicit writes wait for generation and default
+consolidation before reporting success.
 
-### Supabase for deterministic state
+### SQLite or Supabase for deterministic state
 
-Supabase stores structured app state: meal plans, recipe+grocery artifacts, pantry stock, native cart rows, profiles, and macro logs.
+The selected backend stores structured app state: meal plans, recipe+grocery
+artifacts, pantry stock, native cart rows, profiles, macro logs, and provider
+workflow records. SQLite serves local single-process installs; Supabase serves
+hosted deployments.
 
 **Why:** these are deterministic product records that the UI must render reliably. They should not live only in LLM memory.
 

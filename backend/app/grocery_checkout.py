@@ -23,7 +23,7 @@ from app.commerce_policy import (
     CommercePermission,
     commerce_request_context,
 )
-from app.supabase_client import (
+from app.storage import (
     apply_native_grocery_cart_changes,
     claim_provider_checkout_operation,
     get_grocery_cart,
