@@ -321,12 +321,26 @@ const getTimeBasedGreeting = (date = new Date()) => {
   return "Good evening";
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-const apiUrl = (path) => `${API_BASE_URL}${path}`;
-const apiFetch = (url, options = {}) => globalThis.fetch(url, {
-  credentials: "include",
-  ...options
-});
+const CONFIGURED_API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim().replace(/\/$/, "");
+const API_REQUEST_TIMEOUT_MS = 20_000;
+
+const apiUrl = (path) => {
+  if (CONFIGURED_API_BASE_URL) return `${CONFIGURED_API_BASE_URL}${path}`;
+  if (typeof window !== "undefined" && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    return `/backend${path}`;
+  }
+  return `http://localhost:8000${path}`;
+};
+
+const apiFetch = (url, options = {}) => {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  return globalThis.fetch(url, {
+    credentials: "include",
+    ...options,
+    signal: options.signal || controller.signal
+  }).finally(() => globalThis.clearTimeout(timeout));
+};
 
 const getMealTitle = (meal, fallback = "No recipe set") => {
   if (!meal) return fallback;
@@ -1217,12 +1231,21 @@ export default function Home() {
         })
       });
       await requireSuccessfulResponse(response);
-      await loadAuthSession();
-      setHouseholdBootstrap(null);
+      const result = await response.json();
+      setAuthState({
+        loading: false,
+        required: true,
+        authenticated: true,
+        email: result.email || ""
+      });
+      applyBootstrappedHousehold({
+        initialized: true,
+        ...(result.household || {})
+      });
     } catch (error) {
       setAuthError(apiErrorMessage(error, "Google sign-in could not be completed."));
     }
-  }, [loadAuthSession]);
+  }, [applyBootstrappedHousehold]);
 
   const signOut = useCallback(async () => {
     try {

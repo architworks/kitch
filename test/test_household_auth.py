@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from app.auth import (
     HouseholdIdentity,
@@ -15,10 +16,48 @@ from app.auth import (
     verify_google_credential,
 )
 from app.household_config import canonical_user_name, get_household_profile_id, get_user_id
+from app.main import app
 from app.sqlite_supabase import SQLiteKitchClient
 
 
 class HostedSessionTests(unittest.TestCase):
+    def test_google_sign_in_returns_complete_household_and_cookie_supports_session_reload(self):
+        household = {
+            "google_subject": "google-user-1",
+            "email": "owner@example.com",
+            "household_id": "household-a",
+            "owner_profile_id": "owner-a",
+            "members": [{"id": "owner-a", "name": "Owner"}],
+        }
+        claims = {
+            "sub": "google-user-1",
+            "email": "owner@example.com",
+            "email_verified": True,
+            "name": "Owner",
+        }
+        environment = {
+            "KITCH_DATABASE_BACKEND": "supabase",
+            "KITCH_AUTH_SESSION_SECRET": "s" * 40,
+        }
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch(
+            "app.main.ensure_google_household", return_value=household,
+        ):
+            with TestClient(app) as client:
+                signed_in = client.post("/api/auth/google", json={
+                    "credential": "credential",
+                    "timezone": "Asia/Kolkata",
+                })
+                self.assertEqual(signed_in.status_code, 200)
+                self.assertEqual(signed_in.json()["household"], household)
+                self.assertIn("kitch_session=", signed_in.headers["set-cookie"])
+
+                session = client.get("/api/auth/session")
+                self.assertEqual(session.status_code, 200)
+                self.assertTrue(session.json()["authenticated"])
+                self.assertEqual(session.json()["household"]["members"], household["members"])
+
     def test_signed_session_rejects_tampering_and_expiry(self):
         with patch.dict(os.environ, {"KITCH_AUTH_SESSION_SECRET": "s" * 40}):
             token = issue_session({
