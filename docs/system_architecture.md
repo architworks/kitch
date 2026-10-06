@@ -31,7 +31,8 @@ The current design separates responsibilities deliberately:
 
 ```mermaid
 flowchart LR
-    Browser[Browser / Next.js UI] -->|HTTP| API[FastAPI Gateway]
+    Google[Google Identity Services] -->|verified ID token| API[FastAPI Gateway]
+    Browser[Browser / Next.js UI] -->|signed HttpOnly session| API
     API -->|agent requests| AgentRuntime[Gemini + ADK head-chef runtime]
     AgentRuntime --> Tools[Application tool layer]
     Tools --> Storage[Persistence facade]
@@ -74,6 +75,18 @@ nutrition and provider workflow contract. SQLite is the single-process local
 backend; Supabase is the backend-only hosted backend.
 
 **Why:** these are deterministic records that the UI must render and users must be able to review. They should not live only in chat memory.
+
+### One hosted sign-in owns one household
+
+Hosted Kitch verifies a Google ID token and maps its stable subject to one
+internal household and owner profile. All protected APIs then derive household
+and member IDs from a server-owned request context. Browser payloads cannot
+select a different household. Additional household members remain editable
+profiles for personal nutrition context; they are not authenticated users.
+
+Local SQLite mode deliberately skips Google Sign-In and keeps its one local
+household bootstrap flow. The accepted model and rejected multi-account model
+are recorded in `adr/0005-how-google-sign-in-owns-a-household.md`.
 
 ### The configured memory service stores flexible household context
 
@@ -171,6 +184,11 @@ Current routes:
 
 | Route | Duty |
 | :--- | :--- |
+| `POST /api/auth/google` | Verifies a Google ID credential, creates/loads its one hosted household, and sets the signed session cookie. |
+| `GET /api/auth/session` | Returns safe authentication and household-member context. |
+| `POST /api/auth/logout` | Deletes the Kitch session cookie. |
+| `GET/POST /api/household/bootstrap` | Reports/creates the one local SQLite household; hosted households are created by sign-in. |
+| `PATCH /api/household/members/{id}` | Renames an in-household member while retaining the stable profile ID and linked records. |
 | `POST /api/chat` | Runs a text chat turn through the ADK runner. |
 | `POST /api/upload-photo` | Classifies an image as meal, pantry, or ambiguous before routing structured observations. |
 | `GET /api/state/{user_name}` | Returns dashboard state, including the authoritative current calendar-week meal plan and next chronological meal. |
@@ -205,7 +223,7 @@ Current routes:
 | `POST /api/grocery/providers/{provider}/checkout/place-order` | Revalidates and places only the exact approved snapshot. |
 | `POST /api/grocery/providers/{provider}/checkout/payment-status` | Polls only when the discovered provider capability documents payment status. |
 | `GET /api/health/live` | Dependency-free process and event-loop liveness check. |
-| `GET /api/health/ready` | Core readiness check for elevated database access, required schema, and the configured household profile; provider states are informational. |
+| `GET /api/health/ready` | Publicly returns only safe core status; authenticated calls include component diagnostics. Provider states remain informational. |
 
 Why the backend owns durable checkout drafts:
 
@@ -239,11 +257,13 @@ Facade: `backend/app/storage.py`
 Hosted schema: `backend/database/supabase_schema.sql`
 Local adapter and schema: `backend/app/sqlite_supabase.py`
 
-Logical tables in both adapters:
+Logical tables across the hosted and local adapters:
 
 | Table | Shared or individual | Duty |
 | :--- | :--- | :--- |
-| `profiles` | Prototype member/shared-owner profile | Stores factual member identity, household size, timezone, pantry revision, and full-review time. It contains no semantic preferences. |
+| `households` | Hosted ownership boundary | Supabase-only household root used by authenticated account mapping and profile isolation. |
+| `household_accounts` | Hosted authentication mapping | Supabase-only mapping from verified Google subject to exactly one household and owner profile. |
+| `profiles` | Household member/shared-owner profile | Stores stable member identity, editable name, household size, timezone, pantry revision, and full-review time. It contains no semantic preferences. |
 | `nutrition_targets` | Individual | Stores deterministic calorie and macro goals separately from preference memory. |
 | `provider_selection_state` | Shared household workflow | Stores the ordering provider currently selected in the checkout UI. |
 | `meal_plans` | Shared household | Stores breakfast/lunch/dinner meal names keyed by exact calendar date. |
@@ -258,6 +278,13 @@ Logical tables in both adapters:
 | `pending_agent_actions` | Shared household | Stores expiring, single-use confirmation payloads for bulk destructive changes. |
 
 Important modeling decisions:
+
+- `household_accounts.google_subject` is the stable hosted login identifier.
+  Emails may change and are not used as the primary key.
+- Member names are mutable display data. Nutrition and history continue to
+  reference the unchanged `profiles.id`.
+- Shared tables use the authenticated household's owner profile ID; personal
+  nutrition tables use a member ID resolved only from that household.
 
 - Nutrition entries use `consumed_at` as the dated source of truth. An explicit
   meal/date/time from the user wins; otherwise the request receipt time in the
@@ -453,10 +480,11 @@ behavior are documented in `ux_user_flows.md`, not duplicated here.
 - Provider OAuth and production approval remain externally controlled.
 - Blinkit live integration is not implemented.
 - Instamart production is gated until explicit approval and staging validation.
-- Hosted multi-household registration is not implemented. A local SQLite
-  installation bootstraps one household and its members on first use.
+- Hosted sign-in can create unrelated one-owner households. Sharing one
+  household across multiple authenticated Google accounts is deliberately not
+  implemented.
 - Provider order placement is live and must remain guarded.
-- The hosted household remains configured until registration exists; local
+- Hosted household identity comes from the verified Google subject; local
   household identity comes from the first-run SQLite onboarding flow.
 
 Reproducible defects, operational blockers, and deliberately deferred

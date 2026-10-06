@@ -83,6 +83,16 @@ def configure_adk_tracing() -> bool:
     if not has_otel_endpoint and not has_langsmith and not _env_flag_enabled("KITCH_ADK_TRACING_ENABLED"):
         return False
 
+    # ADK spans can contain prompts, tool arguments, and model responses. Do
+    # not export them merely because a generic OTEL endpoint happens to exist.
+    # The explicit opt-in is deliberately separate from exporter credentials.
+    if not _env_flag_enabled("KITCH_ALLOW_SENSITIVE_ADK_TRACES"):
+        print(
+            "[Kitch tracing] ADK trace export is disabled because "
+            "KITCH_ALLOW_SENSITIVE_ADK_TRACES is not true."
+        )
+        return False
+
     os.environ.setdefault("OTEL_SERVICE_NAME", "kitch-backend")
     os.environ.setdefault(
         "OTEL_RESOURCE_ATTRIBUTES",

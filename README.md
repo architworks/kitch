@@ -41,7 +41,8 @@ flowchart LR
 1. The Next.js frontend renders confirmed product state and collects explicit
    user actions.
 2. FastAPI exposes the browser API, invokes the Gemini/Google ADK runtime,
-   accesses the selected persistence backend, and guards provider operations.
+   verifies hosted Google sessions, accesses the selected persistence backend,
+   and guards provider operations.
 3. SQLite stores local structured state; Supabase stores hosted structured state
    behind backend-only RLS.
 4. ADK chat sessions are process-local. Household memory is process-local with
@@ -51,6 +52,11 @@ flowchart LR
 
 The browser never calls Gemini, ADK, elevated Supabase APIs, or provider MCP
 servers directly.
+
+Hosted Kitch uses one Google account as the owner of one household. Other
+household members are editable profiles—not separate login accounts—so their
+stable IDs and personal nutrition history survive renames. Local SQLite mode
+remains login-free.
 
 Detailed component flows are in `docs/system_architecture.md`. Agent names,
 routing, tools, memory access, commerce authority, and rejected topology
@@ -139,6 +145,8 @@ test/                   Functional blueprint, fixtures, and automated tests
 - `docs/supabase_setup.md` — hosted structured-persistence setup.
 - `docs/vertex_memory_setup.md` — persistent Memory Bank setup.
 - `docs/vercel_wif_setup.md` — keyless Vercel-to-Google authentication.
+- `docs/security_and_privacy.md` — hosted identity, household isolation,
+  security controls, provider credentials, telemetry, and retention.
 - `docs/swiggy_setup.md` — localhost OAuth and hosted Swiggy onboarding.
 - `docs/known_issues_and_optimisations.md` — current defects, operational
   blockers, and deferred engineering work.

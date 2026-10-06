@@ -207,6 +207,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _older_than(value: Any, *, days: int) -> bool:
+    """Return whether a persisted UTC timestamp is outside its retention window."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    return parsed.astimezone(timezone.utc) < datetime.now(timezone.utc) - timedelta(days=days)
+
+
 def _execute(operation: str, table: str, query: Callable[[], Any]) -> Any:
     try:
         response = query()
@@ -505,6 +516,34 @@ def _recipe_plan_metadata(
 
 
 # Profiles
+def ensure_google_household(
+    google_subject: str,
+    email: str,
+    display_name: str,
+    timezone_name: str,
+) -> Dict[str, Any]:
+    if DATABASE_BACKEND != "supabase":
+        raise PersistenceConfigurationError("Google household identity is hosted-only.")
+    claim_email = os.environ.get("KITCH_LEGACY_HOUSEHOLD_OWNER_EMAIL", "").strip().casefold()
+    claim_legacy = bool(claim_email and email.strip().casefold() == claim_email)
+    data = _execute(
+        "ensure_google_household",
+        "households,household_accounts,profiles",
+        lambda: supabase.rpc("ensure_google_household", {
+            "p_google_subject": google_subject,
+            "p_email": email,
+            "p_display_name": display_name,
+            "p_timezone_name": timezone_name,
+            "p_claim_legacy": claim_legacy,
+        }).execute(),
+    )
+    if not isinstance(data, dict) or not isinstance(data.get("members"), list):
+        raise malformed_persistence_response(
+            "ensure_google_household", "households,household_accounts,profiles"
+        )
+    return data
+
+
 def get_profile(user_name: str) -> Dict[str, Any]:
     profile_id = get_user_id(user_name)
     rows = _read_rows(
@@ -566,17 +605,52 @@ def update_household_profile(
 
 def get_household_members() -> List[Dict[str, Any]]:
     """Return factual configured household-member profiles."""
-    rows = _read_rows(
-        "get_household_members",
-        "profiles",
-        lambda: supabase.table("profiles")
-        .select("id,full_name")
-        .execute(),
-    )
+    if DATABASE_BACKEND == "sqlite":
+        rows = _read_rows(
+            "get_household_members", "profiles",
+            lambda: supabase.table("profiles").select("id,full_name").execute(),
+        )
+    else:
+        from app.auth import require_identity
+        identity = require_identity()
+        rows = _read_rows(
+            "get_household_members", "profiles",
+            lambda: supabase.table("profiles").select("id,full_name")
+            .eq("household_id", identity.household_id).execute(),
+        )
     owner_id = get_household_profile_id()
     return sorted(
         ({"id": row["id"], "name": row["full_name"]} for row in rows),
         key=lambda row: (row["id"] != owner_id, row["name"].lower()),
+    )
+
+
+def update_household_member(member_id: str, full_name: str) -> Dict[str, Any]:
+    cleaned = str(full_name or "").strip()
+    if not cleaned or len(cleaned) > 80:
+        raise ValueError("Member name must contain between 1 and 80 characters.")
+    if any(
+        str(member["id"]) != str(member_id)
+        and str(member["name"]).strip().casefold() == cleaned.casefold()
+        for member in get_household_members()
+    ):
+        raise ValueError("Each household member needs a distinct name.")
+    if DATABASE_BACKEND == "sqlite":
+        row = _confirmed_row(
+            "update_household_member", "profiles",
+            lambda: supabase.table("profiles").update({"full_name": cleaned})
+            .eq("id", member_id).execute(),
+        )
+        if not row:
+            raise ValueError("Household member was not found.")
+        return row
+    from app.auth import require_identity
+    identity = require_identity()
+    return _confirmed_row(
+        "update_household_member", "profiles",
+        lambda: supabase.table("profiles").update({
+            "full_name": cleaned, "updated_at": _now_iso(),
+        }).eq("id", member_id).eq("household_id", identity.household_id).execute(),
     )
 
 
@@ -1207,7 +1281,14 @@ def get_provider_checkout_draft(
         .limit(1)
         .execute(),
     )
-    return _normalize_provider_checkout_draft_row(rows[0]) if rows else None
+    if not rows:
+        return None
+    draft = _normalize_provider_checkout_draft_row(rows[0])
+    retention_days = max(1, int(os.environ.get("KITCH_PROVIDER_DRAFT_RETENTION_DAYS", "30")))
+    if _older_than(draft.get("updated_at"), days=retention_days):
+        delete_provider_checkout_draft(provider, provider_environment)
+        return None
+    return draft
 
 
 def save_provider_checkout_draft(
@@ -1324,7 +1405,16 @@ def get_provider_connection(
         .limit(1)
         .execute(),
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    connection = rows[0]
+    retention_days = max(
+        1, int(os.environ.get("KITCH_EXPIRED_PROVIDER_CONNECTION_RETENTION_DAYS", "30"))
+    )
+    if _older_than(connection.get("expires_at"), days=retention_days):
+        delete_provider_connection(provider, provider_environment)
+        return None
+    return connection
 
 
 def save_provider_connection(
@@ -1431,9 +1521,22 @@ def save_provider_oauth_client(
 
 
 def create_provider_oauth_flow(flow: Dict[str, Any]) -> Dict[str, Any]:
+    profile_id = get_household_profile_id()
+    oauth_cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(hours=max(1, int(os.environ.get("KITCH_OAUTH_FLOW_RETENTION_HOURS", "24"))))
+    ).isoformat()
+    _read_rows(
+        "purge_provider_oauth_flows",
+        "provider_oauth_flows",
+        lambda: supabase.table("provider_oauth_flows").delete()
+        .eq("profile_id", profile_id)
+        .lt("expires_at", oauth_cutoff)
+        .execute(),
+    )
     payload = {
         **flow,
-        "profile_id": get_household_profile_id(),
+        "profile_id": profile_id,
     }
     return _confirmed_row(
         "create_provider_oauth_flow",
@@ -1901,19 +2004,30 @@ def validate_persistence_readiness() -> Dict[str, Any]:
             .limit(1)
             .execute(),
         )
-    try:
-        profile = get_household_profile()
-    except PersistenceError as error:
-        if error.supabase_code == "household_profile_missing":
-            raise PersistenceConfigurationError(
-                "The configured household profile is missing from public.profiles."
-            ) from error
-        raise
-    return {
+    if DATABASE_BACKEND == "supabase":
+        hosted_identity_schema = {
+            "households": ("id", "timezone_name", "legacy_claimable", "created_at", "updated_at"),
+            "household_accounts": (
+                "google_subject", "household_id", "owner_profile_id", "email",
+                "created_at", "last_seen_at",
+            ),
+            "profiles": ("household_id", "member_order", "updated_at"),
+        }
+        for table, columns in hosted_identity_schema.items():
+            _read_rows(
+                "readiness_check", table,
+                lambda table=table, columns=columns: supabase.table(table)
+                .select(",".join(columns)).limit(1).execute(),
+            )
+    result = {
         "status": "ready",
         "backend": DATABASE_BACKEND,
         "durable": True,
         "credential_type": SUPABASE_KEY_TYPE,
-        "tables": list(REQUIRED_TABLE_COLUMNS),
-        "household_profile_id": profile["id"],
+        "tables": list(REQUIRED_TABLE_COLUMNS) + (
+            ["households", "household_accounts"] if DATABASE_BACKEND == "supabase" else []
+        ),
     }
+    if DATABASE_BACKEND == "sqlite" or __import__("app.auth", fromlist=["current_identity"]).current_identity():
+        result["household_profile_id"] = get_household_profile()["id"]
+    return result

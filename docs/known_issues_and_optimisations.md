@@ -19,6 +19,7 @@ The most recent provider run is
 | KI-004 | Medium | Open | Instamart unresolved items are duplicated and the displayed not-found count is wrong. |
 | KI-005 | High | Open | A chat checkout request can erase an existing provider review even though checkout is refused. |
 | OP-002 | Critical | Open | The hosted Vercel backend function returns HTTP 500 for liveness, readiness, state, and chat. |
+| SEC-001 | Medium | Monitoring | Next.js currently brings in a transitive `baseline-browser-mapping` advisory for which npm reports no available fix. |
 
 ## KI-001: Instamart matching and preference leakage
 
@@ -160,6 +161,18 @@ all returned HTTP 500 with `FUNCTION_INVOCATION_FAILED`. The deployed app is
 not operational until the Vercel function startup failure is diagnosed from
 deployment/runtime logs and both health endpoints succeed.
 
+## Security dependency monitoring
+
+### SEC-001: Transitive Next.js browser-data denial-of-service advisory
+
+On 2026-10-06, `npm audit --omit=dev` reported two moderate findings for
+`baseline-browser-mapping` through Next.js (`GHSA-w5vr-8v7q-w6rv`). The issue
+terminates the build/runtime process only when that package is given malformed
+mapping input; Kitch does not pass user-controlled input to it. npm currently
+reports no fixed version. Keep Next.js current and remove this entry as soon as
+the upstream dependency is patched. The Python requirements audit reported no
+known vulnerabilities on the same date.
+
 ## Deferred optimisations
 
 ### OPT-001: Provider-registered cart executors
@@ -185,12 +198,3 @@ correction, forget, and item-isolation tests. A preview deployment needs its own
 explicit WIF subject binding before it can run the same tests. Observe real retrieval before
 adding custom topics or few-shot extraction rules; do not pre-emptively replace
 flexible memory with structured preference fields.
-
-### OPT-003: Auth-backed households
-
-The current prototype member IDs are configured in code while factual member
-names are persisted in `profiles` and returned by the backend.
-Introduce authentication, household membership, and per-household ownership
-before supporting unrelated households in one deployment. This change must
-also introduce membership-aware RLS policies if clients ever access Supabase
-directly.

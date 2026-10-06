@@ -608,13 +608,11 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             or payload.get("isError") is True
             or (payload.get("error") and payload.get("success") is not True)
         ):
-            error = payload.get("error") or {}
-            message = error.get("message") if isinstance(error, dict) else str(error)
             raise ProviderOperationError(
                 provider=self.provider_id,
                 operation=operation,
                 code="provider_operation_rejected",
-                message=str(message or "Instamart rejected the operation."),
+                message="Instamart rejected the operation.",
                 retryable=False,
             )
 

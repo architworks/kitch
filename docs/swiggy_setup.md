@@ -36,5 +36,25 @@ SWIGGY_INSTAMART_PRODUCTION_APPROVED=true
 PROVIDER_CREDENTIAL_ENCRYPTION_KEY=YOUR_FERNET_KEY
 ```
 
+For the Vercel deployment in this repository, the exact callback includes the
+backend function prefix:
+
+`https://kitch-meal-planner.vercel.app/backend/api/grocery/providers/swiggy_instamart/oauth/callback`
+
+`FRONTEND_URL` is optional when the frontend and backend share an origin, as
+they do in the Vercel deployment. Kitch then uses a relative post-callback
+redirect, so an omitted variable cannot accidentally send the hosted browser
+to localhost. Set it only when the frontend intentionally uses another origin.
+
+The callback is accepted only with the same authenticated Kitch household
+session that started the flow. OAuth state, the encrypted token, provider cart,
+review and checkout authority are all scoped to that household's owner profile.
+
+Disconnect performs best-effort Swiggy logout and deletes Kitch's encrypted
+connection and provider review. Expired OAuth-flow records are purged after 24
+hours; inactive checkout reviews and long-expired connections default to 30
+days. The configurable windows and privacy boundary are documented in
+`security_and_privacy.md`.
+
 Never use automated tests to place a production order. Checkout remains
 available only through the explicit reviewed UI flow.

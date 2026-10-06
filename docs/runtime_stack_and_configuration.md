@@ -13,7 +13,7 @@ not describe component flows or agent topology.
 
 | Layer | Current implementation | Location |
 | --- | --- | --- |
-| Frontend | Next.js 16.2.6, React 19.2.4, ESLint 9 | `frontend/` |
+| Frontend | Next.js 16.3.x, React 19.2.4, ESLint 9 | `frontend/` |
 | API | FastAPI, Uvicorn, Pydantic | `backend/app/main.py` |
 | Agent runtime | Google ADK 2.x with native Gemini models | `backend/app/agent/` |
 | Household memory | Vertex AI Memory Bank or ADK in-memory memory | `backend/app/agent/memory.py` |
@@ -77,6 +77,8 @@ off the event loop, and live provider and memory probes have bounded timeouts.
 
 Current structured tables are:
 
+- `households` (hosted)
+- `household_accounts` (hosted)
 - `profiles`
 - `nutrition_targets`
 - `provider_selection_state`
@@ -143,8 +145,24 @@ receives it.
 An empty SQLite installation uses first-run household bootstrap. Every entered
 name creates a profile, the first profile owns shared state, household size is
 the number of profiles, and the browser supplies its system IANA timezone.
-Hosted Supabase retains its configured household. In both cases the frontend
-hydrates member names from backend state.
+Hosted Supabase requires Google Sign-In: one verified Google subject creates or
+loads one household and one owner profile. Other household members remain
+editable internal profiles, not login accounts. In both modes the frontend
+hydrates stable member IDs and editable names from backend state.
+
+| Variable | Purpose |
+| --- | --- |
+| `GOOGLE_OAUTH_CLIENT_ID` | Backend audience used to verify hosted Google ID tokens. |
+| `KITCH_AUTH_SESSION_SECRET` | At least 32 random characters used to sign HttpOnly Kitch sessions. |
+| `KITCH_LEGACY_HOUSEHOLD_OWNER_EMAIL` | One-time optional owner email allowed to claim the pre-authentication household. Remove after the account mapping exists. |
+| `KITCH_ALLOWED_ORIGINS` | Comma-separated exact browser origins allowed by CORS. |
+| `KITCH_EXPOSE_API_DOCS` | Keep unset/false in hosted environments; explicit opt-in for OpenAPI routes. |
+| `KITCH_MAX_REQUEST_BYTES` | Maximum non-upload request body size; defaults to 2 MiB. |
+| `KITCH_MAX_UPLOAD_BYTES` | Maximum image payload; defaults to 10 MiB. |
+
+The frontend uses the same public web-client ID in
+`NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID`. Direct Google Identity Services credential
+mode needs authorized JavaScript origins, not an OAuth redirect URI.
 
 ## Session and memory services
 
@@ -217,6 +235,7 @@ facts are never written by Kitch telemetry.
 | Variable | Purpose |
 | --- | --- |
 | `KITCH_ADK_TRACING_ENABLED` | Explicitly enable tracing. |
+| `KITCH_ALLOW_SENSITIVE_ADK_TRACES` | Required second opt-in because ADK spans may contain prompts, responses and tool arguments. |
 | `KITCH_ADK_TRACING_REQUIRED` | Fail startup if tracing cannot initialize. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP HTTP trace endpoint. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Shared OTLP endpoint. |
@@ -238,6 +257,7 @@ docker run --rm --name kitch-jaeger \
 
 ```bash
 KITCH_ADK_TRACING_ENABLED=true
+KITCH_ALLOW_SENSITIVE_ADK_TRACES=true
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
 OTEL_SERVICE_NAME=kitch-backend
 ```
@@ -247,6 +267,12 @@ OTEL_SERVICE_NAME=kitch-backend
 Provider behavior and checkout safety live in `system_architecture.md`; agent
 authority over provider tools lives in `ai_agent_topology.md`. This section
 contains configuration only.
+
+Provider retention defaults are configured with
+`KITCH_OAUTH_FLOW_RETENTION_HOURS=24`,
+`KITCH_PROVIDER_DRAFT_RETENTION_DAYS=30`, and
+`KITCH_EXPIRED_PROVIDER_CONNECTION_RETENTION_DAYS=30`. See
+`security_and_privacy.md` for the exact lifecycle and deletion behavior.
 
 ### Zepto
 
@@ -281,7 +307,7 @@ npx -y mcp-remote https://mcp.zepto.co.in/mcp
 | `SWIGGY_OAUTH_SCOPE` | Delegated scope; defaults to `mcp:tools`. |
 | `SWIGGY_OAUTH_CLIENT_NAME` | Dynamic-registration client name. |
 | `SWIGGY_INSTAMART_PRODUCTION_APPROVED` | Explicit production approval gate. |
-| `FRONTEND_URL` | Browser destination after OAuth callback. |
+| `FRONTEND_URL` | Optional cross-origin browser destination after OAuth callback; omit for same-origin deployment. |
 
 One dynamic OAuth client is stored per environment and one encrypted
 connection per household/provider/environment. OAuth state is single-use and

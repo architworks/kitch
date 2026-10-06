@@ -18,3 +18,4 @@ describes the intended architecture even when implementation is still pending.
 | [0002](0002-what-triggers-memory-generation.md) | Accepted | What causes Kitch to generate or update a memory. |
 | [0003](0003-how-memory-persists-without-persisting-chat-sessions.md) | Accepted | How long-term memory persists while chat sessions remain temporary. |
 | [0004](0004-why-grocery-provider-agents-use-mcp-tools-directly.md) | Accepted | Why provider cart agents use MCP tools directly instead of deterministic product-matching adapters. |
+| [0005](0005-how-google-sign-in-owns-a-household.md) | Accepted | How one hosted Google account owns one household while household members remain editable profiles. |

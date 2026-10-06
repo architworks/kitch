@@ -108,6 +108,51 @@ print('persisted')
         """)
         self.assertIn("safe", output)
 
+    def test_provider_security_records_expire_by_policy(self):
+        output = self.run_isolated("""
+            from datetime import datetime, timedelta, timezone
+            from app import supabase_client as db
+
+            db.bootstrap_household(['Ada'], 'UTC')
+            profile_id = db.get_household_profile_id()
+            old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+            db.save_provider_connection('swiggy_instamart', 'local', {
+                'access_token_ciphertext':'expired-ciphertext',
+                'expires_at':old,
+            })
+            assert db.get_provider_connection('swiggy_instamart', 'local') is None
+
+            db.save_provider_checkout_draft(
+                {'status':'draft'}, 'swiggy_instamart', 'local'
+            )
+            db.supabase.table('provider_checkout_drafts').update({
+                'updated_at': old,
+            }).eq('profile_id', profile_id).execute()
+            assert db.get_provider_checkout_draft('swiggy_instamart', 'local') is None
+
+            db.supabase.table('provider_oauth_flows').insert({
+                'profile_id':profile_id, 'provider':'swiggy_instamart',
+                'provider_environment':'local', 'state_hash':'old-state',
+                'code_verifier_ciphertext':'old-cipher', 'client_id':'client',
+                'redirect_uri':'http://localhost:8000/callback',
+                'expires_at':old,
+            }).execute()
+            db.create_provider_oauth_flow({
+                'provider':'swiggy_instamart', 'provider_environment':'local',
+                'state_hash':'new-state', 'code_verifier_ciphertext':'new-cipher',
+                'client_id':'client', 'redirect_uri':'http://localhost:8000/callback',
+                'expires_at':(
+                    datetime.now(timezone.utc) + timedelta(minutes=10)
+                ).isoformat(),
+            })
+            states = db.supabase.table('provider_oauth_flows').select(
+                'state_hash'
+            ).eq('profile_id', profile_id).execute().data
+            assert states == [{'state_hash':'new-state'}]
+            print('retained-minimally')
+        """)
+        self.assertIn("retained-minimally", output)
+
     def test_local_provider_key_is_created_once_and_can_decrypt_after_reload(self):
         output = self.run_isolated("""
             import os

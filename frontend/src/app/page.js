@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
+import Script from "next/script";
 import {
   DEFAULT_ACTIVE_USER,
   DEFAULT_HOUSEHOLD_SIZE,
@@ -322,6 +323,10 @@ const getTimeBasedGreeting = (date = new Date()) => {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const apiUrl = (path) => `${API_BASE_URL}${path}`;
+const apiFetch = (url, options = {}) => globalThis.fetch(url, {
+  credentials: "include",
+  ...options
+});
 
 const getMealTitle = (meal, fallback = "No recipe set") => {
   if (!meal) return fallback;
@@ -834,6 +839,14 @@ export default function Home() {
   const [onboardingMembers, setOnboardingMembers] = useState([""]);
   const [isOnboardingSaving, setIsOnboardingSaving] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
+  const [authState, setAuthState] = useState({ loading: true, required: false, authenticated: false, email: "" });
+  const [authError, setAuthError] = useState("");
+  const [timeGreeting, setTimeGreeting] = useState("Welcome");
+  const googleButtonRef = useRef(null);
+  const [memberEditorOpen, setMemberEditorOpen] = useState(false);
+  const [memberNameDrafts, setMemberNameDrafts] = useState({});
+  const [memberEditorError, setMemberEditorError] = useState("");
+  const [savingMemberId, setSavingMemberId] = useState("");
 
   // UI state variables
   const [chatInput, setChatInput] = useState("");
@@ -970,6 +983,7 @@ export default function Home() {
     }
     if (Array.isArray(data.household_members) && data.household_members.length > 0) {
       const members = data.household_members.map((member, index) => ({
+        id: member.id,
         value: member.name,
         label: index === 0 ? `${member.name} (me)` : member.name
       }));
@@ -1001,7 +1015,7 @@ export default function Home() {
   }, [applyConfirmedGroceryCart]);
 
   const fetchLiveState = async (userName) => {
-    const res = await fetch(apiUrl(`/api/state/${userName}`));
+    const res = await apiFetch(apiUrl(`/api/state/${userName}`));
     await requireSuccessfulResponse(res);
     return res.json();
   };
@@ -1009,7 +1023,7 @@ export default function Home() {
   const loadNutritionDashboard = useCallback(async (userName, focusDate) => {
     const weekStart = getWeekStartForDate(focusDate);
     const weekEnd = shiftIsoDate(weekStart, 6);
-    const res = await fetch(apiUrl(
+    const res = await apiFetch(apiUrl(
       `/api/nutrition/${encodeURIComponent(userName)}?start_date=${weekStart}&end_date=${weekEnd}`
     ));
     await requireSuccessfulResponse(res);
@@ -1023,7 +1037,7 @@ export default function Home() {
   }, []);
 
   const loadMealPlanWeek = useCallback(async (weekStart, focusDate = "") => {
-    const res = await fetch(apiUrl(`/api/meal-plan?week_start=${encodeURIComponent(weekStart)}`));
+    const res = await apiFetch(apiUrl(`/api/meal-plan?week_start=${encodeURIComponent(weekStart)}`));
     await requireSuccessfulResponse(res);
     const data = await res.json();
     const days = Array.isArray(data.days) ? data.days : [];
@@ -1041,7 +1055,7 @@ export default function Home() {
 
   const syncLatestRecipeGroceryPlan = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl("/api/recipe-grocery/plans/latest"));
+      const res = await apiFetch(apiUrl("/api/recipe-grocery/plans/latest"));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       setLatestRecipeGroceryPlan(data.plan || null);
@@ -1054,7 +1068,7 @@ export default function Home() {
 
   const syncProviderRegistry = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl("/api/grocery/providers"));
+      const res = await apiFetch(apiUrl("/api/grocery/providers"));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const providers = (Array.isArray(data.providers) ? data.providers : []).map(withProviderRoutes);
@@ -1090,7 +1104,7 @@ export default function Home() {
     setIsProviderAddressLoading(true);
     setProviderAddressLoadError("");
     try {
-      const res = await fetch(apiUrl(selectedProviderAddressesRoute));
+      const res = await apiFetch(apiUrl(selectedProviderAddressesRoute));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const addresses = data.addresses || null;
@@ -1146,6 +1160,7 @@ export default function Home() {
 
   const applyBootstrappedHousehold = useCallback((data) => {
     const members = (data?.members || []).map((member, index) => ({
+      id: member.id,
       value: member.name,
       label: index === 0 ? `${member.name} (me)` : member.name
     }));
@@ -1161,6 +1176,84 @@ export default function Home() {
     setHouseholdBootstrap(data);
   }, []);
 
+  const loadAuthSession = useCallback(async () => {
+    const response = await apiFetch(apiUrl("/api/auth/session"), { credentials: "include" });
+    await requireSuccessfulResponse(response);
+    const session = await response.json();
+    setAuthState({
+      loading: false,
+      required: Boolean(session.auth_required),
+      authenticated: Boolean(session.authenticated),
+      email: session.email || ""
+    });
+    return session;
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      loadAuthSession().catch(error => {
+        setAuthError(apiErrorMessage(error, "Kitch could not verify your sign-in."));
+        setAuthState({ loading: false, required: true, authenticated: false, email: "" });
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAuthSession]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setTimeGreeting(getTimeBasedGreeting()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleGoogleCredential = useCallback(async ({ credential }) => {
+    setAuthError("");
+    try {
+      const response = await apiFetch(apiUrl("/api/auth/google"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credential,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+        })
+      });
+      await requireSuccessfulResponse(response);
+      await loadAuthSession();
+      setHouseholdBootstrap(null);
+    } catch (error) {
+      setAuthError(apiErrorMessage(error, "Google sign-in could not be completed."));
+    }
+  }, [loadAuthSession]);
+
+  const signOut = useCallback(async () => {
+    try {
+      const response = await apiFetch(apiUrl("/api/auth/logout"), {
+        method: "POST",
+        credentials: "include"
+      });
+      await requireSuccessfulResponse(response);
+      window.google?.accounts?.id?.disableAutoSelect?.();
+      setMemberEditorOpen(false);
+      setHouseholdBootstrap(null);
+      setHouseholdMembers([]);
+      setAuthState({ loading: false, required: true, authenticated: false, email: "" });
+    } catch (error) {
+      setMemberEditorError(apiErrorMessage(error, "Kitch could not sign out."));
+    }
+  }, []);
+
+  const renderGoogleButton = useCallback(() => {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID;
+    if (!window.google?.accounts?.id || !googleButtonRef.current || !clientId) return;
+    window.google.accounts.id.initialize({ client_id: clientId, callback: handleGoogleCredential });
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline", size: "large", shape: "pill", text: "continue_with", width: 300
+    });
+  }, [handleGoogleCredential]);
+
+  useEffect(() => {
+    if (authState.required && !authState.authenticated) renderGoogleButton();
+  }, [authState.authenticated, authState.required, renderGoogleButton]);
+
   const submitHouseholdOnboarding = async (event) => {
     event.preventDefault();
     const members = onboardingMembers.map(name => name.trim()).filter(Boolean);
@@ -1172,7 +1265,7 @@ export default function Home() {
     setOnboardingError("");
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const response = await fetch(apiUrl("/api/household/bootstrap"), {
+      const response = await apiFetch(apiUrl("/api/household/bootstrap"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ members, timezone })
@@ -1187,8 +1280,9 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (authState.loading || (authState.required && !authState.authenticated)) return undefined;
     let ignore = false;
-    fetch(apiUrl("/api/household/bootstrap"))
+    apiFetch(apiUrl("/api/household/bootstrap"), { credentials: "include" })
       .then(requireSuccessfulResponse)
       .then(response => response.json())
       .then(data => {
@@ -1201,7 +1295,45 @@ export default function Home() {
         }
       });
     return () => { ignore = true; };
-  }, [applyBootstrappedHousehold]);
+  }, [applyBootstrappedHousehold, authState.authenticated, authState.loading, authState.required]);
+
+  const openMemberEditor = () => {
+    setMemberNameDrafts(householdMembers.reduce((drafts, member) => ({ ...drafts, [member.id]: member.value }), {}));
+    setMemberEditorError("");
+    setMemberEditorOpen(true);
+  };
+
+  const saveMemberName = async (member) => {
+    const nextName = String(memberNameDrafts[member.id] || "").trim();
+    if (!nextName || nextName === member.value) return;
+    setSavingMemberId(member.id);
+    setMemberEditorError("");
+    try {
+      const response = await apiFetch(apiUrl(`/api/household/members/${encodeURIComponent(member.id)}`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      });
+      await requireSuccessfulResponse(response);
+      const result = await response.json();
+      const oldName = member.value;
+      const members = result.members.map((item, index) => ({
+        id: item.id, value: item.name, label: index === 0 ? `${item.name} (me)` : item.name
+      }));
+      setHouseholdMembers(members);
+      setActiveUser(current => current === oldName ? nextName : current);
+      setUserProfiles(current => {
+        const next = { ...current, [nextName]: { ...(current[oldName] || {}), name: nextName } };
+        if (nextName !== oldName) delete next[oldName];
+        return next;
+      });
+    } catch (error) {
+      setMemberEditorError(apiErrorMessage(error, "Kitch could not rename that member."));
+    } finally {
+      setSavingMemberId("");
+    }
+  };
 
   useEffect(() => {
     if (!householdBootstrap?.initialized) return undefined;
@@ -1375,7 +1507,7 @@ export default function Home() {
   }, [clearProviderSyncTimers]);
 
   const saveHouseholdProfile = async (size) => {
-    const res = await fetch(apiUrl("/api/household/profile"), {
+    const res = await apiFetch(apiUrl("/api/household/profile"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1421,7 +1553,7 @@ export default function Home() {
     invalidateProviderReview();
     beginGroceryMutation();
     try {
-      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
+      const res = await apiFetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
@@ -1446,7 +1578,7 @@ export default function Home() {
     invalidateProviderReview();
     beginGroceryMutation();
     try {
-      const res = await fetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
+      const res = await apiFetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "DELETE"
       });
       await requireSuccessfulResponse(res);
@@ -1468,7 +1600,7 @@ export default function Home() {
     invalidateProviderReview();
     beginGroceryMutation();
     try {
-      const res = await fetch(apiUrl("/api/grocery/cart/planned"), {
+      const res = await apiFetch(apiUrl("/api/grocery/cart/planned"), {
         method: "DELETE"
       });
       await requireSuccessfulResponse(res);
@@ -1503,7 +1635,7 @@ export default function Home() {
 
     beginGroceryMutation();
     try {
-      const res = await fetch(apiUrl("/api/grocery/cart/items"), {
+      const res = await apiFetch(apiUrl("/api/grocery/cart/items"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestedItem)
@@ -1549,7 +1681,7 @@ export default function Home() {
     setIsProviderSyncing(true);
     startProviderSyncProgress();
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.syncCart), {
+      const res = await apiFetch(apiUrl(selectedProvider.routes.syncCart), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1588,7 +1720,7 @@ export default function Home() {
     setIsProviderSyncing(true);
     startProviderSyncProgress();
     try {
-      const res = await fetch(apiUrl(selectedProviderRevalidateRoute), {
+      const res = await apiFetch(apiUrl(selectedProviderRevalidateRoute), {
         method: "POST"
       });
       await requireSuccessfulResponse(res);
@@ -1636,7 +1768,7 @@ export default function Home() {
     ) return null;
     providerDraftRestoreInFlightRef.current = true;
     try {
-      const res = await fetch(apiUrl(selectedProviderCheckoutDraftRoute));
+      const res = await apiFetch(apiUrl(selectedProviderCheckoutDraftRoute));
       await requireSuccessfulResponse(res);
       const data = await res.json();
       let review = data.draft || null;
@@ -1651,7 +1783,7 @@ export default function Home() {
         if (selectedProviderId !== "swiggy_instamart") {
           resetPayload.selected_payment_method_id = null;
         }
-        const resetRes = await fetch(apiUrl(selectedProviderCheckoutDraftRoute), {
+        const resetRes = await apiFetch(apiUrl(selectedProviderCheckoutDraftRoute), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(resetPayload)
@@ -1703,7 +1835,7 @@ export default function Home() {
     if (!providerCartReview?.review_id || !selectedProvider.routes) return null;
     setIsUpdatingProviderReview(true);
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.checkoutDraft), {
+      const res = await apiFetch(apiUrl(selectedProvider.routes.checkoutDraft), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
@@ -1738,7 +1870,7 @@ export default function Home() {
     setProviderAddressLoadError("");
     setSelectedProviderAddress("");
     invalidateProviderReview();
-    fetch(apiUrl("/api/grocery/provider-selection"), {
+    apiFetch(apiUrl("/api/grocery/provider-selection"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selected_provider: provider.id })
@@ -1748,7 +1880,7 @@ export default function Home() {
   const startProviderConnection = async (provider) => {
     if (!provider?.routes?.connectionStart || providerSyncInFlightRef.current) return;
     try {
-      const res = await fetch(apiUrl(provider.routes.connectionStart), { method: "POST" });
+      const res = await apiFetch(apiUrl(provider.routes.connectionStart), { method: "POST" });
       await requireSuccessfulResponse(res);
       const data = await res.json();
       if (!data.authorization_url) throw new Error("The provider did not return an authorization URL.");
@@ -1761,7 +1893,7 @@ export default function Home() {
   const disconnectProvider = async (provider) => {
     if (!provider?.routes?.connection || providerSyncInFlightRef.current) return;
     try {
-      const res = await fetch(apiUrl(provider.routes.connection), { method: "DELETE" });
+      const res = await apiFetch(apiUrl(provider.routes.connection), { method: "DELETE" });
       await requireSuccessfulResponse(res);
       invalidateProviderReview();
       setProviderSavedAddresses(null);
@@ -1793,7 +1925,7 @@ export default function Home() {
         selected_payment_method_id: effectiveProviderPaymentMethod || null,
         order_review_acknowledged: true
       }) || providerCartReview;
-      const res = await fetch(apiUrl(selectedProvider.routes.placeOrder), {
+      const res = await apiFetch(apiUrl(selectedProvider.routes.placeOrder), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1837,7 +1969,7 @@ export default function Home() {
     setIsCheckingProviderPayment(true);
     startProviderSyncProgress();
     try {
-      const res = await fetch(apiUrl(selectedProvider.routes.paymentStatus), { method: "POST" });
+      const res = await apiFetch(apiUrl(selectedProvider.routes.paymentStatus), { method: "POST" });
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const review = data.review || data;
@@ -1870,7 +2002,7 @@ export default function Home() {
       message: `This removes every nutrition entry for ${activeUser} on ${formatPlanDate(diaryDate, { month: "long", day: "numeric", year: "numeric" })}.`,
       confirmLabel: "Clear day",
       onConfirm: async () => {
-        const res = await fetch(apiUrl(`/api/diary/clear/${encodeURIComponent(activeUser)}`), {
+        const res = await apiFetch(apiUrl(`/api/diary/clear/${encodeURIComponent(activeUser)}`), {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ confirmed: true, date: diaryDate }),
         });
@@ -1929,7 +2061,7 @@ export default function Home() {
       const route = nutritionEntryEditor.id
         ? `/api/diary/${encodeURIComponent(activeUser)}/entries/${nutritionEntryEditor.id}`
         : `/api/diary/${encodeURIComponent(activeUser)}/entries`;
-      const res = await fetch(apiUrl(route), {
+      const res = await apiFetch(apiUrl(route), {
         method: nutritionEntryEditor.id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1948,7 +2080,7 @@ export default function Home() {
 
   const deleteNutritionEntry = async (entryId) => {
     try {
-      const res = await fetch(apiUrl(`/api/diary/${encodeURIComponent(activeUser)}/entries/${entryId}`), {
+      const res = await apiFetch(apiUrl(`/api/diary/${encodeURIComponent(activeUser)}/entries/${entryId}`), {
         method: "DELETE"
       });
       await requireSuccessfulResponse(res);
@@ -1964,7 +2096,7 @@ export default function Home() {
     if (!nutritionGoalEditor) return;
     setIsNutritionSaving(true);
     try {
-      const res = await fetch(apiUrl(`/api/nutrition/targets/${encodeURIComponent(activeUser)}`), {
+      const res = await apiFetch(apiUrl(`/api/nutrition/targets/${encodeURIComponent(activeUser)}`), {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nutritionGoalEditor)
       });
@@ -1983,7 +2115,7 @@ export default function Home() {
 
   const patchPantry = async (changes) => {
     try {
-      const res = await fetch(apiUrl("/api/pantry"), {
+      const res = await apiFetch(apiUrl("/api/pantry"), {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expected_revision: pantryRevision, changes }),
       });
@@ -2001,7 +2133,7 @@ export default function Home() {
 
   const reconcileCartWithPantry = async () => {
     try {
-      const res = await fetch(apiUrl("/api/grocery-cart/reconcile-pantry"), {
+      const res = await apiFetch(apiUrl("/api/grocery-cart/reconcile-pantry"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expected_revision: pantryRevision }),
       });
@@ -2033,7 +2165,7 @@ export default function Home() {
     message: `This will remove all ${pantryStock.length} pantry item(s). The native cart will not change unless you explicitly update it from the pantry.`,
     confirmLabel: "Mark empty",
     onConfirm: async () => {
-      const res = await fetch(apiUrl("/api/pantry"), {
+      const res = await apiFetch(apiUrl("/api/pantry"), {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expected_revision: pantryRevision, items: [], confirmed: true }),
       });
@@ -2082,7 +2214,7 @@ export default function Home() {
         grocery_list: groceryList
       };
 
-      const res = await fetch(apiUrl("/api/chat"), {
+      const res = await apiFetch(apiUrl("/api/chat"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2138,13 +2270,13 @@ export default function Home() {
             message: act.impact?.message || "This action changes shared household state.",
             confirmLabel: "Confirm",
             onConfirm: async () => {
-              const confirmRes = await fetch(apiUrl(`/api/agent-actions/${act.action_id}/confirm`), { method: "POST" });
+              const confirmRes = await apiFetch(apiUrl(`/api/agent-actions/${act.action_id}/confirm`), { method: "POST" });
               await requireSuccessfulResponse(confirmRes);
               await syncLiveState(activeUser);
               triggerBannerAlert("Confirmed change completed.");
             },
             onCancel: async () => {
-              await fetch(apiUrl(`/api/agent-actions/${act.action_id}/cancel`), { method: "POST" });
+              await apiFetch(apiUrl(`/api/agent-actions/${act.action_id}/cancel`), { method: "POST" });
             },
           });
         }
@@ -2236,7 +2368,7 @@ export default function Home() {
         steps: [...prev.steps, "🧠 Running ADK multimodal vision analysis..."]
       }));
 
-      const res = await fetch(apiUrl("/api/upload-photo"), {
+      const res = await apiFetch(apiUrl("/api/upload-photo"), {
         method: "POST",
         body: formData
       });
@@ -2616,7 +2748,7 @@ export default function Home() {
     : "Upcoming dates";
   const focusMealTitle = firstPlannedFocusMeal.title;
   const focusMealSlotLabel = MEAL_SLOT_LABELS[firstPlannedFocusMeal.slot] || currentMealLabel;
-  const heroGreeting = `${getTimeBasedGreeting()}, ${activeUser}!`;
+  const heroGreeting = `${timeGreeting}, ${activeUser}!`;
   const focusMealContext = firstPlannedFocusMeal.planDate
     ? `${focusMealSlotLabel} for ${focusMealDateText}`
     : "No household meal plan yet";
@@ -2640,6 +2772,37 @@ export default function Home() {
       revealEarlierMessages();
     }
   };
+
+  if (authState.loading) {
+    return (
+      <main className="household-onboarding-shell" aria-busy="true">
+        <section className="household-onboarding-card">
+          <Image src="/kitch-chef-hat.svg" alt="" width={64} height={64} aria-hidden="true" />
+          <span className="eyebrow">Preparing Kitch</span>
+          <h1>Opening your kitchen…</h1>
+        </section>
+      </main>
+    );
+  }
+
+  if (authState.required && !authState.authenticated) {
+    return (
+      <main className="household-onboarding-shell">
+        <section className="household-onboarding-card kitch-sign-in-card">
+          <Image src="/kitch-chef-hat.svg" alt="" width={72} height={72} aria-hidden="true" />
+          <span className="eyebrow">Welcome to Kitch</span>
+          <h1>Open your household kitchen</h1>
+          <p>Sign in with Google to access your household’s plans, pantry, nutrition and grocery carts.</p>
+          <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={renderGoogleButton} />
+          <div ref={googleButtonRef} className="google-sign-in-button" />
+          {!process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID && (
+            <p className="household-onboarding-error">Google Sign-In is not configured for this deployment.</p>
+          )}
+          {authError && <p className="household-onboarding-error" role="alert">{authError}</p>}
+        </section>
+      </main>
+    );
+  }
 
   if (householdBootstrap === null) {
     return (
@@ -2929,8 +3092,8 @@ export default function Home() {
             <span>Active member</span>
             <strong>{activeUser}</strong>
           </div>
-          <button type="button" aria-label="Change active member" onClick={() => setChatInput("Switch active member to ")}>
-            ▾
+          <button type="button" aria-label="Manage household members" onClick={openMemberEditor}>
+            ⚙
           </button>
         </div>
       </aside>
@@ -4595,6 +4758,34 @@ export default function Home() {
                 setConfirmationDialog(null);
                 if (cancel) await cancel();
               }}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {memberEditorOpen && (
+        <div className="confirmation-backdrop" onMouseDown={() => setMemberEditorOpen(false)}>
+          <section className="confirmation-dialog household-member-dialog" role="dialog" aria-modal="true" aria-labelledby="member-editor-title" onMouseDown={event => event.stopPropagation()}>
+            <h2 id="member-editor-title">Household members</h2>
+            <p>Renaming a member keeps their nutrition history and other records intact.</p>
+            <div className="household-member-editor-list">
+              {householdMembers.map(member => (
+                <label key={member.id}>
+                  <span>{member.id === householdBootstrap.owner_profile_id ? "Household owner" : "Member"}</span>
+                  <div>
+                    <input value={memberNameDrafts[member.id] ?? member.value} onChange={event => setMemberNameDrafts(current => ({ ...current, [member.id]: event.target.value }))} />
+                    <button type="button" disabled={savingMemberId === member.id || String(memberNameDrafts[member.id] ?? member.value).trim() === member.value} onClick={() => saveMemberName(member)}>
+                      {savingMemberId === member.id ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {memberEditorError && <p className="household-onboarding-error" role="alert">{memberEditorError}</p>}
+            <div className="confirmation-actions">
+              {authState.required && (
+                <button type="button" className="danger-secondary" onClick={signOut}>Sign out</button>
+              )}
+              <button type="button" onClick={() => setMemberEditorOpen(false)}>Done</button>
             </div>
           </section>
         </div>

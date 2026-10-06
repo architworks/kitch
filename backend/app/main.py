@@ -1,17 +1,20 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
 import asyncio
+import hashlib
+import logging
 import os
 import time
 import json
 from uuid import uuid4
 from datetime import datetime, time as datetime_time, timedelta
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from collections import defaultdict, deque
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.core import runner, session_service, vision_runner
@@ -28,6 +31,18 @@ from app.providers.base import ProviderOperationError
 from app.providers.instamart import InstamartProviderAdapter
 from app.providers.registry import provider_registry
 from app.household_config import canonical_user_name
+from app.auth import (
+    HouseholdIdentity,
+    auth_required,
+    begin_identity_scope,
+    clear_session_cookie,
+    current_identity,
+    end_identity_scope,
+    issue_session,
+    session_from_request,
+    set_session_cookie,
+    verify_google_credential,
+)
 from google.genai.types import Content, Part
 from google.adk.events import Event, EventActions
 
@@ -64,6 +79,8 @@ from app.storage import (
     apply_meal_plan_edits,
     get_provider_checkout_draft,
     update_household_profile,
+    ensure_google_household,
+    update_household_member,
     update_macro_entry,
     delete_macro_entry,
     get_pending_agent_action,
@@ -89,6 +106,90 @@ from app.persistence import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger("kitch.api")
+MAX_UPLOAD_BYTES = int(os.environ.get("KITCH_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+MAX_REQUEST_BYTES = int(os.environ.get("KITCH_MAX_REQUEST_BYTES", str(2 * 1024 * 1024)))
+_rate_windows: dict[str, deque[float]] = defaultdict(deque)
+_rate_last_cleanup = 0.0
+MAX_RATE_LIMIT_IDENTITIES = 10_000
+
+
+def _rate_limit_for(path: str) -> tuple[int, int] | None:
+    if path == "/api/auth/google":
+        return (20, 600)
+    if path in {"/api/chat", "/api/upload-photo"}:
+        return (30 if path == "/api/chat" else 10, 60)
+    if path.endswith("/checkout/place-order"):
+        return (5, 300)
+    return None
+
+
+def _rate_limit_exceeded(key: str, maximum: int, window_seconds: int) -> bool:
+    """Apply a bounded process-local throttle without retaining stale clients."""
+    global _rate_last_cleanup
+    now = time.monotonic()
+    if now - _rate_last_cleanup >= 60:
+        cutoff = now - 600
+        for stored_key, stored_bucket in list(_rate_windows.items()):
+            while stored_bucket and stored_bucket[0] <= cutoff:
+                stored_bucket.popleft()
+            if not stored_bucket:
+                _rate_windows.pop(stored_key, None)
+        _rate_last_cleanup = now
+    if key not in _rate_windows and len(_rate_windows) >= MAX_RATE_LIMIT_IDENTITIES:
+        return True
+    bucket = _rate_windows[key]
+    cutoff = now - window_seconds
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if len(bucket) >= maximum:
+        return True
+    bucket.append(now)
+    return False
+
+
+def _security_headers(response: Response) -> Response:
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+    response.headers["Cache-Control"] = "no-store"
+    if os.environ.get("VERCEL", "").lower() == "1":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+
+
+def _configured_allowed_origins() -> list[str]:
+    """Return exact CORS origins without trusting local origins in hosted mode."""
+    configured = os.environ.get("KITCH_ALLOWED_ORIGINS", "").strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if auth_required():
+        return ["https://kitch-meal-planner.vercel.app"]
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def _provider_callback_destination(provider_id: str) -> str:
+    """Return a same-origin callback destination unless explicitly overridden."""
+    frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    suffix = f"/?provider_connection={provider_id}&connection_status=connected"
+    return f"{frontend_url}{suffix}" if frontend_url else suffix
+
+
+def _household_identity(value: Dict[str, Any]) -> HouseholdIdentity:
+    return HouseholdIdentity(
+        google_subject=str(value["google_subject"]),
+        email=str(value["email"]),
+        household_id=str(value["household_id"]),
+        owner_profile_id=str(value["owner_profile_id"]),
+        members=tuple(
+            {"id": str(member["id"]), "name": str(member["name"])}
+            for member in value.get("members") or []
+        ),
+    )
 
 grocery_checkout_service = GroceryCheckoutService(
     cart_mapper=apply_zepto_brand_memory_to_cart_items,
@@ -213,7 +314,11 @@ async def lifespan(app: FastAPI):
     """
     Refuse startup unless durable storage is correctly configured and ready.
     """
-    bootstrap = await asyncio.to_thread(get_household_bootstrap)
+    bootstrap = (
+        await asyncio.to_thread(get_household_bootstrap)
+        if not auth_required()
+        else {"initialized": False}
+    )
     retention_task = None
     if bootstrap.get("initialized"):
         await asyncio.to_thread(validate_persistence_readiness)
@@ -237,16 +342,19 @@ app = FastAPI(
     title="Kitch Backend Gateway",
     description="Python microservice running the Google ADK 2.0 agentic loops.",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if (not auth_required() or os.environ.get("KITCH_EXPOSE_API_DOCS") == "true") else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if (not auth_required() or os.environ.get("KITCH_EXPOSE_API_DOCS") == "true") else None,
 )
 
-# Enable CORS for Next.js frontend calls
+allowed_origins = _configured_allowed_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Vercel-OIDC-Token"],
 )
 
 @app.middleware("http")
@@ -262,21 +370,72 @@ async def persistence_postcondition(request: Request, call_next):
     memory_auth_token = begin_memory_auth_scope(
         request.headers.get("x-vercel-oidc-token")
     )
+    identity_token = None
     try:
+        raw_content_length = request.headers.get("content-length")
+        if raw_content_length:
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                content_length = MAX_REQUEST_BYTES + 1
+            request_limit = (
+                MAX_UPLOAD_BYTES + 1024 * 1024
+                if request.url.path == "/api/upload-photo"
+                else MAX_REQUEST_BYTES
+            )
+            if content_length > request_limit:
+                return _security_headers(JSONResponse(status_code=413, content={"detail": {
+                    "code": "request_too_large",
+                    "message": "This request is too large for Kitch to process.",
+                }}))
+        claims = None
+        if auth_required():
+            claims = session_from_request(request)
+            public_path = request.url.path in {
+                "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
+            }
+            if claims:
+                context = await asyncio.to_thread(
+                    ensure_google_household,
+                    str(claims["sub"]),
+                    str(claims["email"]),
+                    str(claims.get("name") or "Kitch household"),
+                    "UTC",
+                )
+                identity_token = begin_identity_scope(_household_identity(context))
+            elif not public_path:
+                return _security_headers(JSONResponse(status_code=401, content={"detail": {
+                    "code": "authentication_required",
+                    "message": "Sign in with Google to use this Kitch household.",
+                }}))
+        rate_limit = _rate_limit_for(request.url.path)
+        if rate_limit:
+            maximum, window_seconds = rate_limit
+            principal = str((claims or {}).get("sub") or (request.client.host if request.client else "unknown"))
+            key = f"{request.url.path}:{hashlib.sha256(principal.encode()).hexdigest()[:16]}"
+            if _rate_limit_exceeded(key, maximum, window_seconds):
+                response = JSONResponse(status_code=429, content={"detail": {
+                    "code": "rate_limited",
+                    "message": "Too many requests. Wait a moment and try again.",
+                }})
+                response.headers["Retry-After"] = str(window_seconds)
+                return _security_headers(response)
         response = await call_next(request)
         raise_recorded_persistence_failure()
-        return response
+        return _security_headers(response)
     except PersistenceError as error:
         if error.supabase_code == "40001":
-            return JSONResponse(status_code=409, content={"detail": {
+            return _security_headers(JSONResponse(status_code=409, content={"detail": {
                 "code": "pantry_revision_conflict",
                 "message": "The pantry changed elsewhere. Refresh and try again.",
-            }})
-        return JSONResponse(
+            }}))
+        return _security_headers(JSONResponse(
             status_code=503,
             content={"detail": error.public_detail()},
-        )
+        ))
     finally:
+        if identity_token is not None:
+            end_identity_scope(identity_token)
         end_persistence_scope(token)
         end_confirmation_scope(confirmation_token)
         end_memory_auth_scope(memory_auth_token)
@@ -301,6 +460,55 @@ async def provider_operation_exception_handler(
         status_code=error.status_code,
         content={"detail": error.public_detail()},
     )
+
+
+@app.post("/api/auth/google")
+async def google_sign_in_endpoint(payload: Dict[str, Any]):
+    if not auth_required():
+        raise HTTPException(status_code=404, detail="Hosted sign-in is not enabled locally.")
+    credential = str(payload.get("credential") or "")
+    timezone_name = str(payload.get("timezone") or "UTC")
+    claims = await asyncio.to_thread(verify_google_credential, credential)
+    context = await asyncio.to_thread(
+        ensure_google_household,
+        str(claims["sub"]),
+        str(claims["email"]),
+        str(claims.get("name") or "Kitch household"),
+        timezone_name,
+    )
+    response = JSONResponse({
+        "authenticated": True,
+        "email": str(claims["email"]),
+        "household": context,
+    })
+    set_session_cookie(response, issue_session(claims))
+    return response
+
+
+@app.get("/api/auth/session")
+async def auth_session_endpoint():
+    if not auth_required():
+        return {"auth_required": False, "authenticated": True}
+    identity = current_identity()
+    if identity is None:
+        return {"auth_required": True, "authenticated": False}
+    return {
+        "auth_required": True,
+        "authenticated": True,
+        "email": identity.email,
+        "household": {
+            "household_id": identity.household_id,
+            "owner_profile_id": identity.owner_profile_id,
+            "members": list(identity.members),
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout_endpoint():
+    response = JSONResponse({"authenticated": False})
+    clear_session_cookie(response)
+    return response
 
 # 1. Conversational Chat Agent Endpoint
 @app.post("/api/chat", response_model=ChatResponse)
@@ -440,9 +648,13 @@ async def chat_endpoint(payload: ChatRequest):
             
         return ChatResponse(text=text_reply, action=action)
         
-    except Exception as e:
-        print(f"Chat execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Chat execution failed")
+        raise HTTPException(status_code=500, detail={
+            "code": "chat_failed", "message": "Kitch could not complete that request. Please try again.",
+        })
 
 # 2. Visual Photo Ingestion & OCR Scanner Endpoint
 @app.post("/api/upload-photo")
@@ -454,7 +666,11 @@ async def upload_photo_endpoint(
 ):
     """Classify an image first, then route observations to the owning specialist."""
     try:
-        file_bytes = await file.read()
+        if file.content_type and not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=415, detail="Upload an image file.")
+        file_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(file_bytes) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="The image is too large to upload.")
         active_user = canonical_user_name(active_user)
         user_id = active_user.replace(" ", "_")
         session_id = f"kitch_chat_session_{user_id}"
@@ -561,9 +777,11 @@ async def upload_photo_endpoint(
         }
     except HTTPException:
         raise
-    except Exception as e:
-        print(f"Photo upload execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Photo upload execution failed")
+        raise HTTPException(status_code=500, detail={
+            "code": "photo_processing_failed", "message": "Kitch could not process that image. Please try again.",
+        })
 
 # 3. Live DB Synchronization State Routes
 @app.get("/api/household/bootstrap")
@@ -618,8 +836,9 @@ async def get_state_endpoint(user_name: str):
             "grocery_cart": grocery_cart,
             "latest_recipe_grocery_plan": latest_recipe_grocery_plan
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Live state load failed")
+        raise HTTPException(status_code=500, detail="Kitch could not load the household state.")
 
 
 @app.get("/api/meal-plan")
@@ -753,8 +972,23 @@ async def update_household_profile_endpoint(payload: Dict[str, Any]):
             timezone_name=payload.get("timezone_name", current.get("timezone_name")),
         )
         return {"status": "success", "profile": profile}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Household profile update failed")
+        raise HTTPException(status_code=500, detail="Kitch could not update the household settings.")
+
+
+@app.patch("/api/household/members/{member_id}")
+async def update_household_member_endpoint(member_id: str, payload: Dict[str, Any]):
+    """Rename one member without changing their stable profile identity."""
+    try:
+        member = update_household_member(member_id, str(payload.get("name") or ""))
+        return {
+            "status": "success",
+            "member": {"id": str(member["id"]), "name": member["full_name"]},
+            "members": get_household_members(),
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.patch("/api/nutrition/targets/{user_name}")
@@ -835,8 +1069,9 @@ async def get_grocery_cart_endpoint():
     """Returns the shared household native grocery cart."""
     try:
         return {"grocery_cart": get_grocery_cart()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Native cart read failed")
+        raise HTTPException(status_code=500, detail="Kitch could not load the grocery cart.")
 
 @app.post("/api/grocery/cart/items")
 async def add_grocery_cart_item_endpoint(payload: Dict[str, Any]):
@@ -854,8 +1089,9 @@ async def add_grocery_cart_item_endpoint(payload: Dict[str, Any]):
             "pantryAllocation": payload.get("pantryAllocation", {}),
         })
         return {"status": "success", "item": item, "grocery_cart": get_grocery_cart()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Native cart add failed")
+        raise HTTPException(status_code=500, detail="Kitch could not add that grocery item.")
 
 @app.patch("/api/grocery/cart/items/{item_id}")
 async def update_grocery_cart_item_endpoint(item_id: str, payload: Dict[str, Any]):
@@ -863,8 +1099,9 @@ async def update_grocery_cart_item_endpoint(item_id: str, payload: Dict[str, Any
     try:
         item = update_grocery_cart_item(item_id, payload)
         return {"status": "success", "item": item, "grocery_cart": get_grocery_cart()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Native cart update failed")
+        raise HTTPException(status_code=500, detail="Kitch could not update that grocery item.")
 
 @app.delete("/api/grocery/cart/items/{item_id}")
 async def delete_grocery_cart_item_endpoint(item_id: str):
@@ -872,8 +1109,9 @@ async def delete_grocery_cart_item_endpoint(item_id: str):
     try:
         res = delete_grocery_cart_item(item_id)
         return {"status": "success" if res else "failed", "grocery_cart": get_grocery_cart()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Native cart delete failed")
+        raise HTTPException(status_code=500, detail="Kitch could not remove that grocery item.")
 
 @app.delete("/api/grocery/cart/planned")
 async def clear_planned_grocery_cart_endpoint():
@@ -881,8 +1119,9 @@ async def clear_planned_grocery_cart_endpoint():
     try:
         res = clear_planned_grocery_cart()
         return {"status": "success" if res else "failed", "grocery_cart": get_grocery_cart()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Planned cart clear failed")
+        raise HTTPException(status_code=500, detail="Kitch could not clear the planned grocery rows.")
 
 # 5. Recipe + Grocery Artifact Routes
 @app.get("/api/recipe-grocery/plans")
@@ -890,8 +1129,9 @@ async def list_recipe_grocery_plans_endpoint(limit: int = 10):
     """Returns recent recipe+ingredient artifacts for future recipe UI surfaces."""
     try:
         return {"plans": list_recipe_grocery_plans(limit=limit)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Recipe list failed")
+        raise HTTPException(status_code=500, detail="Kitch could not load saved recipes.")
 
 @app.get("/api/recipe-grocery/plans/latest")
 async def latest_recipe_grocery_plan_endpoint():
@@ -899,8 +1139,9 @@ async def latest_recipe_grocery_plan_endpoint():
     try:
         plans = list_recipe_grocery_plans(limit=1)
         return {"plan": plans[0] if plans else None}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Latest recipe load failed")
+        raise HTTPException(status_code=500, detail="Kitch could not load the latest recipe.")
 
 @app.get("/api/recipe-grocery/plans/{plan_id}")
 async def get_recipe_grocery_plan_endpoint(plan_id: str):
@@ -912,8 +1153,9 @@ async def get_recipe_grocery_plan_endpoint(plan_id: str):
         return {"plan": plan}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Recipe load failed")
+        raise HTTPException(status_code=500, detail="Kitch could not load that recipe.")
 
 
 @app.patch("/api/recipe-grocery/plans/{plan_id}")
@@ -942,8 +1184,9 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
     """
     try:
         return {"grocery_list": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Grocery calculation failed")
+        raise HTTPException(status_code=500, detail="Kitch could not calculate the grocery list.")
 
 # 7. Provider-neutral grocery commerce
 @app.get("/api/grocery/providers")
@@ -994,10 +1237,7 @@ async def provider_oauth_callback_endpoint(
             status_code=422,
         )
     await adapter.oauth.complete(code, state)
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
-    return RedirectResponse(
-        f"{frontend_url}/?provider_connection={provider_id}&connection_status=connected"
-    )
+    return RedirectResponse(_provider_callback_destination(provider_id))
 
 
 @app.delete("/api/grocery/providers/{provider_id}/connection")
@@ -1071,6 +1311,13 @@ async def liveness_check():
 async def readiness_check():
     """Verify core persistence and report optional components separately."""
     try:
+        if auth_required() and current_identity() is None:
+            persistence = await asyncio.to_thread(validate_persistence_readiness)
+            return {
+                "status": "ready",
+                "service": "kitch-backend",
+                "persistence": persistence.get("status", "ready"),
+            }
         persistence, providers, memory = await asyncio.gather(
             asyncio.to_thread(validate_persistence_readiness),
             provider_registry.readiness(),

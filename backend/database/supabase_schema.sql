@@ -2,15 +2,38 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+CREATE TABLE IF NOT EXISTS public.households (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    timezone_name TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+    legacy_claimable BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- 1. Create User Profiles Table
 CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id UUID NOT NULL REFERENCES public.households(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
     household_size INTEGER NOT NULL DEFAULT 3 CHECK (household_size >= 1),
     timezone_name TEXT NOT NULL DEFAULT 'Asia/Kolkata',
     pantry_revision BIGINT NOT NULL DEFAULT 0,
     pantry_reviewed_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    member_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_household_name_unique
+    ON public.profiles(household_id, lower(btrim(full_name)));
+
+CREATE TABLE IF NOT EXISTS public.household_accounts (
+    google_subject TEXT PRIMARY KEY CHECK (length(btrim(google_subject)) > 0),
+    household_id UUID NOT NULL UNIQUE REFERENCES public.households(id) ON DELETE CASCADE,
+    owner_profile_id UUID NOT NULL UNIQUE REFERENCES public.profiles(id) ON DELETE RESTRICT,
+    email TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- Nutrition goals are user-specific operational state, not household-profile
@@ -250,6 +273,112 @@ CREATE INDEX IF NOT EXISTS idx_provider_oauth_flows_expiry
 CREATE INDEX IF NOT EXISTS idx_pending_agent_actions_profile_status
     ON public.pending_agent_actions(profile_id, status, expires_at);
 
+-- Resolve one verified Google subject to exactly one household. The optional
+-- legacy claim is decided by trusted backend configuration, never by the
+-- browser, and can succeed only while an unclaimed legacy household exists.
+CREATE OR REPLACE FUNCTION public.ensure_google_household(
+    p_google_subject TEXT,
+    p_email TEXT,
+    p_display_name TEXT,
+    p_timezone_name TEXT,
+    p_claim_legacy BOOLEAN DEFAULT FALSE
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    account public.household_accounts%ROWTYPE;
+    v_household_id UUID;
+    v_owner_profile_id UUID;
+    member_name TEXT;
+    members JSONB;
+BEGIN
+    IF NULLIF(btrim(p_google_subject), '') IS NULL OR NULLIF(btrim(p_email), '') IS NULL THEN
+        RAISE EXCEPTION 'verified Google subject and email are required' USING ERRCODE = '22023';
+    END IF;
+
+    SELECT * INTO account
+    FROM public.household_accounts
+    WHERE google_subject = p_google_subject
+    FOR UPDATE;
+
+    IF FOUND THEN
+        UPDATE public.household_accounts
+        SET email = p_email, last_seen_at = now()
+        WHERE google_subject = p_google_subject
+        RETURNING * INTO account;
+    ELSE
+        IF p_claim_legacy THEN
+            SELECT h.id INTO v_household_id
+            FROM public.households h
+            WHERE h.legacy_claimable = TRUE
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.household_accounts a WHERE a.household_id = h.id
+              )
+            ORDER BY h.created_at
+            LIMIT 1
+            FOR UPDATE;
+        END IF;
+
+        IF v_household_id IS NOT NULL THEN
+            SELECT p.id INTO v_owner_profile_id
+            FROM public.profiles p
+            WHERE p.household_id = v_household_id
+            ORDER BY p.member_order, p.created_at
+            LIMIT 1;
+            UPDATE public.households
+            SET legacy_claimable = FALSE, updated_at = now()
+            WHERE id = v_household_id;
+        ELSE
+            INSERT INTO public.households(timezone_name)
+            VALUES (COALESCE(NULLIF(btrim(p_timezone_name), ''), 'UTC'))
+            RETURNING id INTO v_household_id;
+
+            member_name := COALESCE(
+                NULLIF(btrim(p_display_name), ''), split_part(p_email, '@', 1), 'Household owner'
+            );
+            INSERT INTO public.profiles(
+                id, household_id, full_name, household_size, timezone_name,
+                member_order, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(), v_household_id, member_name, 1,
+                COALESCE(NULLIF(btrim(p_timezone_name), ''), 'UTC'), 0, now(), now()
+            ) RETURNING id INTO v_owner_profile_id;
+            INSERT INTO public.nutrition_targets(profile_id) VALUES (v_owner_profile_id);
+        END IF;
+
+        INSERT INTO public.household_accounts(
+            google_subject, household_id, owner_profile_id, email
+        ) VALUES (
+            p_google_subject, v_household_id, v_owner_profile_id, p_email
+        ) RETURNING * INTO account;
+    END IF;
+
+    SELECT COALESCE(jsonb_agg(
+        jsonb_build_object('id', p.id, 'name', p.full_name)
+        ORDER BY p.member_order, p.created_at
+    ), '[]'::jsonb)
+    INTO members
+    FROM public.profiles p
+    WHERE p.household_id = account.household_id;
+
+    RETURN jsonb_build_object(
+        'google_subject', account.google_subject,
+        'email', account.email,
+        'household_id', account.household_id,
+        'owner_profile_id', account.owner_profile_id,
+        'members', members
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BOOLEAN)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BOOLEAN)
+    TO service_role;
+
 CREATE OR REPLACE FUNCTION public.claim_pending_agent_action(
     p_profile_id uuid, p_action_id uuid
 )
@@ -278,6 +407,8 @@ DECLARE
     policy_name text;
 BEGIN
     FOREACH table_name IN ARRAY ARRAY[
+        'households',
+        'household_accounts',
         'profiles',
         'nutrition_targets',
         'provider_selection_state',

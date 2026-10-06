@@ -105,6 +105,7 @@ Before running the scenarios, prepare a consistent household test context.
 | Flexible household preference memory | 1.3, 8.2, 9.1–9.6 |
 | Household settings and domain routing | 1.8, 4.4, 7.3, 8.2 |
 | Destructive-action and order authority boundaries | 2.6, 4.4, 7.3, 8.4 |
+| Hosted identity, stable member profiles and household isolation | 12.1–12.5 |
 
 ## Meal-Plan Persistence Regression Context
 
@@ -1066,6 +1067,70 @@ section. The expected weekday depends on the run date.
 - Fail criteria: Any simulated catalogue/cart data appears, OAuth state can be
   reused, or the callback uses an origin other than exact localhost.
 
+## Section 12: Hosted Sign-In and Household Isolation
+
+### Scenario 12.1 - First Google Sign-In Creates One Household
+
+- Setup: Use a verified Google account that has no `household_accounts` row.
+- Action: Open the hosted app and complete Google Sign-In.
+- Expected behavior: Kitch creates one household, one owner profile, and one
+  account mapping, then opens the empty household without a second onboarding
+  form.
+- Pass criteria: Reloading uses the signed HttpOnly session and returns the same
+  household and stable owner profile ID.
+- Fail criteria: Multiple households are created, the browser chooses a
+  household ID, or a Supabase credential reaches the browser.
+
+### Scenario 12.2 - Returning Account Loads Only Its Household
+
+- Setup: Prepare two unrelated Google test accounts with distinct Kitch
+  households and recognizable pantry/cart rows.
+- Action: Sign in with each account in separate isolated browser contexts.
+- Expected behavior: Each account sees only its own members, plans, pantry,
+  nutrition, native cart, provider connection and checkout draft.
+- Pass criteria: Direct requests containing another household's member or row
+  ID return no cross-household data and perform no mutation.
+- Fail criteria: Any shared state, provider token/status, address, cart or
+  checkout review crosses the household boundary.
+
+### Scenario 12.3 - Member Rename Preserves Identity and History
+
+- Setup: Choose a non-owner member with at least one nutrition entry.
+- Action: Rename that member from the household-member editor, reload, and open
+  their nutrition history.
+- Expected behavior: The new name appears everywhere while the profile ID and
+  existing history remain unchanged.
+- Pass criteria: The old display name is gone, the new one persists, and linked
+  records retain the original profile ID.
+- Fail criteria: A replacement profile is created, history disappears, or an
+  out-of-household profile can be renamed.
+
+### Scenario 12.4 - Sign-Out and Protected Hosted APIs
+
+- Action: Sign out, reload, and call representative state, chat, pantry and
+  grocery-provider routes without the session cookie.
+- Expected behavior: The sign-in screen appears and protected routes return a
+  normalized 401. Liveness and safe readiness remain public.
+- Pass criteria: OpenAPI is unavailable by default and public health responses
+  contain no provider, schema, credential or household detail.
+- Fail criteria: Household state remains accessible or raw backend errors are
+  displayed.
+
+### Scenario 12.5 - Swiggy Connection Belongs to the Signed-In Owner
+
+- Setup: Sign in, begin Swiggy connection, and preserve the returned OAuth
+  state without completing a real order.
+- Action: Attempt the callback without the Kitch session and from another
+  household session, then complete it from the initiating household.
+- Expected behavior: The first two attempts fail without consuming usable
+  authority. The initiating household can complete the single-use flow and is
+  the only household that sees the connection and resulting cart review.
+- Pass criteria: Disconnect removes that household's encrypted token and
+  checkout draft. No token, PKCE verifier or raw authorization response is
+  browser-visible.
+- Fail criteria: Callback state is portable across sessions/households or
+  another household can use the connection.
+
 ## Final Run Summary Template
 
 Close every artifact with a functional summary.
@@ -1084,6 +1149,7 @@ Close every artifact with a functional summary.
 - Persistent household memory:
 - Datetime awareness:
 - Local runtime and persistence:
+- Hosted sign-in and household isolation:
 
 ## Regressions Found
 

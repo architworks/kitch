@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -97,6 +98,30 @@ def wait_for_http(
     fail(f"the {label} did not become ready within {int(timeout)} seconds.")
 
 
+def child_process_options() -> dict[str, object]:
+    """Keep each server and its descendants in one stoppable process group."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def stop_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+
 def start() -> None:
     npm = require_program("npm")
     if not VENV_PYTHON.exists():
@@ -110,13 +135,18 @@ def start() -> None:
         if not port_available(port):
             fail(f"port {port} is already in use.")
 
-    environment = os.environ.copy()
-    environment.update(values)
+    # Explicit shell/deployment variables take precedence over the convenience
+    # local env file, matching normal twelve-factor configuration behavior.
+    environment = {**values, **os.environ}
     environment["NEXT_PUBLIC_API_BASE_URL"] = "http://localhost:8000"
+    # Polling avoids native watcher exhaustion on macOS and container hosts
+    # with restrictive kqueue/inotify limits. It affects local development only.
+    environment.setdefault("WATCHPACK_POLLING", "true")
     backend = subprocess.Popen(
         [str(VENV_PYTHON), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
         cwd=BACKEND,
         env=environment,
+        **child_process_options(),
     )
     frontend = None
     try:
@@ -129,6 +159,7 @@ def start() -> None:
             [npm, "run", "dev", "--", "--hostname", "127.0.0.1", "--port", "3000"],
             cwd=FRONTEND,
             env=environment,
+            **child_process_options(),
         )
         wait_for_http(frontend, "http://localhost:3000", "frontend")
         print("\nKitch is running at http://localhost:3000")
@@ -140,8 +171,8 @@ def start() -> None:
         print("\nStopping Kitch…")
     finally:
         for process in (frontend, backend):
-            if process is not None and process.poll() is None:
-                process.terminate()
+            if process is not None:
+                stop_process_tree(process)
         for process in (frontend, backend):
             if process is not None:
                 try:

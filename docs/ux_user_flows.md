@@ -71,6 +71,20 @@ saved provider default, select payment, approve the final snapshot, or order.
 
 ## 3. User Types and Context
 
+### Hosted Household Owner
+
+The hosted app opens with Google Sign-In. One Google account creates or loads
+one household and is the only authentication principal for that household.
+Signing out closes access to the complete household state.
+
+Household member names can be edited from the active-member card. A rename is a
+display change: the member's nutrition history and all stable profile links
+remain intact. Members do not independently sign in, and switching the active
+member changes personal nutrition context rather than checkout authority.
+
+The local SQLite experience does not show Google Sign-In. Its normal first-run
+screen asks for member names and creates the single local household.
+
 ### Household Member
 
 A household member uses Kitch to:

@@ -1,8 +1,7 @@
 # Kitch household identity configuration.
 #
-# SQLite resolves these values from the locally bootstrapped household. These
-# constants retain the existing hosted Supabase household until registration is
-# made first-class there as well.
+# SQLite resolves these values from the locally bootstrapped household. Hosted
+# requests resolve them from the verified Google account's household context.
 
 HOUSEHOLD_MEMBERS = ("Archit", "Anubhav", "Naman")
 DEFAULT_ACTIVE_USER = HOUSEHOLD_MEMBERS[0]
@@ -19,8 +18,7 @@ USER_ID_MAP = {
     "Naman": "22222222-2222-2222-2222-222222222222",
 }
 
-# Shared household tables currently reuse one configured profile id until a
-# first-class household table is introduced.
+# Local prototype defaults remain available before SQLite onboarding only.
 HOUSEHOLD_OWNER_NAME = DEFAULT_ACTIVE_USER
 
 
@@ -39,6 +37,18 @@ def canonical_user_name(user_name: str | None) -> str:
     local = _local_client()
     if local is not None:
         return local.canonical_name(user_name)
+    from app.auth import current_identity
+    identity = current_identity()
+    if identity is not None:
+        wanted = str(user_name or "").strip().casefold()
+        for member in identity.members:
+            if member["name"].casefold() == wanted:
+                return member["name"]
+        owner = next(
+            (member for member in identity.members if member["id"] == identity.owner_profile_id),
+            identity.members[0],
+        )
+        return owner["name"]
     if not user_name:
         return DEFAULT_ACTIVE_USER
 
@@ -52,6 +62,14 @@ def get_user_id(user_name: str | None) -> str:
     local = _local_client()
     if local is not None:
         return local.user_id(user_name)
+    from app.auth import current_identity
+    identity = current_identity()
+    if identity is not None:
+        wanted = str(user_name or "").strip().casefold()
+        for member in identity.members:
+            if member["name"].casefold() == wanted:
+                return member["id"]
+        return identity.owner_profile_id
     return USER_ID_MAP[canonical_user_name(user_name)]
 
 
@@ -60,6 +78,10 @@ def get_household_profile_id() -> str:
     local = _local_client()
     if local is not None:
         return local.owner_id()
+    from app.auth import current_identity
+    identity = current_identity()
+    if identity is not None:
+        return identity.owner_profile_id
     return USER_ID_MAP[HOUSEHOLD_OWNER_NAME]
 
 
@@ -69,4 +91,8 @@ def household_members_text() -> str:
     if local is not None:
         state = local.bootstrap_status()
         return ", ".join(member["name"] for member in state["members"])
+    from app.auth import current_identity
+    identity = current_identity()
+    if identity is not None:
+        return ", ".join(member["name"] for member in identity.members)
     return ", ".join(HOUSEHOLD_MEMBERS)

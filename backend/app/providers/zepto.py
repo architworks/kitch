@@ -8,6 +8,7 @@ are controlled by the remote MCP server.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -19,6 +20,9 @@ from app.providers.base import (
     ProviderCapabilities,
     ProviderDescriptor,
 )
+
+
+logger = logging.getLogger("kitch.providers.zepto")
 
 
 class ZeptoProviderAdapter(GroceryProviderAdapter):
@@ -165,7 +169,7 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                 if tool_error:
                     return self._error(
                         "address_lookup_failed",
-                        f"Zepto saved addresses could not be read: {tool_error}",
+                        "Zepto could not return saved addresses.",
                     )
 
                 return {
@@ -175,9 +179,10 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                     "message": "Zepto saved addresses are available. Select one before syncing the cart.",
                 }
         except Exception as exc:
+            logger.warning("Zepto address lookup failed: error_type=%s", type(exc).__name__)
             return self._error(
                 "address_lookup_failed",
-                f"Zepto saved addresses could not be read: {exc}",
+                "Zepto could not return saved addresses.",
             )
 
     async def sync_cart(
@@ -207,9 +212,10 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
         try:
             return await self._sync_cart(items, selected_address_id)
         except Exception as exc:
+            logger.warning("Zepto cart sync failed: error_type=%s", type(exc).__name__)
             return self._error(
                 "mcp_sync_failed",
-                f"Zepto MCP cart sync failed: {exc}",
+                "Zepto could not synchronize the cart.",
             )
 
     async def revalidate_cart(self, draft: Dict[str, Any]) -> Dict[str, Any]:
@@ -225,9 +231,10 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
         try:
             return await self._revalidate_cart(draft, selected_address_id)
         except Exception as exc:
+            logger.warning("Zepto cart revalidation failed: error_type=%s", type(exc).__name__)
             return self._error(
                 "mcp_revalidation_failed",
-                f"Zepto cart revalidation failed: {exc}",
+                "Zepto could not revalidate the cart.",
             )
 
     async def _sync_cart(
@@ -362,7 +369,8 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
             try:
                 search_result = await self._call_tool(session, "search_products", {"query": search_term, "pageNumber": 0})
             except Exception as exc:
-                unavailable_items.append({"name": item.get("name"), "reason": f"Zepto search failed: {exc}"})
+                logger.warning("Zepto product search failed: error_type=%s", type(exc).__name__)
+                unavailable_items.append({"name": item.get("name"), "reason": "Zepto product search failed."})
                 continue
 
             product = self._first_orderable_product(search_result, item)
@@ -688,7 +696,8 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                     "cart_summary": self.normalize_cart_summary(cart),
                 }
         except Exception as exc:
-            return self._error("mcp_get_cart_failed", f"Zepto MCP cart read failed: {exc}")
+            logger.warning("Zepto MCP cart read failed: error_type=%s", type(exc).__name__)
+            return self._error("mcp_get_cart_failed", "Zepto could not return the cart.")
 
     async def place_order(self, review: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Place the currently reviewed Zepto cart order through MCP."""
@@ -709,7 +718,8 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                     )
                 return {"status": "success", "provider": "zepto", "order_result": result}
         except Exception as exc:
-            return self._error("mcp_order_failed", f"Zepto MCP order placement failed: {exc}")
+            logger.warning("Zepto MCP order placement failed: error_type=%s", type(exc).__name__)
+            return self._error("mcp_order_failed", "Zepto could not complete the order request.")
 
     def _error(self, code: str, message: str, **extra: Any) -> Dict[str, Any]:
         return {"status": "error", "provider": "zepto", "code": code, "message": message, **extra}
@@ -1205,9 +1215,10 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                 ),
             )
         except Exception as exc:
+            logger.warning("Zepto store context failed: error_type=%s", type(exc).__name__)
             return self._error(
                 "store_context_unavailable",
-                f"Zepto could not establish store context for the selected address: {exc}",
+                "Zepto could not establish store context for the selected address.",
                 selected_address_id=selected_address_id,
             )
 
@@ -1215,7 +1226,7 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
         if tool_error:
             return self._error(
                 "store_context_unavailable",
-                f"Zepto could not establish store context for the selected address: {tool_error}",
+                "Zepto could not establish store context for the selected address.",
                 selected_address_id=selected_address_id,
             )
 
@@ -1561,7 +1572,8 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                 else:
                     context["addresses"] = addresses
             except Exception as exc:
-                context["address_error"] = str(exc)
+                logger.warning("Zepto checkout address read failed: error_type=%s", type(exc).__name__)
+                context["address_error"] = "Zepto could not return saved addresses."
 
         if payment_tool:
             context["payment_tool"] = payment_tool
@@ -1573,7 +1585,8 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
                 else:
                     context["payment_methods"] = payment_methods
             except Exception as exc:
-                context["payment_error"] = str(exc)
+                logger.warning("Zepto payment-method read failed: error_type=%s", type(exc).__name__)
+                context["payment_error"] = "Zepto could not return payment methods."
 
         return context
 
