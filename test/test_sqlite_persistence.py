@@ -51,7 +51,7 @@ class SQLitePersistenceTests(unittest.TestCase):
             assert db.list_recipe_grocery_plans() == []
             assert [row['version'] for row in db.supabase.connect().execute(
                 'SELECT version FROM schema_migrations ORDER BY version'
-            ).fetchall()] == [1, 2]
+            ).fetchall()] == [1, 2, 3]
             print('ok')
         """)
         self.assertIn("ok", output)
@@ -127,6 +127,7 @@ print('persisted')
             )
             db.supabase.table('provider_checkout_drafts').update({
                 'updated_at': old,
+                'expires_at': old,
             }).eq('profile_id', profile_id).execute()
             assert db.get_provider_checkout_draft('swiggy_instamart', 'local') is None
 

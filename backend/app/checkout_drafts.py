@@ -170,6 +170,10 @@ def refresh_checkout_eligibility(
     """Re-derive denormalized review eligibility under the current policy."""
     if str(row.get("status") or "") not in {"blocked", "ready", "partial", "changed"}:
         return row
+    if (row.get("checkout_context") or {}).get("native_cart_stale") is True:
+        # Only a fresh provider sync/revalidation may clear this durable marker.
+        # Re-reading an old provider projection must never mint a new approval.
+        return row
 
     result = {
         "items": row.get("matched_items") or [],
@@ -385,6 +389,11 @@ def invalidate_draft_for_native_drift(
     provider_label = str(existing.get("provider") or "provider").replace("_", " ").title()
     blockers.append(f"The native grocery selection changed after the {provider_label} cart was reviewed.")
     payload = {
+        "checkout_context": {
+            **(existing.get("checkout_context") or {}),
+            "native_cart_stale": True,
+            "native_cart_stale_at": _now_iso(),
+        },
         "selected_payment_method_id": None,
         "order_review_acknowledged": False,
         "can_place_order": False,
@@ -442,12 +451,21 @@ def save_order_outcome(
         "payment_pending": "payment_pending",
         "unknown": "unknown",
     }.get(outcome_status, "blocked")
+    payment_state = dict(outcome.get("payment_state") or existing.get("payment_state") or {})
+    # Payment deep links are immediate hand-off material, not durable review
+    # state. The caller still receives them in the direct checkout response.
+    payment_state.pop("upi_intent_url", None)
+    payment_state.pop("bridge_url", None)
+    checkout_context = dict(existing.get("checkout_context") or {})
+    if outcome.get("message") is not None:
+        checkout_context["provider_message"] = str(outcome["message"])
     payload = {
         "status": status,
         "checkout_attempt_id": outcome.get("checkout_attempt_id") or existing.get("checkout_attempt_id"),
         "provider_order_ids": outcome.get("provider_order_ids") or existing.get("provider_order_ids") or [],
         "order_results": outcome.get("order_results") or existing.get("order_results") or [],
-        "payment_state": outcome.get("payment_state") or existing.get("payment_state") or {},
+        "payment_state": payment_state,
+        "checkout_context": checkout_context,
         "ambiguous_order": bool(outcome.get("ambiguous_order")),
         "can_place_order": False,
         "order_review_acknowledged": False,

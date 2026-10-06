@@ -79,6 +79,23 @@ class NativeGroceryCartMutationTests(unittest.TestCase):
 
 
 class ProviderChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_checkout_request_is_refused_without_touching_any_cart(self):
+        service = AsyncMock()
+        fake_main = ModuleType("app.main")
+        fake_main.grocery_checkout_service = service
+
+        with patch.dict(sys.modules, {"app.main": fake_main}):
+            result = await tools.sync_provider_cart_tool(
+                user_request="Place my Instamart order now",
+                provider="swiggy_instamart",
+                native_cart_changes=[{"action": "add", "name": "Milk", "amount": 1}],
+            )
+
+        service.sync_from_chat.assert_not_awaited()
+        self.assertEqual(result["code"], "ui_checkout_required")
+        self.assertFalse(result["native_cart_changed"])
+        self.assertFalse(result["provider_cart_changed"])
+
     async def test_provider_cart_read_accepts_natural_provider_name(self):
         service = AsyncMock()
         service.read_cart_from_chat.return_value = {

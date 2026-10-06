@@ -280,6 +280,21 @@ class MigrationContractTests(unittest.TestCase):
         self.assertIn("claim_provider_checkout_operation", migration)
         self.assertIn("release_provider_checkout_operation", migration)
 
+    def test_provider_checkout_retention_has_a_database_owned_purge(self):
+        migration = (
+            ROOT
+            / "backend"
+            / "database"
+            / "migrations"
+            / "20261006_expire_provider_checkout_state.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("expires_at", migration)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pg_cron", migration)
+        self.assertIn("kitch-expire-provider-checkout-state", migration)
+        self.assertIn("DELETE FROM public.provider_checkout_drafts", migration)
+        self.assertIn("- 'upi_intent_url'", migration)
+        self.assertIn("- 'bridge_url'", migration)
+
     def test_profile_preferences_are_moved_to_their_own_domains(self):
         migration = (
             ROOT

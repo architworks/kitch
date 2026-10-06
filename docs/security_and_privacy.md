@@ -63,11 +63,11 @@ household is removed. Provider security records use shorter defaults:
 | --- | --- |
 | OAuth state and encrypted PKCE verifier | Expiring and single-use; expired records are purged after 24 hours when another flow starts. |
 | Active provider connection | Retained until disconnect or token expiry. Connections expired for more than 30 days are deleted when next accessed. |
-| Checkout review, mapping, payment and order-attempt state | Retained for reload/recovery, then deleted after 30 days of inactivity when next accessed. |
+| Checkout review, mapping, minimal payment state and order outcome | Expires 24 hours after its latest active update. PostgreSQL purges expired rows hourly; draft reads also purge, and SQLite purges at startup. Payment hand-off URLs are never persisted. |
 | Environment-level dynamic OAuth client registration | Retained while that provider/environment remains configured; it contains no household access token. |
 
 The windows are configurable with `KITCH_OAUTH_FLOW_RETENTION_HOURS`,
-`KITCH_PROVIDER_DRAFT_RETENTION_DAYS`, and
+`KITCH_PROVIDER_DRAFT_RETENTION_HOURS`, and
 `KITCH_EXPIRED_PROVIDER_CONNECTION_RETENTION_DAYS`.
 
 Swiggy processes delegated authentication, account addresses, catalogue/cart

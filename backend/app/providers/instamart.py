@@ -158,7 +158,9 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 "fulfilled_quantity": metadata.get("fulfilled_quantity"),
                 "excess_quantity": metadata.get("excess_quantity"),
                 "preference_source": metadata.get("preference_source") or "none",
-                "alternatives_considered": metadata.get("alternatives_considered") or [],
+                "alternatives_considered": self._safe_alternatives(
+                    metadata.get("alternatives_considered") or []
+                ),
                 "confidence": metadata.get("confidence"),
                 "reason": metadata.get("reasoning") or metadata.get("reason") or "Selected by the Instamart cart agent.",
             }
@@ -447,7 +449,9 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                         "The selected Instamart payment method is no longer supported.",
                     )
                 CommerceToolPolicy.authorize("checkout")
-                payload = self._unwrap(await client.call_tool(session, "checkout", args))
+                raw_checkout = await client.call_tool(session, "checkout", args)
+                provider_message = self._provider_message(raw_checkout)
+                payload = self._unwrap(raw_checkout)
                 self._raise_tool_failure(payload, "checkout")
                 order_ids = self._find_values(payload, {"orderId", "order_id"})
                 status_text = " ".join(str(value) for value in self._find_values(payload, {"status", "paymentStatus"})).lower()
@@ -470,7 +474,12 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                         "polling_interval_ms": self._first(payload, "pollingIntervalInMs"),
                         "max_poll_time_ms": self._first(payload, "maxTimeToPollForInMs"),
                     },
-                    "message": str(payload.get("message") or "Instamart checkout completed."),
+                    # Swiggy requires clients to show its returned checkout
+                    # message verbatim.  It commonly lives in the MCP envelope,
+                    # outside the nested data object used for order details.
+                    "message": provider_message or str(
+                        payload.get("message") or "Instamart checkout completed."
+                    ),
                 }
         except ProviderOperationError as exc:
             return self._error(exc.code, exc.message)
@@ -601,6 +610,24 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         self._raise_tool_failure(value, "provider_call")
         data = value.get("data")
         return data if isinstance(data, dict) else value
+
+    def _provider_message(self, payload: Any) -> str:
+        """Return the provider-authored message without reconstructing it."""
+        value = to_plain(payload)
+        if isinstance(value, dict) and isinstance(value.get("content"), list):
+            for block in value["content"]:
+                text = block.get("text") if isinstance(block, dict) else None
+                if not isinstance(text, str):
+                    continue
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict) and parsed.get("message") is not None:
+                    return str(parsed["message"])
+        if isinstance(value, dict) and value.get("message") is not None:
+            return str(value["message"])
+        return ""
 
     def _raise_tool_failure(self, payload: Dict[str, Any], operation: str) -> None:
         if (
@@ -905,7 +932,28 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             return []
 
     def _normalize_order_results(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        results = []
+        results: List[Dict[str, Any]] = []
+        # Checkout may split one cart across stores. Preserve every provider
+        # result, including a failed store result that has no order ID.
+        order_lists = self._lists_for_keys(payload, {"orders", "orderResults", "order_results"})
+        if order_lists:
+            for value in order_lists[0]:
+                if not isinstance(value, dict):
+                    continue
+                order_id = self._first(value, "orderId", "order_id")
+                error = self._first(value, "error", "errorMessage", "error_message")
+                results.append({
+                    "order_id": str(order_id) if order_id else None,
+                    "status": str(
+                        self._first(value, "status", "orderStatus", "order_status")
+                        or ("failed" if error else "unknown")
+                    ),
+                    "message": str(
+                        self._first(value, "message", "description") or error or ""
+                    ),
+                })
+            return results
+
         for value in self._all_objects(payload):
             order_id = self._first(value, "orderId", "order_id")
             if order_id:
@@ -913,10 +961,30 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                     {
                         "order_id": str(order_id),
                         "status": str(self._first(value, "status", "orderStatus") or "unknown"),
-                        "message": str(self._first(value, "message", "description") or ""),
+                        "message": str(
+                            self._first(value, "message", "description", "error") or ""
+                        ),
                     }
                 )
         return list({result["order_id"]: result for result in results}.values())
+
+    @staticmethod
+    def _safe_alternatives(alternatives: Any) -> List[Any]:
+        """Keep agent reasoning but never expose unconfirmed candidate prices."""
+        if not isinstance(alternatives, list):
+            return []
+        safe: List[Any] = []
+        for alternative in alternatives:
+            if not isinstance(alternative, dict):
+                safe.append(alternative)
+                continue
+            safe.append({
+                key: value
+                for key, value in alternative.items()
+                if "price" not in str(key).casefold()
+                and str(key).casefold() not in {"mrp", "amount", "value"}
+            })
+        return safe
 
     def _mark_401(self, exc: Exception) -> None:
         text = str(exc).lower()
@@ -1011,9 +1079,12 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 if key in value:
                     value = value[key]
                     break
-        text = re.sub(r"[^0-9.\-]", "", str(value))
-        if not text:
+        # Never concatenate multiple numbers from display copy such as
+        # "₹70 MRP ₹175". An ambiguous display string is unavailable, not 70175.
+        matches = re.findall(r"-?\d[\d,]*(?:\.\d+)?", str(value))
+        if len(matches) != 1:
             return None
+        text = matches[0].replace(",", "")
         try:
             return int((Decimal(text) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         except (InvalidOperation, ValueError):

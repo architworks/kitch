@@ -14,10 +14,7 @@ The most recent provider run is
 | ID | Severity | Status | Immediate problem |
 | --- | --- | --- | --- |
 | KI-001 | High | Open | Instamart may omit valid variants or apply a preference belonging to another item. |
-| KI-002 | Medium | Open | Instamart search-candidate prices can contain corrupted minor-unit values. |
-| KI-003 | High | Open | Native-cart drift can be overwritten and a stale provider draft can become `ready` again. |
 | KI-004 | Medium | Open | Instamart unresolved items are duplicated and the displayed not-found count is wrong. |
-| KI-005 | High | Open | A chat checkout request can erase an existing provider review even though checkout is refused. |
 | OP-002 | Critical | Open | The hosted Vercel backend function returns HTTP 500 for liveness, readiness, state, and chat. |
 | SEC-001 | Medium | Monitoring | Next.js currently brings in a transitive `baseline-browser-mapping` advisory for which npm reports no available fix. |
 
@@ -60,64 +57,6 @@ their own, a reason to reject a product.
 - Retest eggs, bread, butter, unrelated-preference isolation, multiple brands,
   and multiple pack sizes against a live connected provider.
 
-## KI-002: Corrupted candidate-level price metadata
-
-- **Area:** Instamart search normalization and agent match records
-- **First reproduced:** 2026-08-16
-
-### Observed behavior
-
-Candidate `price_minor` values were orders of magnitude larger than the real
-price. A bread ultimately confirmed at ₹70 correctly appeared as `7000` minor
-units in the provider cart, while earlier candidate metadata contained
-`70701751`. The confirmed provider bill and payable total were correct.
-
-### Probable cause
-
-Loosely structured MCP search output is being copied into the match record
-without an explicit money field and scale. A display string or multiple numeric
-fragments may be interpreted as one amount.
-
-### Required fix
-
-- Read candidate price only from an explicit provider money field with known
-  currency and scale.
-- Store missing or ambiguous candidate prices as unavailable; never guess.
-- Compare the selected candidate's price with the confirmed cart result while
-  allowing a genuine provider-authorized price change.
-- Keep provider-returned subtotal, fees, discounts, taxes, and payable total
-  authoritative.
-
-## KI-003: Native-cart drift can revive a stale provider draft
-
-- **Area:** Durable checkout draft and order safety
-- **First reproduced:** 2026-08-16
-
-### Observed behavior
-
-After synchronizing and approving a provider cart, deleting its native cart row
-cleared payment and acknowledgement. A later draft read nevertheless returned
-the stale provider draft with `status="ready"`, `can_place_order=true`, and no
-blockers. The frontend separately noticed the mismatch and kept checkout
-disabled, but the backend representation was unsafe.
-
-### Probable cause
-
-`invalidate_draft_for_native_drift()` marks the draft blocked, after which
-`refresh_checkout_eligibility()` recomputes readiness from the old stored native
-snapshot and provider result. The generic refresh can remove the drift blocker.
-
-### Required fix
-
-- Make native-drift invalidation durable and non-overridable by generic
-  eligibility refresh.
-- A stale draft must never expose `can_place_order=true`, a confirmation token,
-  or an empty blocker list.
-- Require synchronization from the current native selection before payment and
-  acknowledgement can be restored.
-- Add a backend regression test that performs invalidation followed by the same
-  read/refresh path used by the API.
-
 ## KI-004: Duplicate unresolved Instamart rows
 
 - **Area:** Instamart reconciliation and provider review UI
@@ -131,17 +70,6 @@ for the same native item.
 Deduplicate unavailable results by stable native item ID after reconciliation,
 preserving the most useful combined reasoning. Counts and acknowledgement text
 must use unique unresolved native items.
-
-## KI-005: Refused chat checkout can erase the provider draft
-
-- **Area:** Agent routing and durable checkout state
-- **First reproduced:** 2026-10-04
-
-Chat correctly refused “Place my Instamart order now,” but the previously
-reviewed provider draft disappeared immediately afterward. A checkout refusal
-must be completely read-only: it must not synchronize, invalidate, disconnect,
-or delete checkout state. Add a regression test that snapshots the draft,
-submits a chat checkout request, and asserts byte-equivalent durable state.
 
 ## Operational blockers
 

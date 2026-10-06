@@ -5416,6 +5416,33 @@ button {
   font-size: 13px;
 }
 
+.provider-order-results {
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.provider-order-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(74, 103, 65, 0.16);
+  border-radius: 10px;
+}
+
+.provider-order-result > span {
+  text-transform: capitalize;
+}
+
+.provider-order-result > small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .provider-stale-review {
   grid-column: 1 / -1;
   display: grid;

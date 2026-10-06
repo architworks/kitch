@@ -178,6 +178,7 @@ REQUIRED_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "last_validated_at",
         "operation_id",
         "lease_expires_at",
+        "expires_at",
         "created_at",
         "updated_at",
     ),
@@ -1252,6 +1253,11 @@ _PROVIDER_DRAFT_WRITABLE_FIELDS = {
 }
 
 
+def _provider_draft_expiry_iso() -> str:
+    hours = max(1, int(os.environ.get("KITCH_PROVIDER_DRAFT_RETENTION_HOURS", "24")))
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+
+
 def _normalize_provider_checkout_draft_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row)
     for field in _PROVIDER_DRAFT_JSON_FIELDS:
@@ -1270,6 +1276,7 @@ def get_provider_checkout_draft(
     provider: str,
     provider_environment: str,
 ) -> Dict[str, Any] | None:
+    purge_expired_provider_checkout_drafts()
     rows = _read_rows(
         "get_provider_checkout_draft",
         "provider_checkout_drafts",
@@ -1283,12 +1290,7 @@ def get_provider_checkout_draft(
     )
     if not rows:
         return None
-    draft = _normalize_provider_checkout_draft_row(rows[0])
-    retention_days = max(1, int(os.environ.get("KITCH_PROVIDER_DRAFT_RETENTION_DAYS", "30")))
-    if _older_than(draft.get("updated_at"), days=retention_days):
-        delete_provider_checkout_draft(provider, provider_environment)
-        return None
-    return draft
+    return _normalize_provider_checkout_draft_row(rows[0])
 
 
 def save_provider_checkout_draft(
@@ -1307,6 +1309,7 @@ def save_provider_checkout_draft(
             "provider": provider,
             "provider_environment": provider_environment,
             "updated_at": _now_iso(),
+            "expires_at": _provider_draft_expiry_iso(),
         }
     )
     row = _confirmed_row(
@@ -1317,6 +1320,19 @@ def save_provider_checkout_draft(
         .execute(),
     )
     return _normalize_provider_checkout_draft_row(row)
+
+
+def purge_expired_provider_checkout_drafts() -> int:
+    """Delete expired checkout material across all households."""
+    data = _execute(
+        "purge_expired_provider_checkout_drafts",
+        "provider_checkout_drafts",
+        lambda: supabase.table("provider_checkout_drafts")
+        .delete()
+        .lte("expires_at", _now_iso())
+        .execute(),
+    )
+    return len(data) if isinstance(data, list) else 0
 
 
 def delete_provider_checkout_draft(provider: str, provider_environment: str) -> bool:

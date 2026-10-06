@@ -13,10 +13,12 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.checkout_drafts import (  # noqa: E402
     checkout_snapshot_hash,
+    invalidate_draft_for_native_drift,
     native_snapshot_matches,
     refresh_checkout_eligibility,
     save_initial_draft,
     save_revalidated_draft,
+    save_order_outcome,
 )
 
 
@@ -352,6 +354,62 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertTrue(refreshed["can_place_order"])
         self.assertEqual(refreshed["order_blockers"], [])
         self.assertTrue(refreshed["confirmation_token"])
+
+    def test_native_cart_drift_stays_blocked_until_a_fresh_provider_sync(self):
+        initial = persisted_row({
+            "status": "ready",
+            "native_items": [self.native_item()],
+            "matched_items": self.successful_result()["items"],
+            "provider_cart": self.successful_result()["provider_cart"],
+            "cart_summary": self.successful_result()["cart_summary"],
+            "checkout_context": self.successful_result()["checkout_context"],
+            "payment_options": self.successful_result()["payment_options"],
+            "store_context": self.successful_result()["store_context"],
+            "can_place_order": True,
+            "order_blockers": [],
+            "confirmation_token": "old-token",
+        })
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ) as save:
+            invalidated = invalidate_draft_for_native_drift(initial)
+            refreshed = refresh_checkout_eligibility(invalidated, "Swiggy Instamart")
+
+        self.assertEqual(save.call_count, 1)
+        self.assertTrue(refreshed["checkout_context"]["native_cart_stale"])
+        self.assertEqual(refreshed["status"], "blocked")
+        self.assertFalse(refreshed["can_place_order"])
+        self.assertIsNone(refreshed["confirmation_token"])
+
+    def test_saved_order_outcome_keeps_message_but_not_payment_urls(self):
+        initial = persisted_row({
+            "status": "checkout_pending",
+            "checkout_context": {},
+            "payment_state": {},
+        })
+        outcome = {
+            "status": "success",
+            "message": "Exact Swiggy success message",
+            "provider_order_ids": ["order-1"],
+            "order_results": [{"order_id": "order-1", "status": "PLACED"}],
+            "payment_state": {
+                "status": "confirmed",
+                "order_id": "order-1",
+                "upi_intent_url": "gpay://sensitive",
+                "bridge_url": "https://sensitive.example",
+            },
+        }
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ):
+            saved = save_order_outcome(initial, outcome)
+
+        self.assertEqual(saved["checkout_context"]["provider_message"], outcome["message"])
+        self.assertEqual(saved["payment_state"]["order_id"], "order-1")
+        self.assertNotIn("upi_intent_url", saved["payment_state"])
+        self.assertNotIn("bridge_url", saved["payment_state"])
 
     def test_native_snapshot_detects_quantity_or_membership_drift(self):
         native_item = self.native_item()

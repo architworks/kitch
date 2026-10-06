@@ -777,6 +777,10 @@ automated or browser-test order against production.
   value descending. The financial sidebar shows provider-returned subtotal,
   fees, discounts, and total. A line sum may be labelled **Item subtotal** only;
   it must not become payable total when adjustments are unknown.
+- Money parsing check: Feed a display field containing both a sale price and an
+  MRP. Kitch must mark that field unavailable instead of joining the numeric
+  fragments into a fabricated amount. Unconfirmed candidate prices are not
+  persisted or shown as authoritative.
 - Partial-cart check: When at least one selected item is confirmed and another
   is unresolved, clearly separate **ready to order** and **not found** items.
   Unresolved items are excluded from the provider order but do not block the
@@ -819,6 +823,12 @@ automated or browser-test order against production.
   and there is no implicit provider failover.
 - Concurrency check: A persisted provider/environment lease serializes sync,
   repair, and ordering across reloads and backend instances.
+- Native-drift check: Change a selected native row, read the draft repeatedly,
+  and restart the backend. The draft remains blocked with no confirmation token
+  until an explicit provider resync succeeds; a read must never revive it.
+- Retention check: Expire a draft without reading it. The scheduled/database
+  purge removes its provider cart, payment state, and order outcome after the
+  configured 24-hour window. Payment hand-off URLs must never be stored.
 - Pass criteria: No provider operation starts without explicit refresh or final
   order approval, repair produces an exact confirmed cart, stale approval cannot
   survive material change, and provider state stays isolated.
@@ -843,6 +853,12 @@ automated or browser-test order against production.
   agent, a cart-sync request, and a newly discovered mutating MCP tool. All must
   be denied. Only the final UI Place Order endpoint may carry checkout
   authority; browser and automated tests must stop before a real order.
+- Read-only refusal check: Snapshot an existing provider draft, ask chat to
+  **Place my Instamart order now**, and confirm the request is refused before
+  any native-cart or provider-cart service runs. The draft remains unchanged.
+- Provider-result check: A successful Swiggy fixture displays the exact
+  provider-authored success message. A multi-store response renders every
+  store/order result separately, including failures that have no order ID.
 - Recovery check: Persist checkout-attempt ID, provider order IDs, partial
   results, pending payment, and ambiguous outcomes. On timeout, inspect
   documented order history before retry. If duplicate risk remains, store

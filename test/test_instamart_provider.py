@@ -34,9 +34,16 @@ class FakeContext:
 
 
 class FakeInstamartClient:
-    def __init__(self, *, checkout_error=False, live_optional_address_schema=False):
+    def __init__(
+        self,
+        *,
+        checkout_error=False,
+        live_optional_address_schema=False,
+        checkout_payload=None,
+    ):
         self.calls = []
         self.checkout_error = checkout_error
+        self.checkout_payload = checkout_payload
         names = {
             "get_addresses", "search_products", "your_go_to_items",
             "update_cart", "get_cart", "checkout", "get_orders",
@@ -91,7 +98,10 @@ class FakeInstamartClient:
         if name == "checkout":
             if self.checkout_error:
                 raise TimeoutError("ambiguous timeout")
-            return {"success": True, "data": {"orderId": "order-1", "status": "PLACED"}}
+            return self.checkout_payload or {
+                "success": True,
+                "data": {"orderId": "order-1", "status": "PLACED"},
+            }
         if name == "get_orders":
             return {"success": True, "data": {"orders": []}}
         raise AssertionError(f"Unexpected direct tool call: {name}")
@@ -282,6 +292,43 @@ class InstamartProviderTests(unittest.TestCase):
         ):
             result = asyncio.run(adapter.place_order(review))
         self.assertEqual(result["status"], "success")
+
+    def test_checkout_preserves_exact_provider_message_and_each_store_result(self):
+        client = FakeInstamartClient(checkout_payload={
+            "success": True,
+            "message": "Your Instamart orders were placed. Track both deliveries separately.",
+            "data": {
+                "orders": [
+                    {"orderId": "order-1", "status": "PLACED", "message": "Store one confirmed"},
+                    {"status": "FAILED", "error": "Store two became unavailable"},
+                ]
+            },
+        })
+        review = {
+            "selected_address_id": "home-1",
+            "selected_payment_method_id": "Cash",
+            "payment_options": [{"id": "Cash", "kind": "cod", "provider_value": "Cash"}],
+        }
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id="test-multi-store-order",
+        ):
+            result = asyncio.run(self.adapter(client).place_order(review))
+
+        self.assertEqual(
+            result["message"],
+            "Your Instamart orders were placed. Track both deliveries separately.",
+        )
+        self.assertEqual(len(result["order_results"]), 2)
+        self.assertEqual(result["order_results"][1]["status"], "FAILED")
+        self.assertEqual(result["order_results"][1]["message"], "Store two became unavailable")
+
+    def test_price_parser_rejects_display_text_with_multiple_amounts(self):
+        adapter = self.adapter()
+        self.assertEqual(adapter._minor("₹70"), 7000)
+        self.assertEqual(adapter._minor({"amount": "70.00"}), 7000)
+        self.assertIsNone(adapter._minor("₹70 MRP ₹175"))
 
     def test_recorded_fixture_covers_pack_preference_and_containment_cases(self):
         fixture_path = ROOT / "test" / "fixtures" / "instamart_agent_catalog.json"

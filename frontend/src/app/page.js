@@ -1965,7 +1965,7 @@ export default function Home() {
       clearProviderSyncTimers();
       setProviderSyncStage("complete");
       triggerBannerAlert(data.status === "success"
-        ? `${selectedProvider.label} order placement request completed.`
+        ? (data.result?.message || `${selectedProvider.label} order placement request completed.`)
         : `${selectedProvider.label} order could not be placed.`);
     } catch (e) {
       console.error(`Failed to place ${selectedProvider.label} order`, e);
@@ -2669,6 +2669,10 @@ export default function Home() {
     : "";
   const effectiveProviderPaymentMethod = selectedProviderPaymentMethod || instamartSolePaymentId;
   const providerPaymentState = providerCartReview?.payment_state || {};
+  const providerOrderMessage = providerCheckoutContext.provider_message || "";
+  const providerOrderResults = Array.isArray(providerCartReview?.order_results)
+    ? providerCartReview.order_results
+    : [];
   const providerPaymentPending = providerCartReview?.status === "payment_pending";
   const providerOrderAmbiguous = providerCartReview?.status === "unknown" || providerCartReview?.ambiguous_order;
   const providerOrderBlockers = Array.isArray(providerCartReview?.order_blockers) ? providerCartReview.order_blockers : [];
@@ -4441,11 +4445,22 @@ export default function Home() {
                             </strong>
                             <span>
                               {providerOrderCompleted
-                                ? `${selectedProvider.label} confirmed this order.`
+                                ? (providerOrderMessage || `${selectedProvider.label} confirmed this order.`)
                                 : providerOrderAmbiguous
                                   ? `Kitch will not resubmit this checkout. Verify it in ${selectedProvider.label} before taking another action.`
                                   : `Payment is ${providerPaymentState.status || "pending"}. Do not place the order again.`}
                             </span>
+                            {providerOrderResults.length > 0 && (
+                              <div className="provider-order-results" aria-label="Provider order results">
+                                {providerOrderResults.map((orderResult, idx) => (
+                                  <div className="provider-order-result" key={`${orderResult?.order_id || "store"}-${idx}`}>
+                                    <strong>{orderResult?.order_id ? `Order ${orderResult.order_id}` : `Store result ${idx + 1}`}</strong>
+                                    <span>{orderResult?.status || "Unknown status"}</span>
+                                    {orderResult?.message && <small>{orderResult.message}</small>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {providerPaymentPending && selectedProvider.capabilities?.payment_status && (
                               <button
                                 type="button"

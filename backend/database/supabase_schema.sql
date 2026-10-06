@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS public.provider_checkout_drafts (
     last_validated_at TIMESTAMP WITH TIME ZONE,
     operation_id UUID,
     lease_expires_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (now() + interval '24 hours'),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE (profile_id, provider, provider_environment)
@@ -266,6 +267,8 @@ CREATE INDEX IF NOT EXISTS idx_grocery_cart_items_profile_recipe_plan ON public.
 CREATE INDEX IF NOT EXISTS idx_macro_diary_profile_consumed_at ON public.macro_diary(profile_id, consumed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_provider_checkout_drafts_profile_provider
     ON public.provider_checkout_drafts(profile_id, provider, provider_environment);
+CREATE INDEX IF NOT EXISTS idx_provider_checkout_drafts_expiry
+    ON public.provider_checkout_drafts(expires_at);
 CREATE INDEX IF NOT EXISTS idx_provider_connections_profile_provider
     ON public.provider_connections(profile_id, provider, provider_environment);
 CREATE INDEX IF NOT EXISTS idx_provider_oauth_flows_expiry
@@ -1286,3 +1289,23 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION public.delete_recipe_grocery_plan(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_recipe_grocery_plan(uuid, uuid) TO service_role;
+
+-- Provider checkout payloads may contain provider carts, payment state, and
+-- order outcomes. Purge expired rows independently of application traffic.
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM cron.job
+        WHERE jobname = 'kitch-expire-provider-checkout-state'
+    ) THEN
+        PERFORM cron.schedule(
+            'kitch-expire-provider-checkout-state',
+            '17 * * * *',
+            $command$
+                DELETE FROM public.provider_checkout_drafts
+                WHERE expires_at <= now();
+            $command$
+        );
+    END IF;
+END $$;

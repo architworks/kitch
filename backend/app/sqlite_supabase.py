@@ -270,6 +270,14 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ELSE rowid
         END;
     """),
+    (3, """
+        ALTER TABLE provider_checkout_drafts ADD COLUMN expires_at TEXT;
+        UPDATE provider_checkout_drafts
+        SET expires_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', updated_at, '+24 hours')
+        WHERE expires_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_provider_checkout_drafts_expiry
+            ON provider_checkout_drafts(expires_at);
+    """),
 )
 
 
@@ -582,6 +590,11 @@ class SQLiteQuery:
                             "expires_at",
                             (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
                         )
+                    if self.table == "provider_checkout_drafts":
+                        row.setdefault(
+                            "expires_at",
+                            (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+                        )
                     columns = list(row)
                     values = [self.client.encode_value(self.table, column, row[column]) for column in columns]
                     placeholders = ",".join("?" for _ in columns)
@@ -882,8 +895,12 @@ class SQLiteRPC:
         ).fetchone()
         if not existing:
             conn.execute(
-                "INSERT INTO provider_checkout_drafts(id,profile_id,provider,provider_environment,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                (str(uuid4()), p_profile_id, p_provider, p_provider_environment, now, now),
+                "INSERT INTO provider_checkout_drafts(id,profile_id,provider,provider_environment,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    str(uuid4()), p_profile_id, p_provider, p_provider_environment,
+                    now, now,
+                    (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+                ),
             )
         cursor = conn.execute(
             "UPDATE provider_checkout_drafts SET operation_id=?,lease_expires_at=?,updated_at=? WHERE profile_id=? AND provider=? AND provider_environment=? AND (operation_id IS NULL OR lease_expires_at IS NULL OR lease_expires_at<=? OR operation_id=?)",

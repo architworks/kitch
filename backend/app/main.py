@@ -48,6 +48,7 @@ from google.adk.events import Event, EventActions
 
 # Import backend-neutral structured-state operations.
 from app.storage import (
+    DATABASE_BACKEND,
     get_pantry_stock,
     get_macro_diary,
     get_nutrition_dashboard,
@@ -78,6 +79,7 @@ from app.storage import (
     get_meal_plan_snapshot,
     apply_meal_plan_edits,
     get_provider_checkout_draft,
+    purge_expired_provider_checkout_drafts,
     update_household_profile,
     ensure_google_household,
     update_household_member,
@@ -320,6 +322,15 @@ async def lifespan(app: FastAPI):
         else {"initialized": False}
     )
     retention_task = None
+    if DATABASE_BACKEND == "sqlite":
+        expired_checkout_count = await asyncio.to_thread(
+            purge_expired_provider_checkout_drafts
+        )
+        if expired_checkout_count:
+            print(
+                "Provider-checkout retention removed "
+                f"{expired_checkout_count} expired review records at startup."
+            )
     if bootstrap.get("initialized"):
         await asyncio.to_thread(validate_persistence_readiness)
         deleted_count = await asyncio.to_thread(delete_past_meal_plans)

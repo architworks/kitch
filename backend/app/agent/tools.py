@@ -2,6 +2,7 @@
 
 import json as _json
 import math
+import re
 from typing import List, Dict, Any
 from google.adk.tools import ToolContext
 from app.household_config import DEFAULT_ACTIVE_USER
@@ -440,6 +441,27 @@ async def sync_provider_cart_tool(
     return {
       "status": "error",
       "message": "An explicit user request to synchronize an ordering app is required.",
+    }
+  normalized_request = " ".join(request.casefold().split())
+  checkout_request = (
+    "checkout" in normalized_request
+    or bool(re.search(
+      r"\b(place|submit|confirm|complete|pay(?:\s+for)?)\b.{0,40}\border\b",
+      normalized_request,
+    ))
+    or bool(re.search(r"\border\b.{0,24}\b(now|it|this|these|cart)\b", normalized_request))
+  )
+  if checkout_request:
+    return {
+      "status": "blocked",
+      "code": "ui_checkout_required",
+      "provider_cart_changed": False,
+      "native_cart_changed": False,
+      "ui_action": None,
+      "message": (
+        "Kitch can prepare an ordering-app cart, but final order placement is "
+        "available only from the reviewed Groceries UI. No cart was changed."
+      ),
     }
   result = await grocery_checkout_service.sync_from_chat(
     provider_id=str(provider or "").strip(),

@@ -270,7 +270,7 @@ contains configuration only.
 
 Provider retention defaults are configured with
 `KITCH_OAUTH_FLOW_RETENTION_HOURS=24`,
-`KITCH_PROVIDER_DRAFT_RETENTION_DAYS=30`, and
+`KITCH_PROVIDER_DRAFT_RETENTION_HOURS=24`, and
 `KITCH_EXPIRED_PROVIDER_CONNECTION_RETENTION_DAYS=30`. See
 `security_and_privacy.md` for the exact lifecycle and deletion behavior.
 
