@@ -46,15 +46,17 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
 
     def descriptor(self) -> ProviderDescriptor:
         status = self.status()
+        enabled = bool(status["enabled"])
         return ProviderDescriptor(
             id=self.provider_id,
             label="Zepto",
             brand_label="zepto",
             description="Live cart sync, availability review, and guarded order placement.",
-            enabled=bool(status["enabled"]),
-            state=str(status["state"]),
-            message=str(status["message"]),
+            enabled=enabled,
+            state=str(status["state"]) if enabled else "coming_soon",
+            message=str(status["message"]) if enabled else "Zepto support is coming soon.",
             environment="production",
+            badge=None if enabled else "Coming soon",
             requires_connection=False,
             capabilities=ProviderCapabilities(
                 saved_addresses=True,

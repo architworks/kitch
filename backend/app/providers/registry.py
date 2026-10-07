@@ -63,8 +63,8 @@ class ProviderRegistry:
         )
 
     def descriptors(self) -> list[Dict[str, object]]:
-        zepto = ZeptoProviderAdapter().descriptor()
         instamart = InstamartProviderAdapter().descriptor()
+        zepto = ZeptoProviderAdapter().descriptor()
         blinkit = ProviderDescriptor(
             id="blinkit",
             label="Blinkit",
@@ -77,7 +77,7 @@ class ProviderRegistry:
             capabilities=ProviderCapabilities(),
             theme={"start": "#f5c400", "end": "#148447"},
         )
-        return [zepto.as_dict(), instamart.as_dict(), blinkit.as_dict()]
+        return [instamart.as_dict(), zepto.as_dict(), blinkit.as_dict()]
 
     def get(self, provider_id: str) -> GroceryProviderAdapter:
         provider_id = self.canonical_id(provider_id)

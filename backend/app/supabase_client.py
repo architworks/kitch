@@ -900,14 +900,23 @@ def remove_future_meal_plan_entries(operations: List[Dict[str, Any]]) -> Dict[st
     return data
 
 
-def build_meal_plan_week(week_start: str | date | None = None) -> Dict[str, Any]:
-    timezone_name = get_household_timezone()
+def build_meal_plan_week(
+    week_start: str | date | None = None,
+    timezone_name: str | None = None,
+) -> Dict[str, Any]:
+    timezone_name = timezone_name or get_household_timezone()
     context = calendar_context(timezone_name)
     start = monday_for(context["today"]) if week_start is None else parse_iso_date(week_start)
     if start.weekday() != 0:
         raise ValueError("week_start must be a Monday")
     end = start + timedelta(days=6)
-    saved = {row["plan_date"]: row for row in get_meal_schedule(start, end)}
+    schedule_start = min(start, context["today"])
+    schedule_rows = get_meal_schedule(schedule_start, None)
+    saved = {
+        row["plan_date"]: row
+        for row in schedule_rows
+        if start <= parse_iso_date(row["plan_date"]) <= end
+    }
     days = []
     for planned_date in dates_between(start, end):
         iso = planned_date.isoformat()
@@ -924,7 +933,10 @@ def build_meal_plan_week(week_start: str | date | None = None) -> Dict[str, Any]
             }
         )
 
-    future_rows = get_meal_schedule(context["today"], None)
+    future_rows = [
+        row for row in schedule_rows
+        if parse_iso_date(row["plan_date"]) >= context["today"]
+    ]
     next_planned_date = future_rows[0]["plan_date"] if future_rows else None
     current_slot_index = 0 if context["now"].hour < 11 else 1 if context["now"].hour < 16 else 2
     slots = ("breakfast", "lunch", "dinner")
@@ -1159,6 +1171,12 @@ def update_grocery_cart_item(
     }
     if not allowed_updates:
         raise ValueError("No supported grocery item fields were provided.")
+    if "ingredient_name" in allowed_updates:
+        allowed_updates["ingredient_name"] = str(
+            allowed_updates["ingredient_name"] or ""
+        ).strip()
+        if not allowed_updates["ingredient_name"]:
+            raise ValueError("A grocery item name is required.")
     if "amount" in allowed_updates and "purchase_amount" not in allowed_updates:
         allowed_updates["purchase_amount"] = allowed_updates["amount"]
         allowed_updates["pantry_allocation"] = {}
@@ -1761,17 +1779,23 @@ def infer_nutrition_meal_type(
     return "dinner"
 
 
-def _nutrition_day_bounds(day: str | date) -> tuple[datetime, datetime]:
-    zone = ZoneInfo(get_household_timezone())
+def _nutrition_day_bounds(
+    day: str | date,
+    timezone_name: str | None = None,
+) -> tuple[datetime, datetime]:
+    zone = ZoneInfo(timezone_name or get_household_timezone())
     target = parse_iso_date(day)
     start = datetime.combine(target, datetime_time.min, tzinfo=zone)
     return start.astimezone(timezone.utc), (start + timedelta(days=1)).astimezone(timezone.utc)
 
 
-def _macro_diary_entry(row: Dict[str, Any]) -> Dict[str, Any]:
+def _macro_diary_entry(
+    row: Dict[str, Any],
+    timezone_name: str | None = None,
+) -> Dict[str, Any]:
     consumed_at = str(row["consumed_at"])
     local_time = datetime.fromisoformat(consumed_at.replace("Z", "+00:00")).astimezone(
-        ZoneInfo(get_household_timezone())
+        ZoneInfo(timezone_name or get_household_timezone())
     )
     return {
         "id": row.get("id"),
@@ -1796,17 +1820,20 @@ def get_macro_diary(
     user_name: str,
     start_date: str | date | None = None,
     end_date: str | date | None = None,
+    timezone_name: str | None = None,
 ) -> List[Dict[str, Any]]:
+    resolved_timezone = timezone_name or get_household_timezone()
+
     def execute_query():
         query = (
             supabase.table("macro_diary").select("*")
             .eq("profile_id", get_user_id(user_name))
         )
         if start_date is not None:
-            start, _ = _nutrition_day_bounds(start_date)
+            start, _ = _nutrition_day_bounds(start_date, resolved_timezone)
             query = query.gte("consumed_at", start.isoformat())
         if end_date is not None:
-            _, end = _nutrition_day_bounds(end_date)
+            _, end = _nutrition_day_bounds(end_date, resolved_timezone)
             query = query.lt("consumed_at", end.isoformat())
         return query.order("consumed_at").execute()
 
@@ -1815,7 +1842,7 @@ def get_macro_diary(
         "macro_diary",
         execute_query,
     )
-    return [_macro_diary_entry(row) for row in rows]
+    return [_macro_diary_entry(row, resolved_timezone) for row in rows]
 
 
 def get_nutrition_dashboard(

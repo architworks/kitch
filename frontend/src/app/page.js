@@ -165,18 +165,83 @@ const withProviderRoutes = (provider) => {
   };
 };
 
-const ProviderBrandMark = ({ provider, small = false }) => {
+const ProviderBrandMark = ({ provider, small = false, iconOnly = false }) => {
   if (provider?.id !== "swiggy_instamart") {
     return <span className={`provider-brand ${small ? "small" : ""}`}>{provider?.brandLabel}</span>;
   }
   return (
-    <span className={`provider-brand provider-brand-swiggy ${small ? "small" : ""}`}>
+    <span className={`provider-brand provider-brand-swiggy ${small ? "small" : ""} ${iconOnly ? "icon-only" : ""}`.trim()}>
       <span className="provider-swiggy-logo-clip" aria-hidden="true">
         <Image src={SWIGGY_LOGO_URL} alt="" width={447} height={447} priority={!small} />
       </span>
-      <span className="provider-swiggy-wordmark">Swiggy</span>
+      {!iconOnly && <span className="provider-swiggy-wordmark">Swiggy</span>}
     </span>
   );
+};
+
+const ShoppingCartIcon = ({ className = "" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 3h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 7H6" />
+    <circle cx="10" cy="20" r="1" />
+    <circle cx="18" cy="20" r="1" />
+  </svg>
+);
+
+const RefreshIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M20 6v5h-5" />
+    <path d="M4 18v-5h5" />
+    <path d="M6.1 8.5A7 7 0 0 1 18.7 7L20 11" />
+    <path d="M17.9 15.5A7 7 0 0 1 5.3 17L4 13" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 7h16" />
+    <path d="M9 7V4h6v3" />
+    <path d="M6 7l1 14h10l1-14" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m5 12 4 4L19 6" />
+  </svg>
+);
+
+const EditIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+    <path d="m6 6 12 12M18 6 6 18" />
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+const ChevronIcon = ({ collapsed = false }) => (
+  <svg className={collapsed ? "collapsed" : ""} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+
+const GROCERY_CATEGORY_DESCRIPTIONS = {
+  "Fresh Produce": "Fruits, vegetables and fresh ingredients",
+  "Proteins & Dairy": "Dairy, eggs and household proteins",
+  "Grains & Bakery": "Bread, grains and everyday staples",
+  "Pantry & Spices": "Pantry staples, spices and cooking essentials",
+  General: "Pantry staples, spices, cooking essentials and more"
 };
 
 class ApiResponseError extends Error {
@@ -389,6 +454,7 @@ const getTimeBasedGreeting = (date = new Date()) => {
 const CONFIGURED_API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim().replace(/\/$/, "");
 const API_REQUEST_TIMEOUT_MS = 20_000;
 const AGENT_REQUEST_TIMEOUT_MS = 120_000;
+const PROVIDER_OPERATION_TIMEOUT_MS = 240_000;
 
 const apiUrl = (path) => {
   if (CONFIGURED_API_BASE_URL) return `${CONFIGURED_API_BASE_URL}${path}`;
@@ -418,36 +484,10 @@ const getMealTitle = (meal, fallback = "No recipe set") => {
 const hasMealTitle = (meal) => Boolean(String(getMealTitle(meal, "")).trim());
 const hasPlannedMeals = (day) => MEAL_SLOTS.some(slot => hasMealTitle(day?.[slot]));
 
-const getRecipeCardTitle = (recipe, fallback = "Recipe details pending") => {
+const getRecipeCardTitle = (recipe, fallback = "Recipe") => {
   if (!recipe) return fallback;
   if (typeof recipe === "string") return recipe || fallback;
   return recipe.title || recipe.name || recipe.recipeName || recipe.recipe_name || fallback;
-};
-
-const formatRecipeScopeLabel = (scope, fallback = "Recipe plan") => {
-  if (!scope) return fallback;
-  if (typeof scope === "string" || typeof scope === "number") {
-    return String(scope).trim() || fallback;
-  }
-  if (Array.isArray(scope)) {
-    const labels = scope
-      .map(item => formatRecipeScopeLabel(item, ""))
-      .filter(Boolean);
-    return labels.join(" · ") || fallback;
-  }
-  if (typeof scope !== "object") return fallback;
-
-  const mealSlot = String(scope.mealSlot || scope.meal_slot || "").toLowerCase();
-  const slotLabel = MEAL_SLOT_LABELS[mealSlot] || "";
-  const dateValue = scope.date || scope.plan_date || scope.planDate || "";
-  const dateLabel = dateValue
-    ? formatPlanDate(String(dateValue), { weekday: "long", month: "short", day: "numeric" })
-    : String(scope.day || scope.weekday || "").trim();
-  const rangeLabel = [scope.start_date || scope.startDate, scope.end_date || scope.endDate]
-    .filter(Boolean)
-    .map(value => formatPlanDate(String(value), { month: "short", day: "numeric" }))
-    .join("–");
-  return [slotLabel, dateLabel || rangeLabel].filter(Boolean).join(" · ") || fallback;
 };
 
 const formatRelativeCheckedTime = (value, now = new Date()) => {
@@ -904,7 +944,10 @@ export default function Home() {
   const [pantryStock, setPantryStock] = useState([]);
   const [pantryRevision, setPantryRevision] = useState(0);
   const [pantryReviewedAt, setPantryReviewedAt] = useState("");
-  const [groceryWorkspaceTab, setGroceryWorkspaceTab] = useState("pantry");
+  const [groceryWorkspaceTab, setGroceryWorkspaceTab] = useState("cart");
+  const [collapsedGroceryCategories, setCollapsedGroceryCategories] = useState({});
+  const [editingGroceryItemId, setEditingGroceryItemId] = useState(null);
+  const [groceryItemNameDraft, setGroceryItemNameDraft] = useState("");
   const [pantryDrafts, setPantryDrafts] = useState({});
   const [pantryNewItem, setPantryNewItem] = useState({ name: "", amount: 1, unit: "piece" });
   const [confirmationDialog, setConfirmationDialog] = useState(null);
@@ -1007,9 +1050,6 @@ export default function Home() {
   const selectedProviderRegistryState = selectedProvider.state || "unknown";
   const providerReviewLastValidatedAt = providerCartReview?.last_validated_at || "";
   const hasProviderCartReview = Boolean(providerCartReview);
-  const pantryReviewNeedsAttention = !pantryReviewedAt
-    || providerFreshnessNow - new Date(pantryReviewedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
-
   const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
     if (!review) {
       setProviderCartReview(null);
@@ -1093,10 +1133,14 @@ export default function Home() {
     if (data.grocery_cart) {
       applyConfirmedGroceryCart(data.grocery_cart);
     }
+    if (Object.prototype.hasOwnProperty.call(data, "latest_recipe_grocery_plan")) {
+      setLatestRecipeGroceryPlan(data.latest_recipe_grocery_plan || null);
+    }
   }, [applyConfirmedGroceryCart]);
 
-  const fetchLiveState = async (userName) => {
-    const res = await apiFetch(apiUrl(`/api/state/${userName}`));
+  const fetchLiveState = async (userName, { includeMealPlan = true } = {}) => {
+    const query = includeMealPlan ? "" : "?include_meal_plan=false";
+    const res = await apiFetch(apiUrl(`/api/state/${userName}${query}`));
     await requireSuccessfulResponse(res);
     return res.json();
   };
@@ -1118,7 +1162,8 @@ export default function Home() {
   }, []);
 
   const loadMealPlanWeek = useCallback(async (weekStart, focusDate = "") => {
-    const res = await apiFetch(apiUrl(`/api/meal-plan?week_start=${encodeURIComponent(weekStart)}`));
+    const query = weekStart ? `?week_start=${encodeURIComponent(weekStart)}` : "";
+    const res = await apiFetch(apiUrl(`/api/meal-plan${query}`));
     await requireSuccessfulResponse(res);
     const data = await res.json();
     const days = Array.isArray(data.days) ? data.days : [];
@@ -1132,19 +1177,6 @@ export default function Home() {
     setSelectedPlanDate(nextDate);
     setExpandedMealKey(nextDate ? `${nextDate}-${getTimeBasedMealSlot()}` : "");
     return data;
-  }, []);
-
-  const syncLatestRecipeGroceryPlan = useCallback(async () => {
-    try {
-      const res = await apiFetch(apiUrl("/api/recipe-grocery/plans/latest"));
-      await requireSuccessfulResponse(res);
-      const data = await res.json();
-      setLatestRecipeGroceryPlan(data.plan || null);
-      return data.plan || null;
-    } catch (e) {
-      console.error("Failed to sync latest recipe+grocery plan", e);
-      return null;
-    }
   }, []);
 
   const syncProviderRegistry = useCallback(async () => {
@@ -1231,7 +1263,6 @@ export default function Home() {
       const data = await fetchLiveState(userName);
       applyLiveState(userName, data);
       setLiveStateUser(userName);
-      await syncLatestRecipeGroceryPlan();
       return data;
     } catch (e) {
       console.error("Failed to sync live state with Kitch storage", e);
@@ -1267,8 +1298,14 @@ export default function Home() {
       authenticated: Boolean(session.authenticated),
       email: session.email || ""
     });
+    if (session.authenticated && session.household) {
+      applyBootstrappedHousehold({
+        initialized: true,
+        ...session.household
+      });
+    }
     return session;
-  }, []);
+  }, [applyBootstrappedHousehold]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1371,6 +1408,7 @@ export default function Home() {
 
   useEffect(() => {
     if (authState.loading || (authState.required && !authState.authenticated)) return undefined;
+    if (householdBootstrap?.initialized) return undefined;
     let ignore = false;
     apiFetch(apiUrl("/api/household/bootstrap"), { credentials: "include" })
       .then(requireSuccessfulResponse)
@@ -1385,7 +1423,13 @@ export default function Home() {
         }
       });
     return () => { ignore = true; };
-  }, [applyBootstrappedHousehold, authState.authenticated, authState.loading, authState.required]);
+  }, [
+    applyBootstrappedHousehold,
+    authState.authenticated,
+    authState.loading,
+    authState.required,
+    householdBootstrap?.initialized
+  ]);
 
   const openMemberEditor = () => {
     setMemberNameDrafts(householdMembers.reduce((drafts, member) => ({ ...drafts, [member.id]: member.value }), {}));
@@ -1431,11 +1475,16 @@ export default function Home() {
 
     async function loadState() {
       try {
-        const data = await fetchLiveState(activeUser);
+        await loadMealPlanWeek();
+      } catch (error) {
+        console.error("Failed to load the current meal-plan week", error);
+      }
+      if (ignore) return;
+      try {
+        const data = await fetchLiveState(activeUser, { includeMealPlan: false });
         if (!ignore) {
           applyLiveState(activeUser, data);
           setLiveStateUser(activeUser);
-          await syncLatestRecipeGroceryPlan();
         }
       } catch (e) {
         console.error("Failed to sync live state with Kitch storage", e);
@@ -1446,7 +1495,7 @@ export default function Home() {
     return () => {
       ignore = true;
     };
-  }, [activeUser, applyLiveState, householdBootstrap?.initialized, syncLatestRecipeGroceryPlan]);
+  }, [activeUser, applyLiveState, householdBootstrap?.initialized, loadMealPlanWeek]);
 
   useEffect(() => {
     if (activeTab !== "groceries") return undefined;
@@ -1637,6 +1686,20 @@ export default function Home() {
     ));
   };
 
+  const setProviderSelectionForItems = (items, selected) => {
+    if (providerSyncInFlightRef.current) return;
+    const keys = items
+      .filter(item => cartPurchaseAmount(item) > 0)
+      .map(cartItemKey)
+      .filter(Boolean);
+    if (!keys.length) return;
+    invalidateProviderReview();
+    setExcludedProviderItemIds(current => selected
+      ? current.filter(key => !keys.includes(key))
+      : [...new Set([...current, ...keys])]
+    );
+  };
+
   const updateGroceryCartItemDetails = async (item, updates) => {
     if (providerSyncInFlightRef.current || !item?.id) return;
 
@@ -1653,12 +1716,32 @@ export default function Home() {
       if (data.grocery_cart) {
         applyConfirmedGroceryCart(data.grocery_cart);
       }
+      return true;
     } catch (e) {
       console.error("Failed to update grocery cart item", e);
       setCustomGroceryItems(confirmedGroceryItemsRef.current);
       triggerBannerAlert(apiErrorMessage(e, "Could not update the grocery item."));
+      return false;
     } finally {
       endGroceryMutation();
+    }
+  };
+
+  const saveGroceryItemName = async (item) => {
+    const nextName = groceryItemNameDraft.trim();
+    if (!nextName) {
+      triggerBannerAlert("Enter an item name before saving.");
+      return;
+    }
+    if (nextName === item.name) {
+      setEditingGroceryItemId(null);
+      setGroceryItemNameDraft("");
+      return;
+    }
+    const saved = await updateGroceryCartItemDetails(item, { name: nextName });
+    if (saved) {
+      setEditingGroceryItemId(null);
+      setGroceryItemNameDraft("");
     }
   };
 
@@ -1773,6 +1856,7 @@ export default function Home() {
     try {
       const res = await apiFetch(apiUrl(selectedProvider.routes.syncCart), {
         method: "POST",
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cart_item_ids: checkoutItems.map(item => item.id).filter(Boolean),
@@ -1811,7 +1895,8 @@ export default function Home() {
     startProviderSyncProgress();
     try {
       const res = await apiFetch(apiUrl(selectedProviderRevalidateRoute), {
-        method: "POST"
+        method: "POST",
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
@@ -2017,6 +2102,7 @@ export default function Home() {
       }) || providerCartReview;
       const res = await apiFetch(apiUrl(selectedProvider.routes.placeOrder), {
         method: "POST",
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           review_id: latestReview.review_id,
@@ -2059,7 +2145,10 @@ export default function Home() {
     setIsCheckingProviderPayment(true);
     startProviderSyncProgress();
     try {
-      const res = await apiFetch(apiUrl(selectedProvider.routes.paymentStatus), { method: "POST" });
+      const res = await apiFetch(apiUrl(selectedProvider.routes.paymentStatus), {
+        method: "POST",
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS
+      });
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const review = data.review || data;
@@ -2612,7 +2701,7 @@ export default function Home() {
 
   const recipeCards = normalizeList(latestRecipeGroceryPlan?.recipeCards);
   const activeRecipeCard = recipeCards[0] || null;
-  const activeRecipeTitle = getRecipeCardTitle(activeRecipeCard, latestRecipeGroceryPlan ? "Recipe details pending" : "");
+  const activeRecipeTitle = getRecipeCardTitle(activeRecipeCard, "");
   const activeRecipeIngredients = normalizeList(
     activeRecipeCard?.ingredients ||
     activeRecipeCard?.ingredientList ||
@@ -2620,11 +2709,6 @@ export default function Home() {
     latestRecipeGroceryPlan?.ingredients
   ).filter(ingredient => getIngredientName(ingredient));
   const activeRecipeSteps = getRecipeSteps(activeRecipeCard);
-  const recipePlanScope = latestRecipeGroceryPlan?.scope || {};
-  const recipePlanLabel = formatRecipeScopeLabel(
-    latestRecipeGroceryPlan?.scopeLabel || recipePlanScope.label || activeRecipeCard?.scope,
-    "Recipe plan"
-  );
   const recipeServings = activeRecipeCard?.servings || activeRecipeCard?.serves || latestRecipeGroceryPlan?.householdSize || householdSize;
   const recipeCookTime = activeRecipeCard?.cookTime || activeRecipeCard?.cook_time || activeRecipeCard?.time || "";
   const recipeCalories = activeRecipeCard?.calories || activeRecipeCard?.caloriesPerServing || activeRecipeCard?.calories_per_serving || "";
@@ -3110,7 +3194,6 @@ export default function Home() {
             </div>
 
             <div className="provider-transfer-copy">
-              <span className="provider-transfer-kicker">Secure cart handoff</span>
               <h2 id="provider-transfer-title">
                 {providerSyncStage === "complete"
                   ? isCheckingProviderPayment
@@ -3218,7 +3301,10 @@ export default function Home() {
             <button
               key={key}
               className={`rail-link ${activeTab === key ? "active" : ""}`}
-              onClick={() => setActiveTab(key)}
+              onClick={() => {
+                if (key === "groceries") setGroceryWorkspaceTab("cart");
+                setActiveTab(key);
+              }}
             >
               <span className={`rail-line-icon ${icon}`} aria-hidden="true">
                 {icon === "household" && (
@@ -3311,7 +3397,6 @@ export default function Home() {
             <section className="page-view about-page" aria-label="About Kitch">
               <section className="about-hero">
                 <div className="about-hero-copy">
-                  <span className="eyebrow">About Kitch</span>
                   <h2>Your AI kitchen companion for real life.</h2>
                   <p>Kitch helps your household plan meals, cook better, shop smarter, and track nutrition without turning the kitchen into another spreadsheet.</p>
                   <div className="about-hero-actions">
@@ -3508,13 +3593,16 @@ export default function Home() {
                   </div>
                   <div className="meal-hero-art">
                     <Image src="/countertop-cropped.png" alt="" fill sizes="(max-width: 900px) 100vw, 60vw" priority unoptimized />
-                    <div className="chip-row">
-                      <span>{householdSize} people</span>
-                    </div>
                     <div className="hero-footer">
-                      <div className="avatar-stack">
+                      <div className="hero-member-list" aria-label="Household members">
                         {householdMembers.map(member => (
-                          <span key={member.value}>{member.value[0]}</span>
+                          <span
+                            key={member.value}
+                            className={member.value === activeUser ? "active" : ""}
+                            aria-current={member.value === activeUser ? "true" : undefined}
+                          >
+                            {member.value}
+                          </span>
                         ))}
                       </div>
                     </div>
@@ -3526,7 +3614,6 @@ export default function Home() {
                 <section className="weekly-calendar-feature">
                   <div className="section-heading">
                     <div>
-                      <span className="eyebrow">Your household plan</span>
                       <h2 id="planner-household-heading">{`Weekly Plan for ${householdSize} ${householdSize === 1 ? "Person" : "People"}`}</h2>
                     </div>
                     <div className="planner-week-controls" aria-label="Calendar week navigation">
@@ -3666,7 +3753,6 @@ export default function Home() {
             <section className="page-view analytics-page" aria-label="Macro logs">
               <div className="nutrition-page-heading">
                 <div>
-                  <span className="eyebrow">Personal nutrition</span>
                   <h2>Nutrition for {activeUser}</h2>
                   <p>Track daily intake, review trends, and correct your food log.</p>
                 </div>
@@ -3847,12 +3933,11 @@ export default function Home() {
                 ← Back to Today
               </button>
 
-              {latestRecipeGroceryPlan ? (
+              {activeRecipeCard ? (
                 <div className="recipe-grocery-layout">
                   <section className="recipe-workspace-card">
                     <div className="recipe-hero-panel">
                       <div className="recipe-hero-copy">
-                        <span className="recipe-plan-pill">{recipePlanLabel}</span>
                         <h2>{activeRecipeTitle}</h2>
                         {recipeDescription && <p>{recipeDescription}</p>}
                         <div className="recipe-stat-row">
@@ -3873,9 +3958,6 @@ export default function Home() {
                           </button>
                           <button type="button" onClick={() => setChatInput(`Log ${activeRecipeTitle} for ${activeUser}`)}>
                             Log meal
-                          </button>
-                          <button type="button" aria-label="Save recipe" onClick={() => triggerBannerAlert("Recipe is already saved in Kitch history.")}>
-                            ♡
                           </button>
                           <button type="button" aria-label="Share recipe" onClick={() => setChatInput(`Share the recipe for ${activeRecipeTitle}`)}>
                             ↗
@@ -4047,14 +4129,10 @@ export default function Home() {
               ) : (
                 <section className="recipe-empty-state">
                   <div>
-                    <span className="eyebrow">No recipe plan yet</span>
-                    <h2>Create a recipe and grocery plan</h2>
-                    <p>Ask Kitch for a recipe, ingredients for a dish, or groceries for a planned meal. This page will show the latest saved recipe+grocery artifact.</p>
+                    <h2>No recipe yet</h2>
+                    <p>Ask Kitch to create a recipe, or choose a planned meal to view its recipe here.</p>
                     <div className="hero-actions">
-                      <button type="button" className="primary-action" onClick={() => setChatInput("What groceries do I need for tomorrow?")}>
-                        Plan groceries for tomorrow
-                      </button>
-                      <button type="button" onClick={() => setChatInput("Give me a recipe for paneer butter masala")}>
+                      <button type="button" className="primary-action" onClick={() => setChatInput("Give me a recipe")}>
                         Ask for a recipe
                       </button>
                     </div>
@@ -4071,7 +4149,6 @@ export default function Home() {
             <section className="page-view grocery-management-page" aria-label="Grocery cart review and ordering workflow">
               <div className="grocery-management-header">
                 <div>
-                  <span className="eyebrow">Grocery Management</span>
                   <h2>Review and order groceries</h2>
                   <p>Review pantry and shopping needs, then choose an ordering app and approve the exact provider order.</p>
                 </div>
@@ -4087,7 +4164,6 @@ export default function Home() {
                     <span className={`checkout-stage-number ${nativeCartStageComplete ? "completed" : "pending"}`} aria-hidden="true">1</span>
                     <div className="grocery-workspace-header">
                       <div>
-                        <span className="eyebrow">Household groceries</span>
                         <h2>Pantry and shopping cart</h2>
                         <p>Review what you have at home and manage what still needs to be ordered.</p>
                       </div>
@@ -4120,7 +4196,7 @@ export default function Home() {
                         className={groceryWorkspaceTab === "cart" ? "active" : ""}
                         onClick={() => setGroceryWorkspaceTab("cart")}
                       >
-                        <span className="grocery-workspace-tab-icon cart-icon" aria-hidden="true" />
+                        <ShoppingCartIcon className="grocery-workspace-tab-svg" />
                         <span className="grocery-workspace-tab-label">Shopping cart</span>
                         <span className="grocery-workspace-tab-count">{totalCount} items</span>
                       </button>
@@ -4134,9 +4210,19 @@ export default function Home() {
                     >
                       {groceryWorkspaceTab === "cart" ? <>
                       <div className="native-cart-meta">
-                        <strong>{totalCount} items</strong>
-                        <span>{groceryCategoryCount} categories</span>
-                        <span>{providerSelectedCount} selected for {selectedProvider.label}</span>
+                        <div>
+                          <strong>{totalCount} items</strong>
+                          <span>{groceryCategoryCount} categories</span>
+                          <i aria-hidden="true" />
+                          <span>{providerSelectedCount} selected for <b>{selectedProvider.label || "ordering app"}</b></span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isProviderSyncing || eligibleBuyCount === 0}
+                          onClick={() => setProviderSelectionForItems(groceryList, providerSelectedCount === 0)}
+                        >
+                          {providerSelectedCount === 0 ? "Select all" : "Deselect all"}
+                        </button>
                       </div>
 
                     {totalCount === 0 ? (
@@ -4147,20 +4233,51 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="native-cart-groups">
-                        {Object.entries(groupedGroceryCart).map(([category, items]) => (
-                          <article key={category} className="native-cart-group">
+                        {Object.entries(groupedGroceryCart).map(([category, items]) => {
+                          const eligibleCategoryItems = items.filter(item => cartPurchaseAmount(item) > 0);
+                          const selectedCategoryCount = eligibleCategoryItems.filter(item => !excludedProviderItemIds.includes(cartItemKey(item))).length;
+                          const categoryFullySelected = eligibleCategoryItems.length > 0 && selectedCategoryCount === eligibleCategoryItems.length;
+                          const categoryCollapsed = Boolean(collapsedGroceryCategories[category]);
+                          return (
+                          <article key={category} className={`native-cart-group ${categoryCollapsed ? "collapsed" : ""}`}>
                             <div className="native-cart-group-header">
-                              <h3>{category} <span>({items.length})</span></h3>
-                              <div>
-                                <span>Send to app</span>
+                              <button
+                                type="button"
+                                className="native-category-toggle"
+                                aria-expanded={!categoryCollapsed}
+                                onClick={() => setCollapsedGroceryCategories(current => ({ ...current, [category]: !current[category] }))}
+                              >
+                                <span><ChevronIcon collapsed={categoryCollapsed} /></span>
+                                <span>
+                                  <strong>{category} <em>({items.length})</em></strong>
+                                  <small>{GROCERY_CATEGORY_DESCRIPTIONS[category] || GROCERY_CATEGORY_DESCRIPTIONS.General}</small>
+                                </span>
+                              </button>
+                              <label className="native-category-selection">
+                                <span>{selectedCategoryCount} {selectedCategoryCount === 1 ? "item" : "items"} selected</span>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${categoryFullySelected ? "Deselect" : "Select"} all ${category} items`}
+                                  checked={categoryFullySelected}
+                                  disabled={isProviderSyncing || eligibleCategoryItems.length === 0}
+                                  onChange={() => setProviderSelectionForItems(items, !categoryFullySelected)}
+                                />
+                              </label>
+                            </div>
+
+                            {!categoryCollapsed && <>
+                              <div className="native-cart-column-header" aria-hidden="true">
+                                <span></span>
+                                <span>Item</span>
                                 <span>Needed</span>
                                 <span>Have</span>
                                 <span>To buy</span>
+                                <span>Actions</span>
                               </div>
-                            </div>
 
                             {items.map((item, index) => {
                               const itemAmount = Number(item.amount) || 1;
+                              const isEditingName = editingGroceryItemId === item.id;
                               const haveText = cartPantryAmount(item) > 0
                                 ? formatCartQuantity(cartPantryAmount(item), item.pantryAllocation?.allocated_unit || item.unit)
                                 : "0";
@@ -4179,8 +4296,24 @@ export default function Home() {
                                       onChange={() => toggleProviderItemSelection(item)}
                                     />
                                   </label>
-                                  <div className="native-cart-name">
-                                    <strong>{item.name}</strong>
+                                  <div className={`native-cart-name ${isEditingName ? "editing" : ""}`}>
+                                    {isEditingName ? (
+                                      <input
+                                        type="text"
+                                        aria-label={`Edit item name for ${item.name}`}
+                                        value={groceryItemNameDraft}
+                                        disabled={isProviderSyncing}
+                                        autoFocus
+                                        onChange={(event) => setGroceryItemNameDraft(event.target.value)}
+                                        onKeyDown={(event) => {
+                                          if (event.key === "Enter") saveGroceryItemName(item);
+                                          if (event.key === "Escape") {
+                                            setEditingGroceryItemId(null);
+                                            setGroceryItemNameDraft("");
+                                          }
+                                        }}
+                                      />
+                                    ) : <strong>{item.name}</strong>}
                                     <span>{item.source === "manual" ? "Manual" : "Recipe planned"}</span>
                                   </div>
                                   <div className="native-cart-quantity">
@@ -4215,13 +4348,21 @@ export default function Home() {
                                   <span className="native-cart-have">{haveText}</span>
                                   <span className="native-cart-buy">{toBuyText}</span>
                                   <div className="native-cart-actions">
-                                    <button type="button" disabled={isProviderSyncing} aria-label={`Delete ${item.name}`} onClick={() => deleteGroceryCartItem(item)}>×</button>
+                                    {isEditingName ? <>
+                                      <button type="button" className="save" disabled={isProviderSyncing || !groceryItemNameDraft.trim()} aria-label={`Save ${item.name}`} title={`Save ${item.name}`} onClick={() => saveGroceryItemName(item)}><CheckIcon /></button>
+                                      <button type="button" className="cancel" disabled={isProviderSyncing} aria-label={`Cancel editing ${item.name}`} title="Cancel editing" onClick={() => { setEditingGroceryItemId(null); setGroceryItemNameDraft(""); }}><CloseIcon /></button>
+                                    </> : <>
+                                      <button type="button" className="edit" disabled={isProviderSyncing} aria-label={`Edit ${item.name}`} title={`Edit ${item.name}`} onClick={() => { setEditingGroceryItemId(item.id); setGroceryItemNameDraft(item.name); }}><EditIcon /></button>
+                                      <button type="button" className="delete" disabled={isProviderSyncing} aria-label={`Delete ${item.name}`} title={`Delete ${item.name}`} onClick={() => deleteGroceryCartItem(item)}><TrashIcon /></button>
+                                    </>}
                                   </div>
                                 </div>
                               );
                             })}
+                            </>}
                           </article>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 
@@ -4242,44 +4383,46 @@ export default function Home() {
                         <div className="pantry-manager" data-testid="pantry-review-section">
                           <div className="pantry-manager-heading">
                             <div className="pantry-manager-title">
-                              <span className="pantry-manager-eyebrow">Pantry review</span>
                               <h3>Household pantry</h3>
-                              <p className={`pantry-review-status ${pantryReviewNeedsAttention ? "needs-attention" : "is-current"}`}>
-                                <span className="pantry-review-status-dot" aria-hidden="true" />
-                                <span>
-                                  <strong>{pantryReviewNeedsAttention ? "Review recommended" : "Pantry reviewed"}</strong>
-                                  <span aria-hidden="true"> · </span>
-                                  {pantryReviewedAt
-                                    ? `Last fully reviewed ${formatRelativeCheckedTime(pantryReviewedAt)}`
-                                    : "This pantry has not been fully reviewed yet."}
-                                </span>
-                              </p>
                             </div>
                             <div className="pantry-manager-actions">
-                              <button type="button" className="pantry-cart-action" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}>Update cart from pantry</button>
-                              <button type="button" className="pantry-empty-action" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}>Mark pantry empty</button>
+                              <button type="button" className="pantry-cart-action" aria-label="Update cart from pantry" title="Update cart from pantry" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}><RefreshIcon /></button>
+                              <button type="button" className="pantry-empty-action" aria-label="Mark pantry empty" title="Mark pantry empty" disabled={isProviderSyncing || pantryStock.length === 0} onClick={markPantryEmpty}><TrashIcon /></button>
                             </div>
                           </div>
                           {pantryStock.length === 0 ? (
                             <div className="native-cart-empty"><strong>The pantry is empty.</strong><p>Add an item below or upload a pantry photo.</p></div>
-                          ) : pantryStock.map(item => {
-                            const draft = pantryDrafts[item.id] || item;
-                            return (
-                              <div className="pantry-manager-row" key={item.id}>
-                                <input aria-label={`Pantry item ${item.name}`} value={draft.name} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, name: event.target.value } }))} />
-                                <input aria-label={`Amount of ${item.name}`} type="number" min="0" step="0.1" value={draft.amount} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: event.target.value } }))} />
-                                <input aria-label={`Unit for ${item.name}`} value={draft.unit} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, unit: event.target.value } }))} />
-                                <span>{item.updatedAt ? formatRelativeCheckedTime(item.updatedAt) : "Unknown update time"}</span>
-                                <button type="button" disabled={!pantryDrafts[item.id]} onClick={() => savePantryRow(item)}>Save</button>
-                                <button type="button" aria-label={`Remove ${item.name} from pantry`} onClick={() => patchPantry([{ action: "remove", id: item.id }])}>×</button>
+                          ) : (
+                            <div className="pantry-table">
+                              <div className="pantry-table-header" aria-hidden="true">
+                                <span>Item</span>
+                                <span>Quantity</span>
+                                <span>Unit</span>
+                                <span>Last updated</span>
+                                <span>Actions</span>
                               </div>
-                            );
-                          })}
-                          <div className="cart-add-row pantry-add-row">
-                            <input placeholder="Add pantry item..." value={pantryNewItem.name} onChange={event => setPantryNewItem(current => ({ ...current, name: event.target.value }))} />
-                            <input type="number" min="0.1" step="0.1" value={pantryNewItem.amount} onChange={event => setPantryNewItem(current => ({ ...current, amount: event.target.value }))} />
-                            <input value={pantryNewItem.unit} onChange={event => setPantryNewItem(current => ({ ...current, unit: event.target.value }))} />
-                            <button type="button" disabled={!pantryNewItem.name.trim()} onClick={async () => { const saved = await patchPantry([{ action: "add", name: pantryNewItem.name, amount: Number(pantryNewItem.amount), unit: pantryNewItem.unit }]); if (saved) setPantryNewItem({ name: "", amount: 1, unit: "piece" }); }}>Add to pantry</button>
+                              {pantryStock.map(item => {
+                                const draft = pantryDrafts[item.id] || item;
+                                return (
+                                  <div className="pantry-manager-row" key={item.id}>
+                                    <input aria-label={`Pantry item ${item.name}`} value={draft.name} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, name: event.target.value } }))} />
+                                    <input aria-label={`Amount of ${item.name}`} type="number" min="0" step="0.1" value={draft.amount} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: event.target.value } }))} />
+                                    <input aria-label={`Unit for ${item.name}`} value={draft.unit} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, unit: event.target.value } }))} />
+                                    <span>{item.updatedAt ? formatRelativeCheckedTime(item.updatedAt) : "Unknown update time"}</span>
+                                    <div className="pantry-row-actions">
+                                      <button type="button" className="save" aria-label={`Save ${item.name}`} title={`Save ${item.name}`} disabled={!pantryDrafts[item.id]} onClick={() => savePantryRow(item)}><CheckIcon /></button>
+                                      <button type="button" className="delete" aria-label={`Remove ${item.name} from pantry`} title={`Remove ${item.name} from pantry`} onClick={() => patchPantry([{ action: "remove", id: item.id }])}><TrashIcon /></button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="pantry-add-row">
+                            <input aria-label="New pantry item" placeholder="Add pantry item..." value={pantryNewItem.name} onChange={event => setPantryNewItem(current => ({ ...current, name: event.target.value }))} />
+                            <input aria-label="New pantry item quantity" type="number" min="0.1" step="0.1" value={pantryNewItem.amount} onChange={event => setPantryNewItem(current => ({ ...current, amount: event.target.value }))} />
+                            <input aria-label="New pantry item unit" value={pantryNewItem.unit} onChange={event => setPantryNewItem(current => ({ ...current, unit: event.target.value }))} />
+                            <button type="button" aria-label="Add to pantry" title="Add to pantry" disabled={!pantryNewItem.name.trim()} onClick={async () => { const saved = await patchPantry([{ action: "add", name: pantryNewItem.name, amount: Number(pantryNewItem.amount), unit: pantryNewItem.unit }]); if (saved) setPantryNewItem({ name: "", amount: 1, unit: "piece" }); }}><PlusIcon /></button>
                           </div>
                         </div>
                       )}
@@ -4320,7 +4463,6 @@ export default function Home() {
                     </div>
                     {selectedProvider.requires_connection && (
                       <div className="provider-connection-actions">
-                        <span>Powered by Swiggy</span>
                         {providerConnectionState === "connected" ? (
                           <button type="button" disabled={isProviderSyncing} onClick={() => disconnectProvider(selectedProvider)}>Disconnect household account</button>
                         ) : (
@@ -4369,7 +4511,7 @@ export default function Home() {
                     ) : (
                       <div className="provider-address-stage-body">
                         <div className={`provider-connection-state ${providerConnectionState}`}>
-                          <ProviderBrandMark provider={selectedProvider} small />
+                          <ProviderBrandMark provider={selectedProvider} small iconOnly />
                           <div>
                             <strong>{providerStatusLabel}</strong>
                             <p>{providerStatusDescription}</p>
@@ -4409,7 +4551,7 @@ export default function Home() {
                     <div className="ordering-transfer-compact">
                       <div>
                         <h2>Move cart items to ordering app</h2>
-                        <p>Send the selected native-cart items to {selectedProvider.label}, then review the exact result.</p>
+                        <p>Send the selected native-cart items to {selectedProvider.label}. This does not place an order.</p>
                       </div>
                       <button
                         type="button"
@@ -4726,7 +4868,6 @@ export default function Home() {
 
                 <aside className="grocery-information-sidebar">
                   <article className="grocery-side-card provider-order-summary-card">
-                    <span className="eyebrow">Checkout summary</span>
                     <h3>Order summary</h3>
                     <p><strong>{totalCount}</strong> native items</p>
                     <div className="provider-total-lines">
@@ -4758,7 +4899,7 @@ export default function Home() {
                   </article>
 
                   <article className="grocery-side-card provider-unavailable-card">
-                    <h3>Not found in {selectedProvider.label}</h3>
+                    <h3>Not found on {selectedProvider.label}</h3>
                     {!providerCartReview ? (
                       <small>Unavailable items will appear here after the cart transfer.</small>
                     ) : providerUnavailableItems.length === 0 ? (

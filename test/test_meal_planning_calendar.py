@@ -60,15 +60,46 @@ class PlanningCalendarTests(unittest.TestCase):
         with (
             patch.object(supabase_client, "get_household_timezone", return_value="Asia/Kolkata"),
             patch.object(supabase_client, "calendar_context", return_value=fixed_context),
-            patch.object(supabase_client, "get_meal_schedule", side_effect=[saved_rows, saved_rows]),
+            patch.object(supabase_client, "get_meal_schedule", return_value=saved_rows) as get_schedule,
         ):
             payload = supabase_client.build_meal_plan_week("2026-08-10")
 
+        get_schedule.assert_called_once()
         self.assertEqual(len(payload["days"]), 7)
         self.assertEqual(payload["days"][0]["plan_date"], "2026-08-10")
         self.assertEqual(payload["days"][0]["breakfast"], "")
         self.assertEqual(payload["next_planned_date"], "2026-08-13")
         self.assertEqual(payload["next_meal"]["meal_name"], "Avocado Toast")
+
+    def test_macro_diary_reuses_one_household_timezone_for_all_rows(self):
+        rows = [
+            {
+                "id": index,
+                "meal_name": f"Meal {index}",
+                "quantity": 1,
+                "unit": "serving",
+                "meal_type": "lunch",
+                "calories": 200,
+                "protein_g": 10,
+                "carbs_g": 20,
+                "fat_g": 5,
+                "fiber_g": 2,
+                "consumed_at": f"2026-08-12T0{index}:00:00+00:00",
+            }
+            for index in (1, 2)
+        ]
+        with (
+            patch.object(
+                supabase_client,
+                "get_household_timezone",
+                return_value="Asia/Kolkata",
+            ) as get_timezone,
+            patch.object(supabase_client, "_read_rows", return_value=rows),
+        ):
+            diary = supabase_client.get_macro_diary("Archit")
+
+        get_timezone.assert_called_once()
+        self.assertEqual(len(diary), 2)
 
     def test_chat_contract_uses_planner_context_not_client_plan_state(self):
         payload = ChatRequest(

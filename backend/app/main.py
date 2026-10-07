@@ -38,6 +38,7 @@ from app.auth import (
     clear_session_cookie,
     current_identity,
     end_identity_scope,
+    household_from_session,
     issue_session,
     session_from_request,
     set_session_cookie,
@@ -382,6 +383,7 @@ async def persistence_postcondition(request: Request, call_next):
         request.headers.get("x-vercel-oidc-token")
     )
     identity_token = None
+    upgraded_session_context = None
     try:
         # CORS preflight requests never carry the Kitch session cookie. Let the
         # CORS middleware validate the requested origin and method before
@@ -411,13 +413,16 @@ async def persistence_postcondition(request: Request, call_next):
                 "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
             }
             if claims:
-                context = await asyncio.to_thread(
-                    ensure_google_household,
-                    str(claims["sub"]),
-                    str(claims["email"]),
-                    str(claims.get("name") or "Kitch household"),
-                    "UTC",
-                )
+                context = household_from_session(claims)
+                if context is None:
+                    context = await asyncio.to_thread(
+                        ensure_google_household,
+                        str(claims["sub"]),
+                        str(claims["email"]),
+                        str(claims.get("name") or "Kitch household"),
+                        "UTC",
+                    )
+                    upgraded_session_context = context
                 identity_token = begin_identity_scope(_household_identity(context))
             elif not public_path:
                 return _security_headers(JSONResponse(status_code=401, content={"detail": {
@@ -438,6 +443,11 @@ async def persistence_postcondition(request: Request, call_next):
                 return _security_headers(response)
         response = await call_next(request)
         raise_recorded_persistence_failure()
+        if claims and upgraded_session_context is not None:
+            set_session_cookie(
+                response,
+                issue_session(claims, upgraded_session_context),
+            )
         return _security_headers(response)
     except PersistenceError as error:
         if error.supabase_code == "40001":
@@ -497,7 +507,7 @@ async def google_sign_in_endpoint(payload: Dict[str, Any]):
         "email": str(claims["email"]),
         "household": context,
     })
-    set_session_cookie(response, issue_session(claims))
+    set_session_cookie(response, issue_session(claims, context))
     return response
 
 
@@ -823,45 +833,56 @@ async def household_bootstrap_endpoint(payload: Dict[str, Any]):
 
 
 @app.get("/api/state/{user_name}")
-async def get_state_endpoint(user_name: str):
+async def get_state_endpoint(user_name: str, include_meal_plan: bool = True):
     """
     Return live pantry, nutrition, planning, and household state from the
     selected persistence backend for initial dashboard synchronization.
     """
     try:
         active_user = canonical_user_name(user_name)
-        profile = get_household_profile()
-        pantry = get_pantry_stock()
-        pantry_state = get_pantry_state()
-        today = datetime.now(household_zone(profile.get("timezone_name"))).date()
-        diary = get_macro_diary(active_user, today, today)
-        meal_plan = build_meal_plan_week()
-        grocery_cart = get_grocery_cart()
-        latest_recipe_grocery_plan = get_latest_recipe_grocery_plan_metadata()
-        household_members = get_household_members()
-        nutrition_targets = get_nutrition_targets(active_user)
-        
-        return {
-            "profile": profile,
-            "household_members": household_members,
-            "nutrition_targets": nutrition_targets,
-            "pantry_stock": pantry,
-            "pantry": pantry_state,
-            "macro_diary": diary,
-            "meal_plan": meal_plan,
-            "grocery_cart": grocery_cart,
-            "latest_recipe_grocery_plan": latest_recipe_grocery_plan
-        }
+        def load_state() -> Dict[str, Any]:
+            profile = get_household_profile()
+            timezone_name = str(profile.get("timezone_name") or "Asia/Kolkata")
+            today = datetime.now(household_zone(timezone_name)).date()
+            pantry = get_pantry_stock()
+            diary = get_macro_diary(
+                active_user,
+                today,
+                today,
+                timezone_name,
+            )
+            meal_plan = (
+                build_meal_plan_week(None, timezone_name)
+                if include_meal_plan
+                else None
+            )
+            return {
+                "profile": profile,
+                "household_members": get_household_members(),
+                "nutrition_targets": get_nutrition_targets(active_user),
+                "pantry_stock": pantry,
+                "pantry": {
+                    "revision": int(profile.get("pantry_revision") or 0),
+                    "reviewedAt": profile.get("pantry_reviewed_at"),
+                    "items": pantry,
+                },
+                "macro_diary": diary,
+                "meal_plan": meal_plan,
+                "grocery_cart": get_grocery_cart(),
+                "latest_recipe_grocery_plan": get_latest_recipe_grocery_plan_metadata(),
+            }
+
+        return await asyncio.to_thread(load_state)
     except Exception:
         logger.exception("Live state load failed")
         raise HTTPException(status_code=500, detail="Kitch could not load the household state.")
 
 
 @app.get("/api/meal-plan")
-async def get_meal_plan_endpoint(week_start: str):
+async def get_meal_plan_endpoint(week_start: str | None = None):
     """Return one authoritative Monday-Sunday household planning window."""
     try:
-        return build_meal_plan_week(week_start)
+        return await asyncio.to_thread(build_meal_plan_week, week_start)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -994,15 +1015,31 @@ async def update_household_profile_endpoint(payload: Dict[str, Any]):
 
 
 @app.patch("/api/household/members/{member_id}")
-async def update_household_member_endpoint(member_id: str, payload: Dict[str, Any]):
+async def update_household_member_endpoint(
+    member_id: str,
+    payload: Dict[str, Any],
+    request: Request,
+):
     """Rename one member without changing their stable profile identity."""
     try:
         member = update_household_member(member_id, str(payload.get("name") or ""))
-        return {
+        members = get_household_members()
+        result = {
             "status": "success",
             "member": {"id": str(member["id"]), "name": member["full_name"]},
-            "members": get_household_members(),
+            "members": members,
         }
+        identity = current_identity()
+        claims = session_from_request(request)
+        if identity is None or claims is None:
+            return result
+        response = JSONResponse(result)
+        set_session_cookie(response, issue_session(claims, {
+            "household_id": identity.household_id,
+            "owner_profile_id": identity.owner_profile_id,
+            "members": members,
+        }))
+        return response
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

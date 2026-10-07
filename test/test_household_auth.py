@@ -63,7 +63,7 @@ class HostedSessionTests(unittest.TestCase):
             "app.main.verify_google_credential", return_value=claims,
         ), patch(
             "app.main.ensure_google_household", return_value=household,
-        ):
+        ) as ensure_household:
             with TestClient(app) as client:
                 signed_in = client.post("/api/auth/google", json={
                     "credential": "credential",
@@ -77,6 +77,7 @@ class HostedSessionTests(unittest.TestCase):
                 self.assertEqual(session.status_code, 200)
                 self.assertTrue(session.json()["authenticated"])
                 self.assertEqual(session.json()["household"]["members"], household["members"])
+                ensure_household.assert_called_once()
 
     def test_signed_session_rejects_tampering_and_expiry(self):
         with patch.dict(os.environ, {"KITCH_AUTH_SESSION_SECRET": "s" * 40}):

@@ -74,7 +74,28 @@ def _b64decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def issue_session(claims: dict[str, Any]) -> str:
+def _session_household_context(
+    claims: dict[str, Any],
+    household: dict[str, Any],
+) -> dict[str, Any]:
+    members = [
+        {"id": str(member["id"]), "name": str(member["name"])}
+        for member in household.get("members") or []
+        if member.get("id") and member.get("name")
+    ]
+    return {
+        "google_subject": str(claims["sub"]),
+        "email": str(claims.get("email") or ""),
+        "household_id": str(household["household_id"]),
+        "owner_profile_id": str(household["owner_profile_id"]),
+        "members": members,
+    }
+
+
+def issue_session(
+    claims: dict[str, Any],
+    household: dict[str, Any] | None = None,
+) -> str:
     now = int(time.time())
     payload = {
         "sub": str(claims["sub"]),
@@ -84,6 +105,8 @@ def issue_session(claims: dict[str, Any]) -> str:
         "exp": now + SESSION_TTL_SECONDS,
         "nonce": secrets.token_urlsafe(12),
     }
+    if household is not None:
+        payload["household"] = _session_household_context(claims, household)
     encoded = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = _b64encode(hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest())
     return f"{encoded}.{signature}"
@@ -105,6 +128,24 @@ def read_session(value: str | None) -> dict[str, Any] | None:
         return payload
     except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
         return None
+
+
+def household_from_session(session: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a validated household identity embedded in a signed session."""
+    household = session.get("household")
+    if not isinstance(household, dict):
+        return None
+    if not household.get("household_id") or not household.get("owner_profile_id"):
+        return None
+    members = household.get("members")
+    if not isinstance(members, list) or not members:
+        return None
+    if any(
+        not isinstance(member, dict) or not member.get("id") or not member.get("name")
+        for member in members
+    ):
+        return None
+    return _session_household_context(session, household)
 
 
 def verify_google_credential(credential: str) -> dict[str, Any]:
@@ -156,4 +197,3 @@ def session_from_request(request: Request) -> dict[str, Any] | None:
     if not auth_required():
         return None
     return read_session(request.cookies.get(SESSION_COOKIE))
-

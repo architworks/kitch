@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,7 +145,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         }]
         call_order = []
         with (
-            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True) as claim_operation,
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch(
                 "app.grocery_checkout.apply_native_grocery_cart_changes",
@@ -180,6 +180,12 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["native_items"][0]["amount"], native_item["purchaseAmount"])
         self.assertEqual(call["native_items"][0]["unit"], native_item["purchaseUnit"])
         self.assertEqual(call["selected_address_id"], "home-1")
+        claim_operation.assert_called_once_with(
+            ANY,
+            "swiggy_instamart",
+            "staging",
+            lease_seconds=300,
+        )
         save_draft.assert_called_once()
 
     async def test_combined_chat_request_preserves_native_change_when_provider_is_unavailable(self):

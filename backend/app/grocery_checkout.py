@@ -35,6 +35,7 @@ from app.storage import (
 
 
 CartMapper = Callable[[List[Dict[str, Any]]], Awaitable[List[Dict[str, Any]]]]
+CHECKOUT_OPERATION_LEASE_SECONDS = 300
 
 
 class GroceryCheckoutService:
@@ -704,6 +705,7 @@ class GroceryCheckoutService:
             operation_id,
             provider,
             environment,
+            lease_seconds=CHECKOUT_OPERATION_LEASE_SECONDS,
         ):
             raise ProviderOperationError(
                 provider=provider,
