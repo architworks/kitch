@@ -278,7 +278,7 @@ Provider retention defaults are configured with
 
 | Variable | Purpose |
 | --- | --- |
-| `ZEPTO_MCP_ENABLED` | Enable or disable Zepto. |
+| `ZEPTO_MCP_ENABLED` | Enable or disable Zepto. Defaults to disabled/Coming Soon unless explicitly set to `true`. |
 | `ZEPTO_MCP_URL` | MCP endpoint; defaults to `https://mcp.zepto.co.in/mcp`. |
 | `ZEPTO_MCP_ACCESS_TOKEN` | Preferred bearer-token variable. |
 | `ZEPTO_MCP_BEARER_TOKEN` | Alternate bearer-token variable. |
@@ -300,7 +300,7 @@ npx -y mcp-remote https://mcp.zepto.co.in/mcp
 | --- | --- |
 | `PROVIDER_CREDENTIAL_ENCRYPTION_KEY` | Fernet key for tokens and PKCE verifiers. |
 | `SWIGGY_INSTAMART_ENABLED` | Enable the provider adapter and card. |
-| `SWIGGY_INSTAMART_ENV` | `local`, `staging`, or `production`. |
+| `SWIGGY_INSTAMART_ENV` | Optional explicit override: `local`, `staging`, or `production`. When omitted, an HTTPS callback or Vercel production deployment is treated as production; localhost remains local. |
 | `SWIGGY_INSTAMART_MCP_URL` | MCP URL; must target the `/im` surface. |
 | `SWIGGY_OAUTH_BASE_URL` | OAuth and dynamic-registration origin. |
 | `SWIGGY_OAUTH_REDIRECT_URI` | Exact callback URI; HTTPS is required in production. |

@@ -53,8 +53,16 @@ class SwiggyOAuthBroker:
     provider_id = "swiggy_instamart"
 
     def __init__(self) -> None:
-        self.environment = os.environ.get("SWIGGY_INSTAMART_ENV", "local").strip().lower()
-        if self.environment not in {"local", "staging", "production"}:
+        configured_environment = os.environ.get("SWIGGY_INSTAMART_ENV", "").strip().lower()
+        configured_redirect_uri = os.environ.get("SWIGGY_OAUTH_REDIRECT_URI", "").strip()
+        if configured_environment in {"local", "staging", "production"}:
+            self.environment = configured_environment
+        elif (
+            os.environ.get("VERCEL_ENV", "").strip().lower() == "production"
+            or configured_redirect_uri.startswith("https://")
+        ):
+            self.environment = "production"
+        else:
             self.environment = "local"
         default_origin = (
             "https://mcp-staging.swiggy.com"
@@ -62,10 +70,9 @@ class SwiggyOAuthBroker:
             else "https://mcp.swiggy.com"
         )
         self.oauth_origin = os.environ.get("SWIGGY_OAUTH_BASE_URL", default_origin).rstrip("/")
-        self.redirect_uri = os.environ.get(
-            "SWIGGY_OAUTH_REDIRECT_URI",
-            "http://localhost:8000/api/grocery/providers/swiggy_instamart/oauth/callback",
-        ).strip()
+        self.redirect_uri = configured_redirect_uri or (
+            "http://localhost:8000/api/grocery/providers/swiggy_instamart/oauth/callback"
+        )
         self.scope = os.environ.get("SWIGGY_OAUTH_SCOPE", "mcp:tools").strip()
 
     def production_gate_error(self) -> str | None:

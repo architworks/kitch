@@ -37,7 +37,7 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
             or os.environ.get("ZEPTO_MCP_BEARER_TOKEN")
             or os.environ.get("ZEPTO_ACCESS_TOKEN")
         )
-        self.enabled = os.environ.get("ZEPTO_MCP_ENABLED", "true").lower() not in {"0", "false", "no"}
+        self.enabled = os.environ.get("ZEPTO_MCP_ENABLED", "false").lower() in {"1", "true", "yes"}
         self.raw_headers = os.environ.get("ZEPTO_MCP_HEADERS")
         explicit_transport = os.environ.get("ZEPTO_MCP_TRANSPORT", "").strip().lower()
         self.transport = explicit_transport or ("http" if self.access_token or self.raw_headers else "stdio_remote")

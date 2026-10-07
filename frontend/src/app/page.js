@@ -1191,9 +1191,9 @@ export default function Home() {
       setSelectedOrderingProvider(current => {
         if (providers.some(provider => provider.id === current && provider.enabled)) return current;
         if (providers.some(provider => provider.id === selectedByWorkflow && provider.enabled)) return selectedByWorkflow;
-        const connectedZepto = providers.find(provider => provider.id === "zepto" && provider.enabled && provider.state === "configured");
         const connectedInstamart = providers.find(provider => provider.id === "swiggy_instamart" && provider.enabled && provider.state === "connected");
-        return connectedZepto?.id || connectedInstamart?.id || "";
+        const connectedZepto = providers.find(provider => provider.id === "zepto" && provider.enabled && provider.state === "configured");
+        return connectedInstamart?.id || connectedZepto?.id || "";
       });
       return providers;
     } catch (e) {

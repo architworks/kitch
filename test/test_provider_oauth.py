@@ -43,6 +43,34 @@ class ProviderOAuthTests(unittest.TestCase):
         self.assertNotIn("provider-token", encrypted)
         self.assertEqual(decrypt_provider_secret(encrypted), "provider-token")
 
+    def test_https_callback_infers_production_when_environment_is_omitted(self):
+        os.environ.pop("SWIGGY_INSTAMART_ENV", None)
+        os.environ["SWIGGY_OAUTH_REDIRECT_URI"] = (
+            "https://kitch.example/backend/api/grocery/providers/"
+            "swiggy_instamart/oauth/callback"
+        )
+
+        broker = SwiggyOAuthBroker()
+
+        self.assertEqual(broker.environment, "production")
+
+    def test_localhost_callback_defaults_to_local_when_environment_is_omitted(self):
+        os.environ.pop("SWIGGY_INSTAMART_ENV", None)
+        os.environ.pop("VERCEL_ENV", None)
+
+        broker = SwiggyOAuthBroker()
+
+        self.assertEqual(broker.environment, "local")
+
+    def test_vercel_production_infers_production_when_environment_is_omitted(self):
+        os.environ.pop("SWIGGY_INSTAMART_ENV", None)
+        os.environ.pop("SWIGGY_OAUTH_REDIRECT_URI", None)
+        os.environ["VERCEL_ENV"] = "production"
+
+        broker = SwiggyOAuthBroker()
+
+        self.assertEqual(broker.environment, "production")
+
     def test_pkce_start_stores_only_hashed_state_and_encrypted_verifier(self):
         captured = {}
         with (
