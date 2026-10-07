@@ -383,6 +383,11 @@ async def persistence_postcondition(request: Request, call_next):
     )
     identity_token = None
     try:
+        # CORS preflight requests never carry the Kitch session cookie. Let the
+        # CORS middleware validate the requested origin and method before
+        # applying household authentication to the actual request.
+        if request.method == "OPTIONS":
+            return _security_headers(await call_next(request))
         raw_content_length = request.headers.get("content-length")
         if raw_content_length:
             try:

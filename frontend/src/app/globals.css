@@ -1918,19 +1918,40 @@ button {
   white-space: nowrap;
 }
 
-.rail-member-card button {
-  width: 28px;
-  height: 28px;
-  color: var(--ink-soft);
-  background: transparent;
-  border: 0;
+.rail-member-card .rail-member-settings {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sage-deep);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(74, 103, 65, 0.24);
   border-radius: 999px;
   cursor: pointer;
-  font-size: 14px;
+  box-shadow: 0 5px 14px rgba(52, 44, 36, 0.08);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
-.rail-member-card button:hover {
+.rail-member-card .rail-member-settings svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rail-member-card .rail-member-settings:hover {
   background: var(--surface-muted);
+  border-color: rgba(74, 103, 65, 0.42);
+  transform: translateY(-1px);
+}
+
+.rail-member-card .rail-member-settings:focus-visible {
+  outline: 3px solid rgba(74, 103, 65, 0.22);
+  outline-offset: 2px;
 }
 
 .kitch-workspace {

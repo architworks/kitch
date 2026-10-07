@@ -160,6 +160,9 @@ const apiErrorMessage = (error, fallback) => {
   if (error instanceof ApiResponseError && error.isPersistenceFailure) {
     return PERSISTENCE_FAILURE_MESSAGE;
   }
+  if (error?.name === "AbortError") {
+    return "Kitch took longer than expected to respond. Refresh the relevant page before retrying because the requested change may still have completed.";
+  }
   const message = String(error?.message || "").trim();
   if (!message || /^(failed to fetch|load failed|networkerror)/i.test(message)) {
     return fallback;
@@ -323,6 +326,7 @@ const getTimeBasedGreeting = (date = new Date()) => {
 
 const CONFIGURED_API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim().replace(/\/$/, "");
 const API_REQUEST_TIMEOUT_MS = 20_000;
+const AGENT_REQUEST_TIMEOUT_MS = 120_000;
 
 const apiUrl = (path) => {
   if (CONFIGURED_API_BASE_URL) return `${CONFIGURED_API_BASE_URL}${path}`;
@@ -333,12 +337,13 @@ const apiUrl = (path) => {
 };
 
 const apiFetch = (url, options = {}) => {
+  const { timeoutMs = API_REQUEST_TIMEOUT_MS, ...requestOptions } = options;
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   return globalThis.fetch(url, {
     credentials: "include",
-    ...options,
-    signal: options.signal || controller.signal
+    ...requestOptions,
+    signal: requestOptions.signal || controller.signal
   }).finally(() => globalThis.clearTimeout(timeout));
 };
 
@@ -2239,6 +2244,7 @@ export default function Home() {
 
       const res = await apiFetch(apiUrl("/api/chat"), {
         method: "POST",
+        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
         headers: {
           "Content-Type": "application/json",
         },
@@ -2308,7 +2314,7 @@ export default function Home() {
       console.error("Real API chat processing error", e);
       const message = apiErrorMessage(
         e,
-        `I was unable to reach the Kitch backend server on \`${API_BASE_URL}\`. Please make sure the FastAPI server is running.`
+        `I was unable to reach the Kitch backend server on \`${apiUrl("")}\`. Please make sure the FastAPI server is running.`
       );
       if (e instanceof ApiResponseError && e.isPersistenceFailure) {
         triggerBannerAlert(PERSISTENCE_FAILURE_MESSAGE);
@@ -2393,6 +2399,7 @@ export default function Home() {
 
       const res = await apiFetch(apiUrl("/api/upload-photo"), {
         method: "POST",
+        timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
         body: formData
       });
 
@@ -2443,7 +2450,7 @@ export default function Home() {
       setScanningOverlay({ active: false, title: "", steps: [], fileName: "" });
       const message = apiErrorMessage(
         e,
-        `Failed to reach \`/api/upload-photo\` on \`${API_BASE_URL}\`. Is your FastAPI backend running?`
+        `Failed to reach \`/api/upload-photo\` on \`${apiUrl("")}\`. Is your FastAPI backend running?`
       );
       if (e instanceof ApiResponseError && e.isPersistenceFailure) {
         triggerBannerAlert(PERSISTENCE_FAILURE_MESSAGE);
@@ -3119,8 +3126,17 @@ export default function Home() {
             <span>Active member</span>
             <strong>{activeUser}</strong>
           </div>
-          <button type="button" aria-label="Manage household members" onClick={openMemberEditor}>
-            ⚙
+          <button
+            type="button"
+            className="rail-member-settings"
+            aria-label="Manage household members"
+            title="Manage household members"
+            onClick={openMemberEditor}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
+              <path d="M19.15 13.65a7.8 7.8 0 0 0 .05-1.65 7.8 7.8 0 0 0-.05-1.65l1.75-1.36-2-3.46-2.06.83a7.62 7.62 0 0 0-2.84-1.65L13.7 2.5h-4l-.3 2.21a7.62 7.62 0 0 0-2.84 1.65L4.5 5.53l-2 3.46 1.75 1.36A7.8 7.8 0 0 0 4.2 12c0 .56.02 1.11.05 1.65L2.5 15.01l2 3.46 2.06-.83a7.62 7.62 0 0 0 2.84 1.65l.3 2.21h4l.3-2.21a7.62 7.62 0 0 0 2.84-1.65l2.06.83 2-3.46-1.75-1.36Z" />
+            </svg>
           </button>
         </div>
       </aside>

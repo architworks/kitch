@@ -16,11 +16,31 @@ from app.auth import (
     verify_google_credential,
 )
 from app.household_config import canonical_user_name, get_household_profile_id, get_user_id
+from app import main
 from app.main import app
 from app.sqlite_supabase import SQLiteKitchClient
 
 
 class HostedSessionTests(unittest.TestCase):
+    def test_cors_preflight_does_not_require_a_household_session(self):
+        with patch.dict(os.environ, {
+            "KITCH_DATABASE_BACKEND": "supabase",
+            "KITCH_AUTH_SESSION_SECRET": "s" * 40,
+        }):
+            origin = main.allowed_origins[0]
+            with TestClient(app) as client:
+                response = client.options("/api/chat", headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            origin,
+        )
+
     def test_google_sign_in_returns_complete_household_and_cookie_supports_session_reload(self):
         household = {
             "google_subject": "google-user-1",
