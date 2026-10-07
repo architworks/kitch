@@ -61,6 +61,59 @@ const ABOUT_STEP_TONES = {
   scooter: "rose"
 };
 
+const LOGIN_FLOW_STEPS = [
+  {
+    icon: "calendar",
+    tone: "sage",
+    title: "Kitch plans meals",
+    body: "Learns your likes and dislikes"
+  },
+  {
+    icon: "pot",
+    tone: "amber",
+    title: "Get recipes",
+    body: "Kitch creates recipes using what you have (and what to buy)"
+  },
+  {
+    icon: "cart",
+    tone: "green",
+    title: "Create carts",
+    body: "Add all ingredients to Instamart, Zepto or Blinkit with one click",
+    providers: [
+      { name: "Instamart", logo: "/instamart-logo.jpg" },
+      { name: "Zepto", logo: "/zepto-logo.jpg" },
+      { name: "Blinkit", logo: "/blinkit-logo.jpg" }
+    ]
+  },
+  {
+    icon: "nutrition-chart",
+    tone: "sage",
+    title: "Track nutrition",
+    body: "Log your meals from text or photos and track your nutrition"
+  }
+];
+
+const LOGIN_BENEFITS = [
+  {
+    icon: "people",
+    tone: "sage",
+    title: "One account for your household",
+    body: "Share meal plans, recipes and grocery carts across your kitchen."
+  },
+  {
+    icon: "shield",
+    tone: "blue",
+    title: "Your kitchen data stays private",
+    body: "Your household data remains behind your signed-in account."
+  },
+  {
+    icon: "suggestions",
+    tone: "amber",
+    title: "Get started in seconds",
+    body: "Sign in and you’re ready to plan, cook and order."
+  }
+];
+
 const DEFAULT_MEAL_SLOT = "breakfast";
 const NUTRITION_MEALS = [
   { id: "breakfast", label: "Breakfast", icon: "☀", defaultTime: "08:30" },
@@ -202,6 +255,15 @@ const AboutIconBadge = ({ name, tone = "sage", className = "" }) => {
         <circle className="icon-fill-soft" cx="24" cy="18" r="7" />
         <path className="icon-fill-accent" d="M12 40c1.4-8.3 5.7-12.5 12-12.5S34.6 31.7 36 40H12Z" />
         <path className="icon-stroke" d="M17 39c1.1-5.1 3.5-7.7 7-7.7s5.9 2.6 7 7.7" />
+      </>
+    );
+  } else if (name === "nutrition-chart") {
+    icon = (
+      <>
+        <rect className="icon-fill-soft" x="10" y="29" width="7" height="11" rx="2" />
+        <rect className="icon-fill-accent" x="21" y="20" width="7" height="20" rx="2" />
+        <rect className="icon-fill-main" x="32" y="10" width="7" height="30" rx="2" />
+        <path className="icon-stroke" d="M8 40h34" />
       </>
     );
   } else if (name === "calendar") {
@@ -2821,19 +2883,82 @@ export default function Home() {
 
   if (authState.required && !authState.authenticated) {
     return (
-      <main className="household-onboarding-shell">
-        <section className="household-onboarding-card kitch-sign-in-card">
-          <Image src="/kitch-chef-hat.svg" alt="" width={72} height={72} aria-hidden="true" />
-          <span className="eyebrow">Welcome to Kitch</span>
-          <h1>Open your household kitchen</h1>
-          <p>Sign in with Google to access your household’s plans, pantry, nutrition and grocery carts.</p>
-          <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={renderGoogleButton} />
-          <div ref={googleButtonRef} className="google-sign-in-button" />
-          {!process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID && (
-            <p className="household-onboarding-error">Google Sign-In is not configured for this deployment.</p>
-          )}
-          {authError && <p className="household-onboarding-error" role="alert">{authError}</p>}
-        </section>
+      <main className="kitch-login-shell">
+        <div className="kitch-login-layout">
+          <section className="kitch-login-story" aria-labelledby="kitch-login-story-title">
+            <div className="kitch-login-brand" aria-label="Kitch">
+              <Image src="/kitch-chef-hat.svg" alt="" width={58} height={58} aria-hidden="true" priority />
+              <span>
+                <strong>Kitch</strong>
+              </span>
+            </div>
+
+            <div className="kitch-login-copy">
+              <h1 id="kitch-login-story-title">
+                From meal plans<br />{" "}
+                to groceries, <em>effortlessly</em>
+              </h1>
+              <p>Kitch plans your meals, generates recipes, creates grocery carts on your preferred quick commerce app, and tracks nutrition.</p>
+            </div>
+
+            <div className="kitch-login-flow" aria-label="How Kitch works">
+              {LOGIN_FLOW_STEPS.map((step, index) => (
+                <React.Fragment key={step.title}>
+                  <article className={`kitch-login-flow-card${step.providers ? " has-provider-logos" : ""}`}>
+                    <AboutIconBadge name={step.icon} tone={step.tone} />
+                    <div>
+                      <h2>{step.title}</h2>
+                      <p>{step.body}</p>
+                      {step.providers && (
+                        <div className="kitch-login-provider-logos" aria-label="Supported ordering apps">
+                          {step.providers.map(provider => (
+                            <span key={provider.name}>
+                              <Image
+                                src={provider.logo}
+                                alt={`${provider.name} logo`}
+                                width={42}
+                                height={42}
+                              />
+                              <small>{provider.name}</small>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                  {index < LOGIN_FLOW_STEPS.length - 1 && (
+                    <span className="kitch-login-flow-arrow" aria-hidden="true">›</span>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          </section>
+
+          <section className="household-onboarding-card kitch-sign-in-card" aria-labelledby="kitch-sign-in-title">
+            <Image className="kitch-sign-in-logo" src="/kitch-chef-hat.svg" alt="" width={68} height={68} aria-hidden="true" priority />
+            <h2 id="kitch-sign-in-title">Open your<br />{" "}household kitchen</h2>
+            <p>Sign in with Google to access your household’s meal plans, recipes, pantry and grocery carts.</p>
+            <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={renderGoogleButton} />
+            <div ref={googleButtonRef} className="google-sign-in-button" />
+            {!process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID && (
+              <p className="household-onboarding-error">Google Sign-In is not configured for this deployment.</p>
+            )}
+            {authError && <p className="household-onboarding-error" role="alert">{authError}</p>}
+
+            <div className="kitch-sign-in-divider" aria-hidden="true" />
+            <div className="kitch-sign-in-benefits">
+              {LOGIN_BENEFITS.map(benefit => (
+                <article key={benefit.title}>
+                  <AboutIconBadge name={benefit.icon} tone={benefit.tone} />
+                  <div>
+                    <h3>{benefit.title}</h3>
+                    <p>{benefit.body}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
       </main>
     );
   }
