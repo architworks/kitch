@@ -395,16 +395,20 @@ Example prompts:
    loads read-only saved addresses without refreshing the provider cart. After
    five minutes, Kitch marks the cart review stale and asks the user to refresh
    explicitly before payment or ordering.
-11. Replacements and other material changes are highlighted and reset payment
+11. Refresh rebuilds the exact reviewed Swiggy cart from its saved product IDs
+    and reads the live provider result directly. It does not repeat semantic
+    product selection or depend on an LLM. Any missing, unexpected, price,
+    quantity, or pack change resets approval.
+12. Replacements and other material changes are highlighted and reset payment
     and approval. Unresolved selected items are prominently listed as omitted;
     the confirmed partial cart can proceed after review.
-12. Kitch offers only fresh provider-returned payment methods. Instamart calls
+13. Kitch offers only fresh provider-returned payment methods. Instamart calls
     `get_payment_options`, passes the selected UPI app/QR flow unchanged, or
     offers explicit Cash only when UPI is absent.
-13. The user acknowledges the exact provider, address, products, quantities,
+14. The user acknowledges the exact provider, address, products, quantities,
     payable total, payment method, and any multi-store warning. Kitch then runs
     a final revalidation immediately before ordering.
-14. Pending, partial, or ambiguous order state survives reload. A timeout is
+15. Pending, partial, or ambiguous order state survives reload. A timeout is
     not blindly retried while duplicate-order risk remains.
 
 For a combined explicit chat request, Kitch first applies the declared

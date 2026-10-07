@@ -809,9 +809,12 @@ automated or browser-test order against production.
   changed. Reload and provider switching may perform only read-only address
   discovery; focus performs no MCP call. None automatically searches products,
   mutates the cart, or revalidates it. A draft older than five minutes is
-  visibly stale and payment remains locked. Explicit refresh invokes the same
-  Instamart cart agent, searches stale items again in the same address context,
-  then rebuilds and reconciles the complete cart after safe replacement.
+  visibly stale and payment remains locked. Explicit refresh rebuilds the exact
+  reviewed Swiggy cart from its saved product identifiers, then reads the
+  authoritative cart and payment state and records a new validation time
+  without requiring an LLM call. Missing or unexpected provider rows and
+  material price, pack, or quantity changes reset approval and require review
+  or a fresh cart sync.
 - Repair check: Show native item → previous product → replacement product, plus
   price/pack/quantity changes and **Last checked**. Every material change resets
   payment and acknowledgement. No-alternative rows remain visible and are

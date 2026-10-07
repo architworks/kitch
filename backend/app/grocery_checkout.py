@@ -618,22 +618,13 @@ class GroceryCheckoutService:
         operation_id: str,
         source: str,
     ) -> Dict[str, Any]:
-        if provider_id != "swiggy_instamart":
-            return await adapter.revalidate_cart(review)
-        outcome = await self.instamart_agent.synchronize(
-            adapter=adapter,
-            native_items=list(review.get("native_items") or []),
-            selected_address_id=str(review.get("selected_address_id") or ""),
+        del provider_id
+        with commerce_request_context(
             source=source,
-            previous_review=review,
+            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
             operation_id=operation_id,
-        )
-        refreshed = adapter.confirmed_agent_result(
-            list(review.get("native_items") or []),
-            str(review.get("selected_address_id") or ""),
-            outcome.capture,
-        )
-        refreshed = await adapter.enrich_agent_result_with_payment(refreshed)
+        ):
+            refreshed = await adapter.revalidate_cart(review)
         return self._annotate_revalidation_changes(review, refreshed)
 
     @staticmethod
@@ -647,8 +638,10 @@ class GroceryCheckoutService:
             str((item.get("native_item") or {}).get("id")): item
             for item in previous
         }
-        replacements: List[Dict[str, Any]] = []
-        changes: List[Dict[str, Any]] = []
+        replacements: List[Dict[str, Any]] = list(
+            refreshed.get("replacements") or []
+        )
+        changes: List[Dict[str, Any]] = list(refreshed.get("changes") or [])
         for match in current:
             native_id = str((match.get("native_item") or {}).get("id"))
             old = previous_by_native.get(native_id)

@@ -388,13 +388,157 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         )
 
     async def revalidate_cart(self, draft: Dict[str, Any]) -> Dict[str, Any]:
-        raise ProviderOperationError(
-            provider=self.provider_id,
-            operation="revalidate_cart",
-            code="agent_cart_service_required",
-            message="Instamart cart revalidation must run through the guarded Gemini cart agent service.",
-            status_code=500,
-        )
+        """Refresh an existing review from Swiggy's authoritative cart.
+
+        Gemini is needed to choose products during the initial synchronization,
+        but an explicit refresh already has stable Swiggy product identifiers.
+        Rebuilding, re-reading, and reconciling those identifiers is
+        deterministic and must not fail merely because the language model is
+        unavailable.
+        """
+        selected_address_id = str(draft.get("selected_address_id") or "")
+        reviewed_cart_items: List[Dict[str, Any]] = []
+        for match in draft.get("matched_items") or []:
+            if not isinstance(match, dict):
+                continue
+            product = match.get("cart_item") or match.get("matched_product") or {}
+            spin_id = product.get("spin_id") or product.get("spinId")
+            sku_id = product.get("sku_id") or product.get("skuId")
+            quantity = product.get("quantity")
+            if spin_id and sku_id and quantity:
+                reviewed_cart_items.append({
+                    "spinId": str(spin_id),
+                    "skuId": str(sku_id),
+                    "quantity": int(quantity),
+                })
+        if not selected_address_id or not reviewed_cart_items:
+            raise ProviderOperationError(
+                provider=self.provider_id,
+                operation="revalidate_cart",
+                code="checkout_draft_incomplete",
+                message="The saved Instamart review cannot be refreshed safely.",
+                status_code=409,
+            )
+
+        client = self._client_for_request()
+        async with client.session() as session:
+            tools, version = await self._validated_tools(
+                client,
+                session,
+                {"update_cart", "get_cart"},
+            )
+            CommerceToolPolicy.authorize("update_cart")
+            self._unwrap(await client.call_tool(session, "update_cart", {
+                "selectedAddressId": selected_address_id,
+                "items": reviewed_cart_items,
+            }))
+            raw_cart = self._unwrap(
+                await client.call_tool(session, "get_cart", {})
+            )
+            payment_options: List[Dict[str, Any]] = []
+            if "get_payment_options" in tools:
+                payment_payload = self._unwrap(
+                    await client.call_tool(session, "get_payment_options", {})
+                )
+                payment_options = self._payment_options(payment_payload)
+        live = {
+            "capability_version": version,
+            "provider_cart": self._normalize_cart(raw_cart),
+            "cart_summary": self._cart_summary(raw_cart),
+            "payment_options": payment_options,
+        }
+        provider_cart = live.get("provider_cart") or {}
+        live_items = list(provider_cart.get("items") or [])
+        live_by_id = {
+            self._cart_line_key(item): item
+            for item in live_items
+            if self._cart_line_key(item)
+        }
+
+        refreshed_items: List[Dict[str, Any]] = []
+        unavailable_items = [
+            dict(item)
+            for item in draft.get("unavailable_items") or []
+            if isinstance(item, dict)
+        ]
+        changes: List[Dict[str, Any]] = []
+        reviewed_keys: set[str] = set()
+
+        for previous_match in draft.get("matched_items") or []:
+            if not isinstance(previous_match, dict):
+                continue
+            previous_product = (
+                previous_match.get("cart_item")
+                or previous_match.get("matched_product")
+                or {}
+            )
+            product_key = self._cart_line_key(previous_product)
+            native_item = previous_match.get("native_item") or {}
+            current_item = live_by_id.get(product_key)
+            if current_item is None:
+                unavailable_items.append({
+                    "native_item_id": str(native_item.get("id") or ""),
+                    "name": native_item.get("name") or "Selected item",
+                    "reason": "The previously reviewed Instamart product is no longer present in the live cart.",
+                })
+                changes.append({
+                    "type": "provider_item_removed",
+                    "native_item": native_item,
+                })
+                continue
+            reviewed_keys.add(product_key)
+            refreshed_items.append({
+                **previous_match,
+                "matched_product": {
+                    **(previous_match.get("matched_product") or {}),
+                    **current_item,
+                },
+                "cart_item": current_item,
+            })
+
+        unexpected_items = [
+            item for item in live_items
+            if self._cart_line_key(item) not in reviewed_keys
+        ]
+        if unexpected_items:
+            changes.append({
+                "type": "unexpected_provider_items",
+                "count": len(unexpected_items),
+            })
+
+        payment_options = list(live.get("payment_options") or [])
+        return {
+            **self._base_result(
+                str(
+                    live.get("capability_version")
+                    or draft.get("capability_version")
+                    or ""
+                ),
+                selected_address_id,
+            ),
+            "status": "success" if refreshed_items else "blocked",
+            "items": refreshed_items,
+            "unavailable_items": unavailable_items,
+            "replacements": [],
+            "changes": changes,
+            "changed": bool(changes),
+            "provider_cart": provider_cart,
+            "cart_summary": live.get("cart_summary") or {},
+            "payment_options": payment_options,
+            "checkout_context": {
+                "payment_methods": payment_options,
+                "provider_cart_mismatch": bool(unexpected_items),
+            },
+            "message": "Instamart cart availability and totals were refreshed.",
+        }
+
+    @staticmethod
+    def _cart_line_key(item: Dict[str, Any]) -> str:
+        spin_id = item.get("spin_id") or item.get("spinId")
+        sku_id = item.get("sku_id") or item.get("skuId")
+        if spin_id and sku_id:
+            return f"{spin_id}:{sku_id}"
+        return str(item.get("candidate_id") or "")
 
     async def get_cart(self) -> Dict[str, Any]:
         client = self._client_for_request()

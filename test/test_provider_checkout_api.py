@@ -319,6 +319,42 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.draft["status"], "blocked")
         adapter.revalidate_cart.assert_not_awaited()
 
+    async def test_instamart_revalidation_uses_direct_provider_refresh(self):
+        row = {**self.draft_row(), "provider": "swiggy_instamart"}
+        refreshed_result = {
+            "status": "success",
+            "items": row["matched_items"],
+            "unavailable_items": [],
+            "cart_summary": row["cart_summary"],
+            "checkout_context": row["checkout_context"],
+            "store_context": row["store_context"],
+            "payment_options": row["payment_options"],
+            "changed": False,
+        }
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(
+                environment="production",
+                label="Swiggy Instamart",
+            ),
+            revalidate_cart=AsyncMock(return_value=refreshed_result),
+        )
+        agent = SimpleNamespace(synchronize=AsyncMock())
+        service = self.service(adapter, agent)
+        saved = {**row, "last_validated_at": "2026-10-08T00:00:00+00:00"}
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
+            patch("app.grocery_checkout.get_grocery_cart", return_value=row["native_items"]),
+            patch("app.grocery_checkout.native_snapshot_matches", return_value=True),
+            patch("app.grocery_checkout.save_revalidated_draft", return_value=(saved, False)),
+        ):
+            response = await service.revalidate("swiggy_instamart")
+
+        adapter.revalidate_cart.assert_awaited_once()
+        agent.synchronize.assert_not_awaited()
+        self.assertEqual(response["draft"]["last_validated_at"], saved["last_validated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

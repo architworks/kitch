@@ -215,6 +215,35 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(review["unavailable_items"], result["unavailable_items"])
         self.assertEqual(review["order_blockers"], [])
 
+    def test_unreviewed_provider_rows_block_checkout(self):
+        native_item = self.native_item()
+        result = self.successful_result()
+        result["checkout_context"] = {
+            **result["checkout_context"],
+            "provider_cart_mismatch": True,
+        }
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({
+                "provider": kwargs["provider"],
+                "provider_environment": kwargs["provider_environment"],
+                **payload,
+            }),
+        ):
+            review = save_initial_draft(
+                [native_item],
+                [native_item],
+                result,
+                "address-1",
+                "swiggy_instamart",
+                "staging",
+                "Swiggy Instamart",
+            )
+
+        self.assertFalse(review["can_place_order"])
+        self.assertEqual(review["status"], "blocked")
+        self.assertIn("outside the reviewed Kitch selection", review["order_blockers"][0])
+
     def test_material_revalidation_change_resets_payment_and_approval(self):
         native_item = self.native_item()
         initial = persisted_row(

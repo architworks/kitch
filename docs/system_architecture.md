@@ -438,6 +438,10 @@ Architectural invariants:
   but does not search products, mutate carts, or revalidate provider state.
   Drafts older than five minutes are visibly stale and require explicit refresh
   before payment or approval.
+- Instamart refresh and order preflight deterministically rebuild the cart from
+  the reviewed Swiggy product identifiers, then read the authoritative cart,
+  payment options, and bill. They do not invoke Gemini or reinterpret product
+  intent. A missing or unexpected provider row is a material review change.
 - Replacements, price changes, pack changes, quantity changes, and cart drift
   reset payment and acknowledgement. Unresolved native items remain in the
   approval snapshot as explicitly omitted rows; confirmed partial carts may

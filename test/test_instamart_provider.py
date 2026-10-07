@@ -40,14 +40,18 @@ class FakeInstamartClient:
         checkout_error=False,
         live_optional_address_schema=False,
         checkout_payload=None,
+        cart_payload=None,
+        payment_payload=None,
     ):
         self.calls = []
         self.checkout_error = checkout_error
         self.checkout_payload = checkout_payload
+        self.cart_payload = cart_payload
+        self.payment_payload = payment_payload
         names = {
             "get_addresses", "search_products", "your_go_to_items",
             "update_cart", "get_cart", "checkout", "get_orders",
-            "check_payment_status",
+            "check_payment_status", "get_payment_options",
         }
         required = {
             "search_products": ["addressId", "query"],
@@ -104,6 +108,28 @@ class FakeInstamartClient:
             }
         if name == "get_orders":
             return {"success": True, "data": {"orders": []}}
+        if name == "update_cart":
+            return {"success": True, "data": {"updated": True}}
+        if name == "get_cart":
+            return self.cart_payload or {
+                "success": True,
+                "data": {
+                    "items": [{
+                        "spinId": "eggs-spin-12",
+                        "skuId": "eggs-sku-12",
+                        "itemName": "Farm Fresh Eggs - 12 pieces",
+                        "quantity": 1,
+                        "discountedFinalPrice": 92,
+                        "itemVariant": "12 pieces",
+                    }],
+                    "toPay": "₹92.00",
+                },
+            }
+        if name == "get_payment_options":
+            return self.payment_payload or {
+                "success": True,
+                "data": {"availablePaymentMethods": ["COD"]},
+            }
         raise AssertionError(f"Unexpected direct tool call: {name}")
 
     @staticmethod
@@ -239,6 +265,86 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["items"]), 1)
         self.assertEqual(result["unavailable_items"][0]["name"], "Rare herb")
+
+    def test_revalidation_rebuilds_reviewed_cart_without_reselecting_products(self):
+        native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
+        previous = self.adapter().confirmed_agent_result(
+            native,
+            "home-1",
+            self.capture(),
+        )
+        draft = {
+            **previous,
+            "selected_address_id": "home-1",
+            "matched_items": previous["items"],
+        }
+        client = FakeInstamartClient(cart_payload={
+            "success": True,
+            "data": {
+                "items": [{
+                    "spinId": "eggs-spin-12",
+                    "skuId": "eggs-sku-12",
+                    "itemName": "Farm Fresh Eggs - 12 pieces",
+                    "quantity": 1,
+                    "discountedFinalPrice": 95,
+                    "itemVariant": "12 pieces",
+                }],
+                "toPay": "₹95.00",
+            },
+        })
+
+        with commerce_request_context(
+            source="test_revalidation",
+            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            operation_id="revalidate-1",
+        ):
+            result = asyncio.run(self.adapter(client).revalidate_cart(draft))
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["items"][0]["cart_item"]["price_minor"], 9500)
+        self.assertEqual(result["items"][0]["native_item"]["name"], "Eggs")
+        self.assertEqual(
+            [name for name, _arguments in client.calls],
+            ["update_cart", "get_cart", "get_payment_options"],
+        )
+        self.assertEqual(client.calls[0][1], {
+            "selectedAddressId": "home-1",
+            "items": [{
+                "spinId": "eggs-spin-12",
+                "skuId": "eggs-sku-12",
+                "quantity": 1,
+            }],
+        })
+
+    def test_revalidation_marks_a_removed_reviewed_line_unavailable(self):
+        native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
+        previous = self.adapter().confirmed_agent_result(
+            native,
+            "home-1",
+            self.capture(),
+        )
+        draft = {
+            **previous,
+            "selected_address_id": "home-1",
+            "matched_items": previous["items"],
+        }
+        client = FakeInstamartClient(cart_payload={
+            "success": True,
+            "data": {"items": [], "toPay": "₹0.00"},
+        })
+
+        with commerce_request_context(
+            source="test_revalidation",
+            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            operation_id="revalidate-2",
+        ):
+            result = asyncio.run(self.adapter(client).revalidate_cart(draft))
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["unavailable_items"][0]["name"], "Eggs")
+        self.assertEqual(result["changes"][0]["type"], "provider_item_removed")
 
     def test_report_cannot_claim_item_absent_from_confirmed_cart(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]

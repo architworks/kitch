@@ -140,6 +140,10 @@ def _order_blockers(
         blockers.append(f"{provider_label} address options could not be read.")
     if checkout_context.get("payment_error"):
         blockers.append(f"{provider_label} payment options could not be read.")
+    if checkout_context.get("provider_cart_mismatch"):
+        blockers.append(
+            f"{provider_label} returned cart rows outside the reviewed Kitch selection."
+        )
     if (result.get("store_context") or {}).get("status") != "ready":
         blockers.append(f"{provider_label} store context is not ready for the selected address.")
     if (result.get("cart_summary") or {}).get("total_minor") is None:
