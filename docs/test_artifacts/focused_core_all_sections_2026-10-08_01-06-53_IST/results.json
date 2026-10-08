@@ -1,0 +1,32 @@
+{
+  "run_at": "2026-10-08T01:06:53+05:30",
+  "environment": "local_supabase_vertex",
+  "model": "gemini-3.5-flash-lite",
+  "summary": {
+    "pass": 12,
+    "fail": 0,
+    "partial": 0,
+    "inconclusive": 0,
+    "blocked": 0
+  },
+  "scenarios": [
+    {"id":"1.1","status":"PASS","evidence":{"date_count":7,"meal_slot_count":21,"start":"2026-10-12","end":"2026-10-18"}},
+    {"id":"2.1","status":"PASS","evidence":{"date":"2026-10-15","changed_slot":"dinner","meal":"Vegan Tofu Stir-Fry with Mixed Vegetables and Jasmine Rice","unrelated_dates_changed":0}},
+    {"id":"3.1","status":"PASS","evidence":{"recipe":"Masala Dosa","ingredient_count":12,"step_count":6,"updates_cart":false,"cart_item_count":0,"ui_rendered":true}},
+    {"id":"4.1","status":"PASS","evidence":{"date":"2026-10-08","meal_type":"lunch","calories":320,"protein_g":12,"carbs_g":50,"fat_g":6,"fiber_g":8}},
+    {"id":"5.1","status":"PASS","evidence":{"fixture":"static/food_bowl.png","classification":"meal","meal_name":"Mixed Green Salad","calories":150,"protein_g":3,"carbs_g":10,"fat_g":11,"fiber_g":3}},
+    {"id":"6.1","status":"PASS","evidence":{"action":"UPDATE_GROCERY_CART","generated_cart_rows":14,"total_cart_rows":16,"artifact_updates_cart":true}},
+    {"id":"7.1","status":"PASS","evidence":{"pantry":[{"name":"Eggs","amount":12,"unit":"pieces"},{"name":"Avocado","amount":2,"unit":"pieces"}],"action":"UPDATE_GROCERY_CART","manual_cart_delete_attempted":false}},
+    {"id":"8.2","status":"PASS","evidence":{"provider":"swiggy_instamart","native_count":2,"mapped_count":2,"matched_count":2,"review_status":"ready","order_placed":false}},
+    {"id":"9.1","status":"PASS","evidence":{"preference":"The Baker's Dozen whole wheat","backend_restarted":true,"recalled_after_restart":true}},
+    {"id":"10.1","status":"PASS","evidence":{"household_date":"2026-10-08","timezone":"Asia/Kolkata","stored_dinner":"Mix Veg Curry with Roti","browser_response_matched":true}},
+    {"id":"11.1","status":"PASS","evidence":{"backend":"sqlite","memory":"in_memory","initial_initialized":false,"member_count":2,"activity_record_count":0}},
+    {"id":"12.3","status":"PASS","evidence":{"member":"Naman","temporary_name":"Naman QA","profile_id":"22222222-2222-2222-2222-222222222222","identity_preserved":true,"restored":true}}
+  ],
+  "automated": {
+    "backend_tests_passed": 171,
+    "frontend_lint": "PASS",
+    "frontend_build": "PASS",
+    "browser_console_errors": 0
+  }
+}

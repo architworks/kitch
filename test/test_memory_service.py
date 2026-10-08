@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import time
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from google.adk.memory import InMemoryMemoryService  # noqa: E402
 from google.adk.memory.base_memory_service import SearchMemoryResponse  # noqa: E402
 from google.adk.memory.memory_entry import MemoryEntry  # noqa: E402
+from google.adk.events import Event  # noqa: E402
 from google.genai.types import Content, Part  # noqa: E402
 
 from app.agent import memory as memory_module  # noqa: E402
@@ -211,6 +214,49 @@ class MemoryFactoryTests(unittest.TestCase):
 
 
 class HouseholdMemoryToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_vertex_write_uses_client_native_mapping(self):
+        calls = []
+
+        class FakeMemories:
+            async def generate(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace()
+
+        fake_client = SimpleNamespace(
+            aio=SimpleNamespace(
+                agent_engines=SimpleNamespace(
+                    memories=FakeMemories(),
+                )
+            )
+        )
+        service = memory_module._build_vertex_service(
+            project="kitch-project",
+            location="global",
+            agent_engine_id="12345",
+        )
+        event = Event(
+            id="memory-event",
+            author="user",
+            timestamp=time.time(),
+            content=Content(role="user", parts=[Part(text="Prefer Catch masala.")]),
+        )
+
+        with patch("vertexai.Client", return_value=fake_client):
+            await service.add_events_to_memory(
+                app_name="kitch",
+                user_id="household-id",
+                events=[event],
+                custom_metadata={"wait_for_completion": True},
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0]["direct_contents_source"], dict)
+        self.assertEqual(
+            calls[0]["direct_contents_source"]["events"][0]["content"],
+            event.content,
+        )
+        self.assertEqual(calls[0]["config"], {"wait_for_completion": True})
+
     async def test_write_uses_user_event_household_scope_unique_ids_and_waits(self):
         service = CapturingMemoryService()
         context = ToolContextFixture(service)

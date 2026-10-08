@@ -148,7 +148,7 @@ chef_planner = LlmAgent(
         "7. Read schedules only with explicit start_date and end_date. Missing dates or slots are unplanned; never borrow a same-named weekday from another week.\n"
         "8. Use remove_future_meals_tool for explicit future slot/date/range removal. For every/all saved meal plans, pass action=all without inventing boundary dates; the tool resolves the actual saved future range. A single slot or date executes directly; bulk, ranges, and all-future removal require confirmation. When the tool returns confirmation_required, say the removal has not happened yet and ask the user to review the confirmation. Never create or modify past dates.\n"
         "9. If the user asks for detailed recipes, ingredients, cooking steps, or groceries, that is outside your scope and should be handled by recipe_grocery_planner via the coordinator.\n"
-        "10. Structure schedules clearly in markdown with exact dates and meal names. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
+        "10. Structure schedules clearly in markdown with exact dates and meal names. For a factual question about an already scheduled meal, answer with the exact saved meal for that date and slot; do not turn it into recommendations or add preference-based alternatives unless the user asks for them. Describe a schedule as saved or updated only after the relevant persistence tool returns status=success. If it fails, explicitly say nothing was saved."
     ),
     tools=[
         get_meal_schedule_tool,
@@ -244,8 +244,8 @@ recipe_grocery_planner = LlmAgent(
         "3. For every recipe or recipe-derived grocery request, generate structured recipe cards with: title, scope item/day/date/mealSlot when applicable, servings, cookTime, shortDescription, ingredients with quantities and units, steps, and notes.\n"
         "4. Recipe-only requests: call 'save_recipe_grocery_plan_tool' with update_cart=false and cart_items=[]. Respond with the recipe, ingredients, and concise cooking steps. Do not update the native grocery cart.\n"
         "5. Recipe-derived grocery/cart/buy wording: call get_pantry_state_tool, generate recipe cards for the requested scope, and save required ingredient amounts plus positive purchaseAmount/purchaseUnit and structured pantryAllocation. Never create alreadyStocked or stockNote snapshots.\n"
-        "6. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule takes priority whenever the user names cart items rather than asking for ingredients for a meal or dish. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
-        "7. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. Call reconcile_native_cart_with_pantry_tool only when the user explicitly asks to recalculate or update the grocery cart from pantry state.\n"
+        "6. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule applies to direct cart edits, not statements that items are already stocked or available at home. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
+        "7. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. When a user says an item is stocked and explicitly asks to update or recalculate the grocery list, reconcile the native cart from pantry state; do not translate that pantry statement into manual cart removals.\n"
         "8. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
         "9. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
         "10. Provider availability, current ordering-app cart contents, quantities, prices, and totals also belong to you. Use list_grocery_providers_tool or get_provider_cart_tool for these read-only questions. Reading a provider cart must never synchronize, repair, or otherwise mutate it.\n"
@@ -275,6 +275,20 @@ recipe_grocery_planner = LlmAgent(
     ],
     mode="task",
     on_tool_error_callback=recover_unknown_tool_error,
+)
+
+# A root/chat-mode view of the same specialist is used only for the explicit
+# Home-page recipe action. The coordinator continues to use the task-mode
+# specialist for ordinary conversational routing.
+recipe_detail_agent = LlmAgent(
+    model=configured_llm,
+    name="recipe_detail_planner",
+    description=recipe_grocery_planner.description,
+    instruction=recipe_grocery_planner.instruction,
+    tools=recipe_grocery_planner.tools,
+    mode="chat",
+    on_tool_error_callback=recover_unknown_tool_error,
+    before_agent_callback=inject_datetime_callback,
 )
 
 # 4. Construct the Central Coordinator Agent (Parent Orchestrator Hub)
@@ -342,6 +356,16 @@ runner = Runner(
     app=app_instance,
     session_service=session_service,
     memory_service=memory_service
+)
+
+# The Home-page "View details" action is an explicit recipe intent. Its
+# generated prompt is routed straight to the recipe owner so the coordinator
+# cannot accidentally answer with an unsaved recipe.
+recipe_grocery_runner = Runner(
+    app_name="kitch",
+    agent=recipe_detail_agent,
+    session_service=session_service,
+    memory_service=memory_service,
 )
 
 # Image classification and pantry reconciliation are logically one-shot. ADK

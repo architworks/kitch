@@ -158,24 +158,70 @@ def _build_vertex_service(
     """Build standard Vertex Memory Bank with ADC or request-scoped WIF."""
     from google.adk.memory import VertexAiMemoryBankService
 
-    if credentials_factory is None:
-        return VertexAiMemoryBankService(
-            project=project,
-            location=location,
-            agent_engine_id=agent_engine_id,
-        )
+    class KitchVertexMemoryBankService(VertexAiMemoryBankService):
+        """Keep ADK Memory Bank writes compatible with the Vertex SDK client.
 
-    class RequestScopedVertexMemoryBankService(VertexAiMemoryBankService):
+        google-cloud-aiplatform 2.x currently exposes Memory Bank request
+        models from ``agentplatform.types`` while its deprecated
+        ``vertexai.Client`` validates against a separate, private copy of the
+        same models. Passing the public model object therefore fails type
+        validation even though the payload is valid. Passing a plain mapping
+        lets the client construct its own matching request model.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._credentials_factory = credentials_factory
+            super().__init__(*args, **kwargs)
+            # Kitch uses standard Vertex credentials for Memory Bank. The ADK
+            # compatibility helper currently treats Vertex inference mode as
+            # an Express-mode signal and may pick up an unrelated AI Studio
+            # key from the environment; never retain or use that key here.
+            self._express_mode_api_key = None
+
         def _get_api_client(self):
             import vertexai
 
             return vertexai.Client(
                 project=self._project,
                 location=self._location,
-                credentials=credentials_factory(),
+                credentials=(
+                    self._credentials_factory()
+                    if self._credentials_factory is not None
+                    else self._credentials
+                ),
             ).aio
 
-    return RequestScopedVertexMemoryBankService(
+        async def add_events_to_memory(
+            self,
+            *,
+            app_name: str,
+            user_id: str,
+            events: Sequence[Event],
+            session_id: str | None = None,
+            custom_metadata: Mapping[str, object] | None = None,
+        ) -> None:
+            del session_id
+            direct_events = [
+                {"content": event.content}
+                for event in events
+                if event.content
+                and any(
+                    str(getattr(part, "text", "") or "").strip()
+                    for part in (event.content.parts or [])
+                )
+            ]
+            if not direct_events:
+                return
+
+            config = dict(custom_metadata or {})
+            await self._get_api_client().agent_engines.memories.generate(
+                name="reasoningEngines/" + self._agent_engine_id,
+                direct_contents_source={"events": direct_events},
+                scope={"app_name": app_name, "user_id": user_id},
+                config=config,
+            )
+
+    return KitchVertexMemoryBankService(
         project=project,
         location=location,
         agent_engine_id=agent_engine_id,

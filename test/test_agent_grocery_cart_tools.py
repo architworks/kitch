@@ -22,6 +22,13 @@ from app.agent import tools  # noqa: E402
 
 
 class NativeGroceryCartMutationTests(unittest.TestCase):
+    def test_grocery_agent_distinguishes_stocked_items_from_direct_cart_edits(self):
+        from app.agent.core import recipe_grocery_planner
+
+        instruction = str(recipe_grocery_planner.instruction)
+        self.assertIn("not statements that items are already stocked", instruction)
+        self.assertIn("do not translate that pantry statement into manual cart removals", instruction)
+
     def test_add_creates_a_manual_standalone_row(self):
         saved = {
             "id": "chocolate-1",
@@ -75,6 +82,20 @@ class NativeGroceryCartMutationTests(unittest.TestCase):
             result = tools.modify_native_grocery_cart_tool(["not-an-object"])
 
         self.assertEqual(result["status"], "error")
+        apply.assert_not_called()
+
+    def test_missing_named_row_returns_recoverable_error_before_rpc(self):
+        with (
+            patch.object(tools, "db_get_grocery_cart", return_value=[]),
+            patch.object(tools, "db_apply_native_grocery_cart_changes") as apply,
+        ):
+            result = tools.modify_native_grocery_cart_tool([
+                {"action": "remove", "name": "Eggs"}
+            ])
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "native_cart_item_not_found")
+        self.assertIn("reconcile the cart from pantry state", result["message"])
         apply.assert_not_called()
 
 
@@ -188,6 +209,15 @@ class ProviderChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentTopologyContractTests(unittest.TestCase):
+    def test_saved_meal_reads_are_not_expanded_into_recommendations(self):
+        core = (ROOT / "backend" / "app" / "agent" / "core.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "answer with the exact saved meal for that date and slot",
+            core,
+        )
+
     def test_provider_sync_is_owned_by_recipe_grocery_specialist(self):
         core = (ROOT / "backend" / "app" / "agent" / "core.py").read_text(
             encoding="utf-8"

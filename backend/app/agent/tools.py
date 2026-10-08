@@ -280,6 +280,9 @@ def modify_native_grocery_cart_tool(
 
   This tool is owned by the grocery specialist. It does not generate recipes,
   search an ordering provider, synchronize a provider cart, or place an order.
+  It is only for direct cart edits. A statement that an item is stocked or
+  available at home belongs to pantry management and pantry reconciliation,
+  not to this tool.
 
   Each change requires an action:
   - add: add the amount to an exact existing name/unit row, or create a manual row.
@@ -292,6 +295,40 @@ def modify_native_grocery_cart_tool(
 
   if not all(isinstance(change, dict) for change in parsed):
     return {"status": "error", "message": "Each native-cart change must be an object."}
+
+  current_cart = None
+  for change in parsed:
+    action = str(change.get("action") or "add").strip().lower()
+    if action not in {"set", "update", "remove", "delete"}:
+      continue
+    if change.get("item_id") is not None or change.get("id") is not None:
+      continue
+    if current_cart is None:
+      current_cart = db_get_grocery_cart()
+    requested_name = str(change.get("name") or change.get("item") or "").strip().casefold()
+    requested_unit = str(change.get("unit") or "").strip().casefold()
+    matches = [
+      item for item in current_cart
+      if str(item.get("name") or item.get("ingredient_name") or "").strip().casefold() == requested_name
+      and (
+        not requested_unit
+        or str(item.get("unit") or "").strip().casefold() == requested_unit
+      )
+    ]
+    if len(matches) != 1:
+      return {
+        "status": "error",
+        "code": "native_cart_item_not_unique" if matches else "native_cart_item_not_found",
+        "message": (
+          "More than one native-cart row matches; use the row item_id."
+          if matches
+          else (
+            "No direct native-cart row matches that item. If the user said the item is "
+            "already stocked or available at home, reconcile the cart from pantry state "
+            "instead of removing a cart row."
+          )
+        ),
+      }
   cart = db_apply_native_grocery_cart_changes(parsed)
   return {
     "status": "success",

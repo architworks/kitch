@@ -17,7 +17,12 @@ from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 
 from app.schemas import ChatRequest, ChatResponse
-from app.agent.core import runner, session_service, vision_runner
+from app.agent.core import (
+    recipe_grocery_runner,
+    runner,
+    session_service,
+    vision_runner,
+)
 from app.agent.memory import (
     begin_memory_auth_scope,
     end_memory_auth_scope,
@@ -116,6 +121,11 @@ MAX_REQUEST_BYTES = int(os.environ.get("KITCH_MAX_REQUEST_BYTES", str(2 * 1024 *
 _rate_windows: dict[str, deque[float]] = defaultdict(deque)
 _rate_last_cleanup = 0.0
 MAX_RATE_LIMIT_IDENTITIES = 10_000
+
+
+def is_explicit_recipe_detail_prompt(message: str) -> bool:
+    """Recognize the stable prompt produced by the Home-page recipe action."""
+    return str(message or "").strip().lower().startswith("show me the recipe for ")
 
 
 def _rate_limit_for(path: str) -> tuple[int, int] | None:
@@ -582,7 +592,12 @@ async def chat_endpoint(payload: ChatRequest):
         # 4. Stream and run the persistent agent turn
         text_reply = ""
         tool_confirmation_action = None
-        async for event in runner.run_async(
+        chat_runner = (
+            recipe_grocery_runner
+            if is_explicit_recipe_detail_prompt(payload.message)
+            else runner
+        )
+        async for event in chat_runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=user_message
@@ -856,6 +871,7 @@ async def get_state_endpoint(user_name: str, include_meal_plan: bool = True):
                 if include_meal_plan
                 else None
             )
+            recent_recipe_plans = list_recipe_grocery_plans(limit=1)
             return {
                 "profile": profile,
                 "household_members": get_household_members(),
@@ -869,7 +885,12 @@ async def get_state_endpoint(user_name: str, include_meal_plan: bool = True):
                 "macro_diary": diary,
                 "meal_plan": meal_plan,
                 "grocery_cart": get_grocery_cart(),
-                "latest_recipe_grocery_plan": get_latest_recipe_grocery_plan_metadata(),
+                # The Recipes page needs the complete saved artifact. Metadata
+                # is sufficient only for internal before/after change
+                # detection in the chat endpoint.
+                "latest_recipe_grocery_plan": (
+                    recent_recipe_plans[0] if recent_recipe_plans else None
+                ),
             }
 
         return await asyncio.to_thread(load_state)

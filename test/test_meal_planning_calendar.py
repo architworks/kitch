@@ -23,9 +23,20 @@ from app.planning_calendar import (  # noqa: E402
 )
 from app import supabase_client  # noqa: E402
 from app.schemas import ChatRequest  # noqa: E402
+from app.main import is_explicit_recipe_detail_prompt  # noqa: E402
 
 
 class PlanningCalendarTests(unittest.TestCase):
+    def test_home_recipe_prompt_uses_explicit_recipe_route(self):
+        self.assertTrue(
+            is_explicit_recipe_detail_prompt(
+                "Show me the recipe for Masala Dosa planned on 2026-10-08"
+            )
+        )
+        self.assertFalse(
+            is_explicit_recipe_detail_prompt("What are we cooking tomorrow?")
+        )
+
     def test_household_context_has_exact_current_and_next_week_ranges(self):
         context = calendar_context(
             "Asia/Kolkata",
