@@ -27,7 +27,7 @@ sys.path.insert(0, "/Users/dynamiterdx/Documents/Personal Projects/diet_planner/
 from app.storage import supabase, get_user_id
 
 BASE_URL = "http://localhost:8000"
-ACTIVE_USER = "Archit(me)"
+ACTIVE_USER = "Archit"
 PROFILE_ID = get_user_id(ACTIVE_USER)
 HOUSEHOLD_TIMEZONE = "Asia/Kolkata"
 

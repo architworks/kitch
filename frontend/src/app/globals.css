@@ -124,7 +124,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -2609,7 +2610,7 @@ button {
   gap: 6px;
 }
 
-.hero-member-list span {
+.hero-member-list button {
   min-height: 30px;
   padding: 5px 10px;
   display: inline-flex;
@@ -2621,10 +2622,24 @@ button {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
   box-shadow: 0 5px 16px rgba(41, 52, 37, 0.08);
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
-.hero-member-list span.active {
+.hero-member-list button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(74, 103, 65, 0.45);
+  box-shadow: 0 7px 18px rgba(41, 52, 37, 0.12);
+}
+
+.hero-member-list button:focus-visible {
+  outline: 3px solid rgba(74, 103, 65, 0.24);
+  outline-offset: 2px;
+}
+
+.hero-member-list button.active {
   color: #fff;
   background: var(--sage-deep);
   border-color: var(--sage-deep);
@@ -2644,7 +2659,7 @@ button {
   top: 112px;
 }
 
-.hero-footer button,
+.hero-footer > button,
 .snapshot-card button {
   color: var(--sage-deep);
   background: transparent;
@@ -3223,13 +3238,6 @@ button {
   font-family: var(--font-head);
   font-size: clamp(19px, 1.45vw, 23px);
   line-height: 1.12;
-}
-
-.selected-week-heading p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
 }
 
 .selected-meal-list {
@@ -6969,16 +6977,21 @@ button {
     0 24px 62px rgba(74, 103, 65, 0.22);
 }
 
-.smart-input-shell input[type="text"] {
+.smart-input-shell textarea {
   min-width: 0;
   flex: 1;
   height: 48px;
+  padding: 12px 0;
+  box-sizing: border-box;
   color: var(--ink);
   background: transparent;
   border: 0;
   outline: 0;
+  resize: none;
+  overflow-y: auto;
   font-size: 16px;
   font-weight: 600;
+  line-height: 24px;
 }
 
 .smart-prompt-mark,
@@ -8037,8 +8050,9 @@ button {
     border-radius: 18px;
   }
 
-  .smart-input-shell input[type="text"] {
+  .smart-input-shell textarea {
     height: 44px;
+    padding: 10px 0;
     font-size: 14px;
   }
 

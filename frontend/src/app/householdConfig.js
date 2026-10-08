@@ -1,5 +1,5 @@
 export const HOUSEHOLD_MEMBERS = [
-  { value: "Archit", label: "Archit (me)" },
+  { value: "Archit", label: "Archit" },
   { value: "Anubhav", label: "Anubhav" },
   { value: "Naman", label: "Naman" }
 ];

@@ -7,11 +7,6 @@ HOUSEHOLD_MEMBERS = ("Archit", "Anubhav", "Naman")
 DEFAULT_ACTIVE_USER = HOUSEHOLD_MEMBERS[0]
 DEFAULT_HOUSEHOLD_SIZE = len(HOUSEHOLD_MEMBERS)
 
-USER_ALIASES = {
-    "Archit(me)": "Archit",
-    "Archit (me)": "Archit",
-}
-
 USER_ID_MAP = {
     "Archit": "00000000-0000-0000-0000-000000000000",
     "Anubhav": "11111111-1111-1111-1111-111111111111",
@@ -53,7 +48,6 @@ def canonical_user_name(user_name: str | None) -> str:
         return DEFAULT_ACTIVE_USER
 
     cleaned = user_name.strip()
-    cleaned = USER_ALIASES.get(cleaned, cleaned)
     return cleaned if cleaned in USER_ID_MAP else DEFAULT_ACTIVE_USER
 
 

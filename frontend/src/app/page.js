@@ -1103,10 +1103,10 @@ export default function Home() {
       }
     }
     if (Array.isArray(data.household_members) && data.household_members.length > 0) {
-      const members = data.household_members.map((member, index) => ({
+      const members = data.household_members.map(member => ({
         id: member.id,
         value: member.name,
-        label: index === 0 ? `${member.name} (me)` : member.name
+        label: member.name
       }));
       setHouseholdMembers(members);
       setUserProfiles(prev => members.reduce((profiles, member) => ({
@@ -1271,10 +1271,10 @@ export default function Home() {
   };
 
   const applyBootstrappedHousehold = useCallback((data) => {
-    const members = (data?.members || []).map((member, index) => ({
+    const members = (data?.members || []).map(member => ({
       id: member.id,
       value: member.name,
-      label: index === 0 ? `${member.name} (me)` : member.name
+      label: member.name
     }));
     if (members.length > 0) {
       setHouseholdMembers(members);
@@ -1452,8 +1452,8 @@ export default function Home() {
       await requireSuccessfulResponse(response);
       const result = await response.json();
       const oldName = member.value;
-      const members = result.members.map((item, index) => ({
-        id: item.id, value: item.name, label: index === 0 ? `${item.name} (me)` : item.name
+      const members = result.members.map(item => ({
+        id: item.id, value: item.name, label: item.name
       }));
       setHouseholdMembers(members);
       setActiveUser(current => current === oldName ? nextName : current);
@@ -3287,7 +3287,6 @@ export default function Home() {
           </div>
           <div>
             <h1>Kitch</h1>
-            <span>AI Household</span>
           </div>
         </div>
         <nav className="rail-nav">
@@ -3596,13 +3595,15 @@ export default function Home() {
                     <div className="hero-footer">
                       <div className="hero-member-list" aria-label="Household members">
                         {householdMembers.map(member => (
-                          <span
+                          <button
+                            type="button"
                             key={member.value}
                             className={member.value === activeUser ? "active" : ""}
-                            aria-current={member.value === activeUser ? "true" : undefined}
+                            aria-pressed={member.value === activeUser}
+                            onClick={() => switchActiveUser(member.value)}
                           >
                             {member.value}
-                          </span>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -3647,10 +3648,7 @@ export default function Home() {
 
                       <article className="selected-week-meals">
                         <div className="selected-week-heading">
-                          <div>
-                            <h3>{formatPlanDate(selectedPlanDay.plan_date, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) || "Select a planning date"}</h3>
-                            <p>{mealPlan.timezone ? `Household timezone: ${mealPlan.timezone}` : ""}</p>
-                          </div>
+                          <h3>{formatPlanDate(selectedPlanDay.plan_date, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) || "Select a planning date"}</h3>
                         </div>
 
                         <div className="selected-meal-list">
@@ -4999,14 +4997,20 @@ export default function Home() {
               <button type="button" aria-label="Remove selected image" onClick={clearPendingPhoto}>×</button>
             </div>
           )}
-          <input
-            type="text"
+          <textarea
             id="chat-user-input"
             name="chat-user-input"
+            rows={1}
             placeholder={pendingPhoto ? "Add context for this image..." : "Ask Kitch to plan, log, or add items..."}
             autoComplete="off"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }
+            }}
           />
           <button
             type="button"
