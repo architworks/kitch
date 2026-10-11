@@ -946,9 +946,11 @@ export default function Home() {
   const [pantryReviewedAt, setPantryReviewedAt] = useState("");
   const [groceryWorkspaceTab, setGroceryWorkspaceTab] = useState("cart");
   const [collapsedGroceryCategories, setCollapsedGroceryCategories] = useState({});
+  const [pantryTableCollapsed, setPantryTableCollapsed] = useState(false);
   const [editingGroceryItemId, setEditingGroceryItemId] = useState(null);
   const [groceryItemNameDraft, setGroceryItemNameDraft] = useState("");
   const [pantryDrafts, setPantryDrafts] = useState({});
+  const [editingPantryItemId, setEditingPantryItemId] = useState(null);
   const [pantryNewItem, setPantryNewItem] = useState({ name: "", amount: 1, unit: "piece" });
   const [confirmationDialog, setConfirmationDialog] = useState(null);
   const [mealPlan, setMealPlan] = useState({ days: [] });
@@ -1024,6 +1026,7 @@ export default function Home() {
   const [groceryCustomUnit, setGroceryCustomUnit] = useState("piece");
   const [groceryCustomCat, setGroceryCustomCat] = useState("Fresh Produce");
   const groceryMutationCountRef = useRef(0);
+  const pendingGroceryItemUpdatesRef = useRef(new Map());
   const providerSyncInFlightRef = useRef(false);
   const providerDraftRestoreInFlightRef = useRef(false);
   const providerSyncTimersRef = useRef([]);
@@ -1727,6 +1730,81 @@ export default function Home() {
     }
   };
 
+  const flushQueuedGroceryItemUpdate = async (itemId) => {
+    const entry = pendingGroceryItemUpdatesRef.current.get(itemId);
+    if (!entry || entry.saving) return;
+
+    entry.timer = null;
+    entry.saving = true;
+    const savedVersion = entry.version;
+    const updates = { ...entry.updates };
+    beginGroceryMutation();
+    try {
+      const res = await apiFetch(apiUrl(`/api/grocery/cart/items/${itemId}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      await requireSuccessfulResponse(res);
+      const data = await res.json();
+      const confirmedItems = Array.isArray(data.grocery_cart) ? data.grocery_cart : [];
+      const currentEntry = pendingGroceryItemUpdatesRef.current.get(itemId);
+
+      if (currentEntry?.version === savedVersion) {
+        pendingGroceryItemUpdatesRef.current.delete(itemId);
+        applyConfirmedGroceryCart(confirmedItems);
+      } else {
+        confirmedGroceryItemsRef.current = confirmedItems;
+        setCustomGroceryItems(confirmedItems.map(current => {
+          const pending = pendingGroceryItemUpdatesRef.current.get(current.id);
+          return pending ? { ...current, ...pending.updates } : current;
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to update grocery cart item", error);
+      const currentEntry = pendingGroceryItemUpdatesRef.current.get(itemId);
+      if (currentEntry?.version === savedVersion) {
+        pendingGroceryItemUpdatesRef.current.delete(itemId);
+        setCustomGroceryItems(confirmedGroceryItemsRef.current);
+      }
+      triggerBannerAlert(apiErrorMessage(error, "Could not update the grocery item."));
+    } finally {
+      endGroceryMutation();
+      const currentEntry = pendingGroceryItemUpdatesRef.current.get(itemId);
+      if (currentEntry) {
+        currentEntry.saving = false;
+        if (currentEntry.version !== savedVersion && !currentEntry.timer) {
+          currentEntry.timer = window.setTimeout(() => flushQueuedGroceryItemUpdate(itemId), 0);
+        }
+      }
+    }
+  };
+
+  const adjustGroceryCartItemAmount = (item, delta) => {
+    if (providerSyncInFlightRef.current || !item?.id) return;
+
+    const pending = pendingGroceryItemUpdatesRef.current.get(item.id) || {
+      updates: {},
+      version: 0,
+      saving: false,
+      timer: null
+    };
+    const currentAmount = Number(pending.updates.amount ?? item.amount) || 1;
+    const nextAmount = Math.max(0.1, currentAmount + delta);
+    pending.updates = { ...pending.updates, amount: nextAmount };
+    pending.version += 1;
+    if (pending.timer) window.clearTimeout(pending.timer);
+    if (!pending.saving) {
+      pending.timer = window.setTimeout(() => flushQueuedGroceryItemUpdate(item.id), 300);
+    }
+    pendingGroceryItemUpdatesRef.current.set(item.id, pending);
+
+    invalidateProviderReview();
+    setCustomGroceryItems(current => current.map(currentItem => (
+      currentItem.id === item.id ? { ...currentItem, amount: nextAmount } : currentItem
+    )));
+  };
+
   const saveGroceryItemName = async (item) => {
     const nextName = groceryItemNameDraft.trim();
     if (!nextName) {
@@ -2336,7 +2414,10 @@ export default function Home() {
     const draft = pantryDrafts[item.id] || item;
     const saved = await patchPantry([{ action: "set", id: item.id, name: draft.name,
       amount: Number(draft.amount), unit: draft.unit || "piece" }]);
-    if (saved) setPantryDrafts(current => { const next = { ...current }; delete next[item.id]; return next; });
+    if (saved) {
+      setPantryDrafts(current => { const next = { ...current }; delete next[item.id]; return next; });
+      setEditingPantryItemId(null);
+    }
   };
 
   const markPantryEmpty = () => setConfirmationDialog({
@@ -4209,8 +4290,8 @@ export default function Home() {
                       {groceryWorkspaceTab === "cart" ? <>
                       <div className="native-cart-meta">
                         <div>
-                          <strong>{totalCount} items</strong>
-                          <span>{groceryCategoryCount} categories</span>
+                          <span>{totalCount} {totalCount === 1 ? "item" : "items"}</span>
+                          <span>{groceryCategoryCount} {groceryCategoryCount === 1 ? "category" : "categories"}</span>
                           <i aria-hidden="true" />
                           <span>{providerSelectedCount} selected for <b>{selectedProvider.label || "ordering app"}</b></span>
                         </div>
@@ -4311,11 +4392,11 @@ export default function Home() {
                                           }
                                         }}
                                       />
-                                    ) : <strong>{item.name}</strong>}
+                                    ) : <strong title={item.name}>{item.name}</strong>}
                                     <span>{item.source === "manual" ? "Manual" : "Recipe planned"}</span>
                                   </div>
                                   <div className="native-cart-quantity">
-                                    <button type="button" disabled={isProviderSyncing} onClick={() => updateGroceryCartItemDetails(item, { amount: Math.max(0.1, itemAmount - 1) })}>−</button>
+                                    <button type="button" aria-label={`Decrease ${item.name} quantity`} disabled={isProviderSyncing} onClick={() => adjustGroceryCartItemAmount(item, -1)}>−</button>
                                     <input
                                       aria-label={`Quantity for ${item.name}`}
                                       type="number"
@@ -4330,7 +4411,7 @@ export default function Home() {
                                       }}
                                       onBlur={(e) => updateGroceryCartItemDetails(item, { amount: parseFloat(e.target.value) || 1 })}
                                     />
-                                    <button type="button" disabled={isProviderSyncing} onClick={() => updateGroceryCartItemDetails(item, { amount: itemAmount + 1 })}>+</button>
+                                    <button type="button" aria-label={`Increase ${item.name} quantity`} disabled={isProviderSyncing} onClick={() => adjustGroceryCartItemAmount(item, 1)}>+</button>
                                     <input
                                       aria-label={`Unit for ${item.name}`}
                                       type="text"
@@ -4379,9 +4460,9 @@ export default function Home() {
                         </div>
                       </> : (
                         <div className="pantry-manager" data-testid="pantry-review-section">
-                          <div className="pantry-manager-heading">
-                            <div className="pantry-manager-title">
-                              <h3>Household pantry</h3>
+                          <div className="native-cart-meta pantry-manager-heading">
+                            <div>
+                              <span>{pantryStock.length} {pantryStock.length === 1 ? "item" : "items"}</span>
                             </div>
                             <div className="pantry-manager-actions">
                               <button type="button" className="pantry-cart-action" aria-label="Update cart from pantry" title="Update cart from pantry" disabled={isProviderSyncing} onClick={reconcileCartWithPantry}><RefreshIcon /></button>
@@ -4391,29 +4472,58 @@ export default function Home() {
                           {pantryStock.length === 0 ? (
                             <div className="native-cart-empty"><strong>The pantry is empty.</strong><p>Add an item below or upload a pantry photo.</p></div>
                           ) : (
-                            <div className="pantry-table">
-                              <div className="pantry-table-header" aria-hidden="true">
-                                <span>Item</span>
-                                <span>Quantity</span>
-                                <span>Unit</span>
-                                <span>Last updated</span>
-                                <span>Actions</span>
+                            <div className={`pantry-table ${pantryTableCollapsed ? "collapsed" : ""}`}>
+                              <div className="native-cart-group-header pantry-table-group-header">
+                                <button
+                                  type="button"
+                                  className="native-category-toggle pantry-table-group-title"
+                                  aria-expanded={!pantryTableCollapsed}
+                                  onClick={() => setPantryTableCollapsed(current => !current)}
+                                >
+                                  <span><ChevronIcon collapsed={pantryTableCollapsed} /></span>
+                                  <span>
+                                    <strong>Pantry items <em>({pantryStock.length})</em></strong>
+                                    <small>Items currently available at home</small>
+                                  </span>
+                                </button>
                               </div>
-                              {pantryStock.map(item => {
+                              {!pantryTableCollapsed && <>
+                                <div className="pantry-table-header" aria-hidden="true">
+                                  <span>Item</span>
+                                  <span>Quantity</span>
+                                  <span>Last updated</span>
+                                  <span>Actions</span>
+                                </div>
+                                {pantryStock.map(item => {
                                 const draft = pantryDrafts[item.id] || item;
+                                const isEditing = editingPantryItemId === item.id;
                                 return (
-                                  <div className="pantry-manager-row" key={item.id}>
-                                    <input aria-label={`Pantry item ${item.name}`} value={draft.name} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, name: event.target.value } }))} />
-                                    <input aria-label={`Amount of ${item.name}`} type="number" min="0" step="0.1" value={draft.amount} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: event.target.value } }))} />
-                                    <input aria-label={`Unit for ${item.name}`} value={draft.unit} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, unit: event.target.value } }))} />
+                                  <div className={`pantry-manager-row ${isEditing ? "editing" : ""}`} key={item.id}>
+                                    {isEditing
+                                      ? <input className="pantry-item-name" aria-label={`Pantry item ${item.name}`} value={draft.name} autoFocus onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, name: event.target.value } }))} />
+                                      : <strong className="pantry-item-label">{item.name}</strong>}
+                                    {isEditing ? (
+                                      <div className="pantry-quantity-controls">
+                                        <button type="button" aria-label={`Decrease ${item.name} quantity`} onClick={() => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: Math.max(0, (Number(draft.amount) || 0) - 1) } }))}>−</button>
+                                        <input aria-label={`Amount of ${item.name}`} type="number" min="0" step="0.1" value={draft.amount} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: event.target.value } }))} />
+                                        <button type="button" aria-label={`Increase ${item.name} quantity`} onClick={() => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, amount: (Number(draft.amount) || 0) + 1 } }))}>+</button>
+                                        <input aria-label={`Unit for ${item.name}`} value={draft.unit} onChange={event => setPantryDrafts(current => ({ ...current, [item.id]: { ...draft, unit: event.target.value } }))} />
+                                      </div>
+                                    ) : <strong className="pantry-quantity-label">{formatCartQuantity(item.amount, item.unit)}</strong>}
                                     <span>{item.updatedAt ? formatRelativeCheckedTime(item.updatedAt) : "Unknown update time"}</span>
-                                    <div className="pantry-row-actions">
-                                      <button type="button" className="save" aria-label={`Save ${item.name}`} title={`Save ${item.name}`} disabled={!pantryDrafts[item.id]} onClick={() => savePantryRow(item)}><CheckIcon /></button>
-                                      <button type="button" className="delete" aria-label={`Remove ${item.name} from pantry`} title={`Remove ${item.name} from pantry`} onClick={() => patchPantry([{ action: "remove", id: item.id }])}><TrashIcon /></button>
+                                    <div className="native-cart-actions pantry-row-actions">
+                                      {isEditing ? <>
+                                        <button type="button" className="save" aria-label={`Save ${item.name}`} title={`Save ${item.name}`} disabled={!draft.name.trim()} onClick={() => savePantryRow(item)}><CheckIcon /></button>
+                                        <button type="button" className="cancel" aria-label={`Cancel editing ${item.name}`} title="Cancel editing" onClick={() => { setEditingPantryItemId(null); setPantryDrafts(current => { const next = { ...current }; delete next[item.id]; return next; }); }}><CloseIcon /></button>
+                                      </> : <>
+                                        <button type="button" className="edit" aria-label={`Edit ${item.name}`} title={`Edit ${item.name}`} onClick={() => { setEditingPantryItemId(item.id); setPantryDrafts(current => ({ ...current, [item.id]: { ...item } })); }}><EditIcon /></button>
+                                        <button type="button" className="delete" aria-label={`Remove ${item.name} from pantry`} title={`Remove ${item.name} from pantry`} onClick={() => patchPantry([{ action: "remove", id: item.id }])}><TrashIcon /></button>
+                                      </>}
                                     </div>
                                   </div>
                                 );
-                              })}
+                                })}
+                              </>}
                             </div>
                           )}
                           <div className="pantry-add-row">
