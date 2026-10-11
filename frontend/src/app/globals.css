@@ -1383,18 +1383,6 @@ button {
   text-transform: uppercase;
 }
 
-.calorie-percentage-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 10px;
-  color: var(--sage);
-  background: rgba(74, 103, 65, 0.12);
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .macro-breakdown-card {
   display: flex;
   flex-direction: column;
@@ -3775,32 +3763,6 @@ button {
   line-height: 1.15;
 }
 
-.grocery-workspace-facts {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.grocery-workspace-facts span {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: baseline;
-  gap: 5px;
-  padding: 8px 11px;
-  color: var(--muted);
-  background: rgba(241, 244, 237, .74);
-  border: 1px solid rgba(74, 103, 65, .12);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.grocery-workspace-facts strong {
-  color: var(--sage-deep);
-  font-size: 14px;
-}
-
 .grocery-workspace-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5263,6 +5225,20 @@ button {
   stroke: #1aae67;
 }
 
+.nutrition-calorie-dial .calorie-dial-info h2 {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.nutrition-calorie-dial .calorie-dial-info p {
+  max-width: 88px;
+  margin-top: 7px;
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: .035em;
+  text-align: center;
+}
+
 .nutrition-macro-list {
   display: flex;
   flex-direction: column;
@@ -5271,34 +5247,19 @@ button {
 
 .nutrition-macro-row {
   display: grid;
-  grid-template-columns: 34px minmax(100px, auto) minmax(80px, 1fr) 38px;
+  grid-template-columns: minmax(110px, auto) minmax(80px, 1fr) 38px;
   align-items: center;
   gap: 10px;
 }
 
-.nutrition-macro-icon {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--sage-deep);
-  background: var(--sage-pale);
-  border-radius: 999px;
-  font-weight: 900;
-}
-
-.nutrition-macro-icon.carbs { color: #1766b1; background: #e7f2ff; }
-.nutrition-macro-icon.fat { color: #c76618; background: #fff0e3; }
-
-.nutrition-macro-row > div:nth-child(2) {
+.nutrition-macro-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-size: 12px;
 }
 
-.nutrition-macro-row > div:nth-child(2) strong {
+.nutrition-macro-copy strong {
   color: var(--ink);
   font-size: 12px;
 }
@@ -5518,7 +5479,7 @@ button {
   .nutrition-date-control { width: 100%; }
   .nutrition-date-control strong { flex: 1; min-width: 0; }
   .nutrition-summary-body { grid-template-columns: 1fr; }
-  .nutrition-macro-row { grid-template-columns: 36px minmax(100px, auto) 1fr 40px; }
+  .nutrition-macro-row { grid-template-columns: minmax(100px, auto) 1fr 40px; }
   .nutrition-trend-card .nutrition-card-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .nutrition-trend-metrics { align-self: stretch; justify-content: space-between; }
   .nutrition-trend-metrics button { flex: 1; }
@@ -8268,10 +8229,6 @@ button {
     grid-template-columns: 1fr;
     gap: 12px;
     padding: 18px 16px;
-  }
-
-  .grocery-workspace-facts {
-    justify-content: flex-start;
   }
 
   .grocery-workspace-tabs button {

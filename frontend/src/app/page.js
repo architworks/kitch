@@ -3858,13 +3858,11 @@ export default function Home() {
                           <p>/ {targetCalories} kcal</p>
                         </div>
                       </div>
-                      <span className="calorie-percentage-badge">{nutritionCalPercentage}% of goal</span>
                     </div>
                     <div className="nutrition-macro-list">
                       {nutritionMacroRows.map(row => (
                         <div className="nutrition-macro-row" key={row.key}>
-                          <span className={`nutrition-macro-icon ${row.klass}`}>{row.label.slice(0, 1)}</span>
-                          <div>
+                          <div className="nutrition-macro-copy">
                             <span>{row.label}</span>
                             <strong>{formatNutritionNumber(row.value)} / {row.target} g</strong>
                           </div>
@@ -4245,10 +4243,6 @@ export default function Home() {
                       <div>
                         <h2>Pantry and shopping cart</h2>
                         <p>Review what you have at home and manage what still needs to be ordered.</p>
-                      </div>
-                      <div className="grocery-workspace-facts" aria-label="Household grocery summary">
-                        <span><strong>{pantryStock.length}</strong> pantry items</span>
-                        <span><strong>{totalCount}</strong> cart items</span>
                       </div>
                     </div>
 
