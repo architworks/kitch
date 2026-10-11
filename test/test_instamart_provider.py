@@ -356,6 +356,23 @@ class InstamartProviderTests(unittest.TestCase):
             ["get_cart", "get_payment_options"],
         )
 
+    def test_live_cart_read_does_not_fetch_payment_options(self):
+        client = FakeInstamartClient()
+        with commerce_request_context(
+            source="test_live_cart_read",
+            permissions={CommercePermission.READ},
+            operation_id="live-cart-1",
+        ):
+            result = asyncio.run(self.adapter(client).get_cart())
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["provider_cart"]["items"]), 1)
+        self.assertEqual(
+            [name for name, _arguments in client.calls],
+            ["get_cart"],
+        )
+        self.assertNotIn("payment_options", result)
+
     def test_revalidation_marks_a_removed_reviewed_line_unavailable(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
         previous = self.adapter().confirmed_agent_result(

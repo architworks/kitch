@@ -8,8 +8,6 @@ from uuid import uuid4
 
 from app.checkout_drafts import (
     draft_row_to_review,
-    invalidate_draft_for_native_drift,
-    native_snapshot_matches,
     refresh_checkout_eligibility,
     save_initial_draft,
     save_order_outcome,
@@ -62,8 +60,6 @@ class GroceryCheckoutService:
         descriptor = adapter.descriptor()
         environment = descriptor.environment
         row = get_provider_checkout_draft(provider_id, environment)
-        if row and row.get("native_items") and not native_snapshot_matches(row, get_grocery_cart()):
-            row = invalidate_draft_for_native_drift(row)
         if row:
             row = refresh_checkout_eligibility(row, descriptor.label)
         review = draft_row_to_review(row)
@@ -73,6 +69,35 @@ class GroceryCheckoutService:
 
     async def read_cart_from_chat(self, provider_id: str = "") -> Dict[str, Any]:
         """Read the live provider cart without changing provider or Kitch state."""
+        live = await self.live_cart(provider_id)
+        canonical_provider = str(live.get("provider") or "")
+        provider_cart = live.get("provider_cart") or {}
+        raw_items = (
+            provider_cart.get("items")
+            if isinstance(provider_cart, dict)
+            and isinstance(provider_cart.get("items"), list)
+            else []
+        )
+        items = [self._readable_cart_item(item) for item in raw_items]
+        summary = self._readable_cart_summary(live.get("cart_summary") or {})
+        return {
+            "status": "success",
+            "provider": canonical_provider,
+            "provider_label": live.get("provider_label"),
+            "source": "live_provider_cart",
+            "read_at": live.get("read_at"),
+            "items": items,
+            "item_count": len(items),
+            "cart_summary": summary,
+            "multi_store": bool(
+                isinstance(provider_cart, dict)
+                and provider_cart.get("multi_store")
+            ),
+            "message": live.get("message"),
+        }
+
+    async def live_cart(self, provider_id: str = "") -> Dict[str, Any]:
+        """Fetch the provider cart exactly as it exists, without checkout logic."""
         canonical_provider = ProviderRegistry.canonical_id(provider_id)
         if not canonical_provider:
             canonical_provider = ProviderRegistry.canonical_id(
@@ -100,29 +125,15 @@ class GroceryCheckoutService:
         ):
             result = await adapter.get_cart()
         self._raise_result_error(canonical_provider, "read_cart", result)
-
         provider_cart = result.get("provider_cart") or {}
-        raw_items = (
-            provider_cart.get("items")
-            if isinstance(provider_cart, dict)
-            and isinstance(provider_cart.get("items"), list)
-            else []
-        )
-        items = [self._readable_cart_item(item) for item in raw_items]
-        summary = self._readable_cart_summary(result.get("cart_summary") or {})
         return {
             "status": "success",
             "provider": canonical_provider,
             "provider_label": descriptor.label,
             "source": "live_provider_cart",
             "read_at": datetime.now(timezone.utc).isoformat(),
-            "items": items,
-            "item_count": len(items),
-            "cart_summary": summary,
-            "multi_store": bool(
-                isinstance(provider_cart, dict)
-                and provider_cart.get("multi_store")
-            ),
+            "provider_cart": provider_cart,
+            "cart_summary": result.get("cart_summary") or {},
             "message": (
                 f"Read the current {descriptor.label} cart without changing it."
             ),
@@ -358,16 +369,6 @@ class GroceryCheckoutService:
                     message="No provider checkout draft exists.",
                     status_code=404,
                 )
-            if not native_snapshot_matches(row, get_grocery_cart()):
-                changed = invalidate_draft_for_native_drift(row)
-                raise ProviderOperationError(
-                    provider=provider_id,
-                    operation="revalidate_cart",
-                    code="native_cart_changed",
-                    message="The native cart changed. Synchronize the selected items again.",
-                    status_code=409,
-                    draft=changed,
-                )
             current_review = draft_row_to_review(row) or {}
             result = await self._revalidate_provider(
                 provider_id,
@@ -461,17 +462,6 @@ class GroceryCheckoutService:
                     message="Select a provider-returned payment method before ordering.",
                     status_code=422,
                 )
-            if not native_snapshot_matches(row, get_grocery_cart()):
-                changed = invalidate_draft_for_native_drift(row)
-                raise ProviderOperationError(
-                    provider=provider_id,
-                    operation="place_order",
-                    code="native_cart_changed",
-                    message="The native cart changed after approval.",
-                    status_code=409,
-                    draft=changed,
-                )
-
             validation = await self._revalidate_provider(
                 provider_id,
                 adapter,

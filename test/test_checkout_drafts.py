@@ -13,8 +13,6 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.checkout_drafts import (  # noqa: E402
     checkout_snapshot_hash,
-    invalidate_draft_for_native_drift,
-    native_snapshot_matches,
     refresh_checkout_eligibility,
     save_initial_draft,
     save_revalidated_draft,
@@ -384,32 +382,36 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(refreshed["order_blockers"], [])
         self.assertTrue(refreshed["confirmation_token"])
 
-    def test_native_cart_drift_stays_blocked_until_a_fresh_provider_sync(self):
+    def test_legacy_native_cart_stale_marker_is_removed(self):
         initial = persisted_row({
-            "status": "ready",
+            "status": "blocked",
             "native_items": [self.native_item()],
             "matched_items": self.successful_result()["items"],
             "provider_cart": self.successful_result()["provider_cart"],
             "cart_summary": self.successful_result()["cart_summary"],
-            "checkout_context": self.successful_result()["checkout_context"],
+            "checkout_context": {
+                **self.successful_result()["checkout_context"],
+                "native_cart_stale": True,
+                "native_cart_stale_at": "2026-10-11T00:00:00+00:00",
+            },
             "payment_options": self.successful_result()["payment_options"],
             "store_context": self.successful_result()["store_context"],
-            "can_place_order": True,
-            "order_blockers": [],
-            "confirmation_token": "old-token",
+            "can_place_order": False,
+            "order_blockers": ["The native grocery selection changed after the Swiggy Instamart cart was reviewed."],
+            "confirmation_token": None,
         })
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
             side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
-        ) as save:
-            invalidated = invalidate_draft_for_native_drift(initial)
-            refreshed = refresh_checkout_eligibility(invalidated, "Swiggy Instamart")
+        ):
+            refreshed = refresh_checkout_eligibility(initial, "Swiggy Instamart")
 
-        self.assertEqual(save.call_count, 1)
-        self.assertTrue(refreshed["checkout_context"]["native_cart_stale"])
-        self.assertEqual(refreshed["status"], "blocked")
-        self.assertFalse(refreshed["can_place_order"])
-        self.assertIsNone(refreshed["confirmation_token"])
+        self.assertNotIn("native_cart_stale", refreshed["checkout_context"])
+        self.assertNotIn("native_cart_stale_at", refreshed["checkout_context"])
+        self.assertEqual(refreshed["status"], "ready")
+        self.assertTrue(refreshed["can_place_order"])
+        self.assertEqual(refreshed["order_blockers"], [])
+        self.assertTrue(refreshed["confirmation_token"])
 
     def test_saved_order_outcome_keeps_message_but_not_payment_urls(self):
         initial = persisted_row({
@@ -439,20 +441,6 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(saved["payment_state"]["order_id"], "order-1")
         self.assertNotIn("upi_intent_url", saved["payment_state"])
         self.assertNotIn("bridge_url", saved["payment_state"])
-
-    def test_native_snapshot_detects_quantity_or_membership_drift(self):
-        native_item = self.native_item()
-        row = persisted_row(
-            {
-                "selected_native_item_ids": ["1"],
-                "native_items": [native_item],
-            }
-        )
-        self.assertTrue(native_snapshot_matches(row, [native_item]))
-        self.assertFalse(
-            native_snapshot_matches(row, [{**native_item, "amount": 2.0}])
-        )
-        self.assertFalse(native_snapshot_matches(row, []))
 
     def test_hash_changes_with_confirmed_provider_projection(self):
         review = {

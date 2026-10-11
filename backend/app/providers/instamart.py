@@ -547,19 +547,15 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             _, version = await self._validated_tools(
                 client,
                 session,
-                {"get_cart", "get_payment_options"},
+                {"get_cart"},
             )
             payload = self._unwrap(await client.call_tool(session, "get_cart", {}))
-            payment_payload = self._unwrap(
-                await client.call_tool(session, "get_payment_options", {})
-            )
             return {
                 "status": "success",
                 "provider": self.provider_id,
                 "capability_version": version,
                 "provider_cart": self._normalize_cart(payload),
                 "cart_summary": self._cart_summary(payload),
-                "payment_options": self._payment_options(payment_payload),
             }
 
     async def place_order(self, review: Dict[str, Any] | None = None) -> Dict[str, Any]:

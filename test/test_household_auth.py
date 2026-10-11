@@ -1,4 +1,7 @@
 import os
+from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -22,6 +25,36 @@ from app.sqlite_supabase import SQLiteKitchClient
 
 
 class HostedSessionTests(unittest.TestCase):
+    def test_session_check_does_not_initialize_agent_or_checkout_runtime(self):
+        backend_dir = Path(__file__).resolve().parents[1] / "backend"
+        script = """
+import os
+import sys
+os.environ["KITCH_DATABASE_BACKEND"] = "supabase"
+os.environ["KITCH_AUTH_SESSION_SECRET"] = "s" * 40
+from fastapi.testclient import TestClient
+from app.main import app
+with TestClient(app) as client:
+    response = client.get("/api/auth/session")
+    assert response.status_code == 200, response.text
+for module in (
+    "app.agent.core",
+    "app.agent.memory",
+    "app.agent.tools",
+    "app.grocery_checkout",
+    "google.adk",
+):
+    assert module not in sys.modules, module
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=backend_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
     def test_cors_preflight_does_not_require_a_household_session(self):
         with patch.dict(os.environ, {
             "KITCH_DATABASE_BACKEND": "supabase",

@@ -167,6 +167,7 @@ const withProviderRoutes = (provider) => {
     brandLabel: provider.brand_label || provider.label,
     routes: {
       addresses: `${base}/addresses`,
+      liveCart: `${base}/cart`,
       syncCart: `${base}/checkout/sync`,
       checkoutDraft: `${base}/checkout`,
       revalidateCart: `${base}/checkout/revalidate`,
@@ -1008,6 +1009,7 @@ export default function Home() {
   const [nutritionGoalEditor, setNutritionGoalEditor] = useState(null);
   const [isNutritionSaving, setIsNutritionSaving] = useState(false);
   const [providerCartReview, setProviderCartReview] = useState(null);
+  const [providerLiveCart, setProviderLiveCart] = useState(null);
   const [providerConnectionStatus, setProviderConnectionStatus] = useState(null);
   const [providerSavedAddresses, setProviderSavedAddresses] = useState(null);
   const [isProviderAddressLoading, setIsProviderAddressLoading] = useState(false);
@@ -1018,6 +1020,7 @@ export default function Home() {
   const [isUpdatingProviderReview, setIsUpdatingProviderReview] = useState(false);
   const [excludedProviderItemIds, setExcludedProviderItemIds] = useState([]);
   const [isProviderSyncing, setIsProviderSyncing] = useState(false);
+  const [isProviderCartRefreshing, setIsProviderCartRefreshing] = useState(false);
   const [providerSyncStage, setProviderSyncStage] = useState("idle");
   const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
@@ -1041,6 +1044,7 @@ export default function Home() {
   const groceryMutationCountRef = useRef(0);
   const pendingGroceryItemUpdatesRef = useRef(new Map());
   const providerSyncInFlightRef = useRef(false);
+  const providerCartRefreshInFlightRef = useRef(false);
   const providerDraftRestoreInFlightRef = useRef(false);
   const providerSyncTimersRef = useRef([]);
   const providerSyncDialogRef = useRef(null);
@@ -1058,14 +1062,14 @@ export default function Home() {
   ), [orderingProviders, selectedOrderingProvider]);
   const selectedProviderLabel = selectedProvider.label;
   const selectedProviderId = selectedProvider.id;
-  const selectedProviderRevalidateRoute = selectedProvider.routes?.revalidateCart || "";
+  const selectedProviderLiveCartRoute = selectedProvider.routes?.liveCart || "";
   const selectedProviderCheckoutDraftRoute = selectedProvider.routes?.checkoutDraft || "";
   const selectedProviderAddressesRoute = selectedProvider.routes?.addresses || "";
   const selectedProviderEnabled = Boolean(selectedProvider.enabled);
   const selectedProviderRequiresConnection = Boolean(selectedProvider.requires_connection);
   const selectedProviderRegistryState = selectedProvider.state || "unknown";
   const providerReviewLastValidatedAt = providerCartReview?.last_validated_at || "";
-  const hasProviderCartReview = Boolean(providerCartReview);
+  const hasProviderCartDisplay = Boolean(providerLiveCart || providerCartReview);
   const applyProviderDraft = useCallback((review, { resetAcknowledgement = false } = {}) => {
     if (!review) {
       setProviderCartReview(null);
@@ -1943,6 +1947,7 @@ export default function Home() {
     }
 
     invalidateProviderReview();
+    setProviderLiveCart(null);
     providerSyncInFlightRef.current = true;
     setIsProviderSyncing(true);
     startProviderSyncProgress();
@@ -1981,59 +1986,33 @@ export default function Home() {
     }
   };
 
-  const revalidateProviderCart = useCallback(async ({ announce = true, background = false } = {}) => {
-    if (providerSyncInFlightRef.current || !selectedProviderRevalidateRoute) return null;
-    providerSyncInFlightRef.current = true;
-    if (!background) {
-      setIsProviderSyncing(true);
-      startProviderSyncProgress();
-    }
+  const refreshProviderCart = useCallback(async ({ announce = true } = {}) => {
+    if (providerCartRefreshInFlightRef.current || !selectedProviderLiveCartRoute) return null;
+    providerCartRefreshInFlightRef.current = true;
+    setIsProviderCartRefreshing(true);
     try {
-      const res = await apiFetch(apiUrl(selectedProviderRevalidateRoute), {
-        method: "POST",
+      const res = await apiFetch(apiUrl(selectedProviderLiveCartRoute), {
         timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
-      const review = data.draft || null;
-      if (review) applyProviderDraft(review);
-      if (!background) {
-        clearProviderSyncTimers();
-        setProviderSyncStage("complete");
-        await new Promise(resolve => window.setTimeout(resolve, 350));
-      }
+      setProviderLiveCart(data);
       if (announce) {
-        triggerBannerAlert(data.changed
-          ? `${selectedProviderLabel} cart changed and needs another review.`
-          : `${selectedProviderLabel} cart availability is up to date.`);
+        triggerBannerAlert(`${selectedProviderLabel} cart refreshed.`);
       }
       return data;
     } catch (e) {
-      const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
-      if (changedDraft) applyProviderDraft(changedDraft, { resetAcknowledgement: true });
-      if (!background) {
-        clearProviderSyncTimers();
-        setProviderSyncStage("failed");
-        await new Promise(resolve => window.setTimeout(resolve, 500));
-      }
-      if (announce || changedDraft) {
+      if (announce) {
         triggerBannerAlert(apiErrorMessage(e, `Could not refresh the ${selectedProviderLabel} cart.`));
       }
       return null;
     } finally {
-      if (!background) clearProviderSyncTimers();
-      providerSyncInFlightRef.current = false;
-      if (!background) {
-        setIsProviderSyncing(false);
-        setProviderSyncStage("idle");
-      }
+      providerCartRefreshInFlightRef.current = false;
+      setIsProviderCartRefreshing(false);
     }
   }, [
-    applyProviderDraft,
-    clearProviderSyncTimers,
     selectedProviderLabel,
-    selectedProviderRevalidateRoute,
-    startProviderSyncProgress,
+    selectedProviderLiveCartRoute,
     triggerBannerAlert
   ]);
 
@@ -2093,16 +2072,17 @@ export default function Home() {
   useEffect(() => {
     if (
       activeTab !== "groceries"
-      || !hasProviderCartReview
-      || !["ready", "success", "changed"].includes(providerCartReview?.status)
+      || !selectedProviderLiveCartRoute
+      || !selectedProviderEnabled
+      || (selectedProviderRequiresConnection && providerConnectionStatus?.state !== "connected")
     ) return undefined;
     const refreshIfDue = () => {
-      const validatedAt = Date.parse(providerReviewLastValidatedAt);
+      const readAt = Date.parse(providerLiveCart?.read_at || providerReviewLastValidatedAt);
       if (
         document.visibilityState === "visible"
-        && (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS)
+        && (!Number.isFinite(readAt) || Date.now() - readAt >= PROVIDER_REVALIDATE_AFTER_MS)
       ) {
-        revalidateProviderCart({ announce: false, background: true });
+        refreshProviderCart({ announce: false });
       }
     };
     const refreshTimer = window.setInterval(refreshIfDue, PROVIDER_REVALIDATE_AFTER_MS);
@@ -2116,10 +2096,13 @@ export default function Home() {
     };
   }, [
     activeTab,
-    hasProviderCartReview,
-    providerCartReview?.status,
+    providerLiveCart?.read_at,
     providerReviewLastValidatedAt,
-    revalidateProviderCart
+    refreshProviderCart,
+    selectedProviderEnabled,
+    selectedProviderLiveCartRoute,
+    selectedProviderRequiresConnection,
+    providerConnectionStatus?.state
   ]);
 
   const updateProviderReview = async (updates) => {
@@ -2160,6 +2143,7 @@ export default function Home() {
     setProviderSavedAddresses(null);
     setProviderAddressLoadError("");
     setSelectedProviderAddress("");
+    setProviderLiveCart(null);
     invalidateProviderReview();
     apiFetch(apiUrl("/api/grocery/provider-selection"), {
       method: "PATCH",
@@ -2187,6 +2171,7 @@ export default function Home() {
       const res = await apiFetch(apiUrl(provider.routes.connection), { method: "DELETE" });
       await requireSuccessfulResponse(res);
       invalidateProviderReview();
+      setProviderLiveCart(null);
       setProviderSavedAddresses(null);
       setSelectedProviderAddress("");
       await syncProviderRegistry();
@@ -2888,7 +2873,13 @@ export default function Home() {
   const providerMatchedItems = Array.isArray(providerCartReview?.matched_items)
     ? providerCartReview.matched_items
     : Array.isArray(providerCartReview?.result?.items) ? providerCartReview.result.items : [];
-  const providerCartRows = providerMatchedItems
+  const providerLiveCartItems = Array.isArray(providerLiveCart?.provider_cart?.items)
+    ? providerLiveCart.provider_cart.items
+    : [];
+  const providerDisplayedItems = providerLiveCart
+    ? providerLiveCartItems.map(item => ({ matched_product: item, cart_item: item }))
+    : providerMatchedItems;
+  const providerCartRows = providerDisplayedItems
     .map((match, index) => ({
       match,
       index,
@@ -2898,23 +2889,26 @@ export default function Home() {
       (right.subtotalMinor ?? -1) - (left.subtotalMinor ?? -1)
       || left.index - right.index
     ));
-  const providerUnavailableItems = Array.isArray(providerCartReview?.unavailable_items)
-    ? providerCartReview.unavailable_items
-    : Array.isArray(providerCartReview?.result?.unavailable_items) ? providerCartReview.result.unavailable_items : [];
-  const providerCartChanges = Array.isArray(providerCartReview?.changes) ? providerCartReview.changes : [];
-  const providerReplacements = Array.isArray(providerCartReview?.replacements) ? providerCartReview.replacements : [];
-  const providerLastChecked = providerCartReview?.last_validated_at
+  const providerUnavailableItems = providerLiveCart
+    ? []
+    : Array.isArray(providerCartReview?.unavailable_items)
+      ? providerCartReview.unavailable_items
+      : Array.isArray(providerCartReview?.result?.unavailable_items) ? providerCartReview.result.unavailable_items : [];
+  const providerCartChanges = providerLiveCart || !Array.isArray(providerCartReview?.changes) ? [] : providerCartReview.changes;
+  const providerReplacements = providerLiveCart || !Array.isArray(providerCartReview?.replacements) ? [] : providerCartReview.replacements;
+  const providerCartReadAt = providerLiveCart?.read_at || providerCartReview?.last_validated_at;
+  const providerLastChecked = providerCartReadAt
     ? new Intl.DateTimeFormat("en-IN", {
         day: "numeric",
         month: "short",
         hour: "numeric",
         minute: "2-digit"
-      }).format(new Date(providerCartReview.last_validated_at))
+      }).format(new Date(providerCartReadAt))
     : "Not checked yet";
-  const providerCartDetails = providerCartReview?.provider_cart || providerCartReview?.result?.provider_cart || providerCartReview?.result || null;
+  const providerCartDetails = providerLiveCart?.provider_cart || providerCartReview?.provider_cart || providerCartReview?.result?.provider_cart || providerCartReview?.result || null;
   const providerStoreGroups = Array.isArray(providerCartDetails?.stores) ? providerCartDetails.stores : [];
   const providerMultiStore = Boolean(providerCartDetails?.multi_store || providerStoreGroups.length > 1);
-  const providerCartSummary = providerCartReview?.cart_summary || {
+  const providerCartSummary = providerLiveCart?.cart_summary || providerCartReview?.cart_summary || {
     currency: "INR",
     subtotal_minor: null,
     discount_minor: null,
@@ -4739,7 +4733,7 @@ export default function Home() {
                     </div>
                   </section>
 
-                  <section className={`checkout-stage checkout-timeline-stage provider-cart-review-panel ${!providerCartReview ? "locked" : ""}`} data-locked={!providerCartReview}>
+                  <section className={`checkout-stage checkout-timeline-stage provider-cart-review-panel ${!hasProviderCartDisplay ? "locked" : ""}`} data-locked={!hasProviderCartDisplay}>
                     <span className={`checkout-stage-number ${reviewStageComplete ? "completed" : "pending"}`} aria-hidden="true">5</span>
                     <div className="checkout-stage-heading">
                       <div>
@@ -4747,12 +4741,19 @@ export default function Home() {
                         <p>Review the exact provider products, quantities, and availability. The financial summary stays visible in the sidebar.</p>
                       </div>
                     </div>
-                    {!providerCartReview ? (
+                    {!hasProviderCartDisplay ? (
                       <div className="checkout-locked-state">
                         <span aria-hidden="true">⌑</span>
                         <div>
-                          <strong>No {selectedProvider.label} cart review yet</strong>
-                          <p>Select an address and complete the transfer in stage 4 to unlock this review.</p>
+                          <strong>{selectedProvider.label} cart has not been loaded</strong>
+                          <p>Refresh to read the current cart, or move selected Kitch items to replace it.</p>
+                          <button
+                            type="button"
+                            onClick={() => refreshProviderCart({ announce: true })}
+                            disabled={isProviderCartRefreshing}
+                          >
+                            {isProviderCartRefreshing ? "Refreshing…" : `Refresh ${selectedProvider.label} cart`}
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -4762,15 +4763,19 @@ export default function Home() {
                             <h3>{selectedProvider.label} cart items</h3>
                             <div>
                               <span aria-hidden="true">🛒</span>
-                              <strong>{providerMatchedItems.length} {providerMatchedItems.length === 1 ? "item" : "items"}</strong>
+                              <strong>{providerDisplayedItems.length} {providerDisplayedItems.length === 1 ? "item" : "items"}</strong>
                               <b>{providerTotal || providerSubtotal || "Total unavailable"}</b>
                             </div>
                           </header>
 
-                          <div className={`provider-cart-notice ${providerUnavailableItems.length > 0 && providerReviewConfirmed ? "partial" : providerReviewConfirmed ? "success" : "error"}`}>
-                            <span aria-hidden="true">{providerReviewConfirmed ? "✓" : "!"}</span>
+                          <div className={`provider-cart-notice ${providerLiveCart ? "success" : providerUnavailableItems.length > 0 && providerReviewConfirmed ? "partial" : providerReviewConfirmed ? "success" : "error"}`}>
+                            <span aria-hidden="true">{providerLiveCart || providerReviewConfirmed ? "✓" : "!"}</span>
                             <p>
-                              {providerReviewConfirmed
+                              {providerLiveCart
+                                ? providerDisplayedItems.length > 0
+                                  ? `Showing the latest cart returned by ${selectedProvider.label}.`
+                                  : `Your ${selectedProvider.label} cart is empty.`
+                                : providerReviewConfirmed
                                 ? providerUnavailableItems.length > 0
                                   ? `${providerMatchedItems.length} selected ${providerMatchedItems.length === 1 ? "item is" : "items are"} ready in ${selectedProvider.label}. ${providerUnavailableItems.length} ${providerUnavailableItems.length === 1 ? "item was" : "items were"} not found and will not be included in this order.`
                                   : `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
@@ -4780,10 +4785,10 @@ export default function Home() {
                               <small>Last checked {providerLastChecked}</small>
                               <button
                                 type="button"
-                                onClick={() => revalidateProviderCart({ announce: true })}
-                                disabled={isProviderSyncing || isUpdatingProviderReview || isPlacingProviderOrder}
+                                onClick={() => refreshProviderCart({ announce: true })}
+                                disabled={isProviderCartRefreshing}
                               >
-                                {isProviderSyncing ? "Refreshing…" : `Refresh ${selectedProvider.label} cart`}
+                                {isProviderCartRefreshing ? "Refreshing…" : `Refresh ${selectedProvider.label} cart`}
                               </button>
                             </div>
                           </div>
@@ -4808,7 +4813,7 @@ export default function Home() {
                           )}
 
                           {providerCartRows.length === 0 ? (
-                            <p className="provider-cart-empty">No {selectedProvider.label} cart items were added.</p>
+                            <p className="provider-cart-empty">Your {selectedProvider.label} cart is empty.</p>
                           ) : (
                             <div className="provider-cart-table" role="table" aria-label={`${selectedProvider.label} cart items sorted by subtotal`}>
                               <div className="provider-cart-table-head" role="row">
@@ -5047,7 +5052,7 @@ export default function Home() {
                     <div className="provider-total-lines">
                       <div>
                         <span>Subtotal</span>
-                        <strong>{providerSubtotal || (providerCartReview ? "Not returned" : "Not synced")}</strong>
+                        <strong>{providerSubtotal || (hasProviderCartDisplay ? "Not returned" : "Not loaded")}</strong>
                       </div>
                       {providerFees.map(fee => (
                         <div key={`${fee.label}-${fee.value}`}><span>{fee.label}</span><strong>{fee.value}</strong></div>
@@ -5055,15 +5060,15 @@ export default function Home() {
                       {providerDiscount && <div><span>Discount</span><strong>−{providerDiscount}</strong></div>}
                       <div className="provider-grand-total">
                         <span>{selectedProvider.label} total</span>
-                        <strong>{providerTotal || (providerCartReview ? "Unavailable" : "Not synced")}</strong>
+                        <strong>{providerTotal || (hasProviderCartDisplay ? "Unavailable" : "Not loaded")}</strong>
                       </div>
                     </div>
-                    {providerCartReview && (
+                    {hasProviderCartDisplay && (
                       <span className={`provider-total-source source-${providerTotalSource}`}>
                         {providerTotalSource === "provider" ? "Provider total" : providerTotalSource === "line_items" ? "Exact line-item total" : "Total unavailable"}
                       </span>
                     )}
-                    <small>{providerCartReview ? providerTotalNotice : `Prices and totals appear after ${selectedProvider.label} responds.`}</small>
+                    <small>{hasProviderCartDisplay ? providerTotalNotice : `Prices and totals appear after ${selectedProvider.label} responds.`}</small>
                   </article>
 
                   <article className="grocery-side-card missing-card">
@@ -5072,7 +5077,7 @@ export default function Home() {
                     <small>{pendingBuyCount} selected for {selectedProvider.label}. {stockedCount} rows are already stocked or pantry-covered.</small>
                   </article>
 
-                  <article className="grocery-side-card provider-unavailable-card">
+                  {!providerLiveCart && <article className="grocery-side-card provider-unavailable-card">
                     <h3>Not found on {selectedProvider.label}</h3>
                     {!providerCartReview ? (
                       <small>Unavailable items will appear here after the cart transfer.</small>
@@ -5081,14 +5086,14 @@ export default function Home() {
                     ) : (
                       <div className="provider-unavailable-list">
                         {providerUnavailableItems.map((item, idx) => (
-                          <div key={`${item.name || idx}-provider-unavailable`}>
+                          <div key={`${item.native_item_id || item.id || item.name || "item"}-${idx}-provider-unavailable`}>
                             <strong>{item.name || "Unknown item"}</strong>
                             <span>{item.reason || `${selectedProvider.label} did not return a usable match.`}</span>
                           </div>
                         ))}
                       </div>
                     )}
-                  </article>
+                  </article>}
 
                   <article className="grocery-side-card quick-actions-card">
                     <h3>Quick actions</h3>

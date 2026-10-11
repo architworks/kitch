@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import json
+from functools import lru_cache
 from uuid import uuid4
 from datetime import datetime, time as datetime_time, timedelta
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
@@ -17,21 +18,8 @@ from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 
 from app.schemas import ChatRequest, ChatResponse
-from app.agent.core import (
-    recipe_grocery_runner,
-    runner,
-    session_service,
-    vision_runner,
-)
-from app.agent.memory import (
-    begin_memory_auth_scope,
-    end_memory_auth_scope,
-    memory_readiness,
-)
 from app.agent.structured_models import PhotoAnalysis
-from app.agent.tools import apply_zepto_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
-from app.grocery_checkout import GroceryCheckoutService
 from app.providers.base import ProviderOperationError
 from app.providers.instamart import (
     InstamartProviderAdapter,
@@ -52,9 +40,6 @@ from app.auth import (
     set_session_cookie,
     verify_google_credential,
 )
-from google.genai.types import Content, Part
-from google.adk.events import Event, EventActions
-
 # Import backend-neutral structured-state operations.
 from app.storage import (
     DATABASE_BACKEND,
@@ -124,6 +109,62 @@ MAX_REQUEST_BYTES = int(os.environ.get("KITCH_MAX_REQUEST_BYTES", str(2 * 1024 *
 _rate_windows: dict[str, deque[float]] = defaultdict(deque)
 _rate_last_cleanup = 0.0
 MAX_RATE_LIMIT_IDENTITIES = 10_000
+
+
+@lru_cache(maxsize=1)
+def _agent_core():
+    """Load the ADK runtime only for requests that actually use an agent."""
+    from app.agent import core
+
+    return core
+
+
+class _LazyAgentRuntimeObject:
+    """Keep existing runtime references without importing ADK during auth."""
+
+    def __init__(self, attribute: str) -> None:
+        self.attribute = attribute
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(getattr(_agent_core(), self.attribute), name)
+
+
+runner = _LazyAgentRuntimeObject("runner")
+recipe_grocery_runner = _LazyAgentRuntimeObject("recipe_grocery_runner")
+session_service = _LazyAgentRuntimeObject("session_service")
+vision_runner = _LazyAgentRuntimeObject("vision_runner")
+
+
+@lru_cache(maxsize=1)
+def _memory_runtime():
+    """Load Vertex/ADK memory only for chat and readiness requests."""
+    from app.agent import memory
+
+    return memory
+
+
+async def memory_readiness() -> Dict[str, Any]:
+    return await _memory_runtime().memory_readiness()
+
+
+class _LazyGroceryCheckoutService:
+    """Defer checkout-agent construction until a grocery-provider request."""
+
+    def __init__(self) -> None:
+        self._service = None
+
+    def _load(self):
+        if self._service is None:
+            from app.agent.tools import apply_zepto_brand_memory_to_cart_items
+            from app.grocery_checkout import GroceryCheckoutService
+
+            self._service = GroceryCheckoutService(
+                cart_mapper=apply_zepto_brand_memory_to_cart_items,
+            )
+        return self._service
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._load(), name)
 
 
 def is_explicit_recipe_detail_prompt(message: str) -> bool:
@@ -207,9 +248,7 @@ def _household_identity(value: Dict[str, Any]) -> HouseholdIdentity:
         ),
     )
 
-grocery_checkout_service = GroceryCheckoutService(
-    cart_mapper=apply_zepto_brand_memory_to_cart_items,
-)
+grocery_checkout_service = _LazyGroceryCheckoutService()
 
 
 def _confirmation_action_from_tool_response(value: Any, depth: int = 0) -> Dict[str, Any] | None:
@@ -302,6 +341,8 @@ async def get_or_create_session(
         "app:planner_selected_date": planner_selected_date,
     }
     
+    from google.adk.events import Event, EventActions
+
     session = await session_service.get_session(app_name="kitch", user_id=user_id, session_id=session_id)
     
     if not session:
@@ -392,9 +433,11 @@ async def persistence_postcondition(request: Request, call_next):
     """
     token = begin_persistence_scope()
     confirmation_token = begin_confirmation_scope()
-    memory_auth_token = begin_memory_auth_scope(
-        request.headers.get("x-vercel-oidc-token")
-    )
+    memory_auth_token = None
+    if request.url.path in {"/api/chat", "/api/upload-photo", "/api/health/ready"}:
+        memory_auth_token = _memory_runtime().begin_memory_auth_scope(
+            request.headers.get("x-vercel-oidc-token")
+        )
     identity_token = None
     upgraded_session_context = None
     try:
@@ -477,7 +520,8 @@ async def persistence_postcondition(request: Request, call_next):
             end_identity_scope(identity_token)
         end_persistence_scope(token)
         end_confirmation_scope(confirmation_token)
-        end_memory_auth_scope(memory_auth_token)
+        if memory_auth_token is not None:
+            _memory_runtime().end_memory_auth_scope(memory_auth_token)
 
 @app.exception_handler(PersistenceError)
 async def persistence_exception_handler(
@@ -557,6 +601,8 @@ async def chat_endpoint(payload: ChatRequest):
     running the Google ADK 2.0 persistent session loops.
     """
     try:
+        from google.genai.types import Content, Part
+
         active_user = canonical_user_name(payload.active_user)
         user_id = active_user.replace(" ", "_")
         session_id = f"kitch_chat_session_{user_id}"
@@ -714,6 +760,8 @@ async def upload_photo_endpoint(
 ):
     """Classify an image first, then route observations to the owning specialist."""
     try:
+        from google.genai.types import Content, Part
+
         if file.content_type and not file.content_type.startswith("image/"):
             raise HTTPException(status_code=415, detail="Upload an image file.")
         file_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -1339,6 +1387,11 @@ async def disconnect_provider_endpoint(provider_id: str):
 @app.get("/api/grocery/providers/{provider_id}/addresses")
 async def provider_addresses_endpoint(provider_id: str):
     return await grocery_checkout_service.addresses(provider_id)
+
+
+@app.get("/api/grocery/providers/{provider_id}/cart")
+async def provider_live_cart_endpoint(provider_id: str):
+    return await grocery_checkout_service.live_cart(provider_id)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/sync")

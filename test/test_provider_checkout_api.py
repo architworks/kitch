@@ -115,6 +115,29 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["cart_summary"]["total"]["display"], "₹132.00")
         self.assertEqual(response["source"], "live_provider_cart")
 
+    async def test_live_cart_returns_empty_provider_cart_without_checkout_state(self):
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(
+                environment="local",
+                label="Swiggy Instamart",
+            ),
+            get_cart=AsyncMock(return_value={
+                "status": "success",
+                "provider": "swiggy_instamart",
+                "provider_cart": {"items": [], "stores": [], "multi_store": False},
+                "cart_summary": {"currency": "INR", "total_minor": 0},
+            }),
+        )
+        service = self.service(adapter)
+
+        response = await service.live_cart("Instamart")
+
+        adapter.get_cart.assert_awaited_once()
+        self.assertEqual(response["provider_cart"]["items"], [])
+        self.assertEqual(response["cart_summary"]["total_minor"], 0)
+        self.assertNotIn("draft", response)
+        self.assertNotIn("payment_options", response)
+
     async def test_chat_payment_choice_resolves_only_current_draft_options(self):
         draft = self.draft_row()
         draft["provider"] = "swiggy_instamart"
@@ -295,7 +318,6 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
             patch("app.grocery_checkout.get_grocery_cart", return_value=row["native_items"]),
-            patch("app.grocery_checkout.native_snapshot_matches", return_value=True),
             patch("app.grocery_checkout.save_revalidated_draft", return_value=(changed, True)),
         ):
             with self.assertRaises(ProviderOperationError) as caught:
@@ -330,7 +352,6 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
             patch("app.grocery_checkout.get_grocery_cart", return_value=row["native_items"]),
-            patch("app.grocery_checkout.native_snapshot_matches", return_value=True),
             patch("app.grocery_checkout.save_revalidated_draft", return_value=(row, False)),
             patch("app.grocery_checkout.save_provider_checkout_draft", return_value=pending),
             patch("app.grocery_checkout.save_order_outcome", return_value=final) as save_outcome,
@@ -348,27 +369,24 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         adapter.place_order.assert_awaited_once()
         save_outcome.assert_called_once()
 
-    async def test_revalidation_invalidates_native_cart_drift(self):
+    async def test_revalidation_does_not_block_on_native_cart_drift(self):
         row = self.draft_row()
+        refreshed = {**row, "last_validated_at": "2026-10-11T00:00:00+00:00"}
         adapter = SimpleNamespace(
             descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
-            revalidate_cart=AsyncMock(),
+            revalidate_cart=AsyncMock(return_value={"status": "success", "changed": False}),
         )
         service = self.service(adapter)
-        invalidated = {**row, "status": "blocked"}
         with (
             patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
             patch("app.grocery_checkout.get_grocery_cart", return_value=[]),
-            patch("app.grocery_checkout.native_snapshot_matches", return_value=False),
-            patch("app.grocery_checkout.invalidate_draft_for_native_drift", return_value=invalidated),
+            patch("app.grocery_checkout.save_revalidated_draft", return_value=(refreshed, False)),
         ):
-            with self.assertRaises(ProviderOperationError) as caught:
-                await service.revalidate("zepto")
-        self.assertEqual(caught.exception.code, "native_cart_changed")
-        self.assertEqual(caught.exception.draft["status"], "blocked")
-        adapter.revalidate_cart.assert_not_awaited()
+            response = await service.revalidate("zepto")
+        adapter.revalidate_cart.assert_awaited_once()
+        self.assertEqual(response["draft"]["last_validated_at"], refreshed["last_validated_at"])
 
     async def test_instamart_revalidation_uses_direct_provider_refresh(self):
         row = {**self.draft_row(), "provider": "swiggy_instamart"}
@@ -397,7 +415,6 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
             patch("app.grocery_checkout.get_grocery_cart", return_value=row["native_items"]),
-            patch("app.grocery_checkout.native_snapshot_matches", return_value=True),
             patch("app.grocery_checkout.save_revalidated_draft", return_value=(saved, False)),
         ):
             response = await service.revalidate("swiggy_instamart")

@@ -1,4 +1,4 @@
-"""Durable checkout-review construction and native-cart drift checks."""
+"""Durable checkout-review construction."""
 
 from __future__ import annotations
 
@@ -174,15 +174,15 @@ def refresh_checkout_eligibility(
     """Re-derive denormalized review eligibility under the current policy."""
     if str(row.get("status") or "") not in {"blocked", "ready", "partial", "changed"}:
         return row
-    if (row.get("checkout_context") or {}).get("native_cart_stale") is True:
-        # Only a fresh provider sync/revalidation may clear this durable marker.
-        # Re-reading an old provider projection must never mint a new approval.
-        return row
+
+    checkout_context = dict(row.get("checkout_context") or {})
+    checkout_context.pop("native_cart_stale", None)
+    checkout_context.pop("native_cart_stale_at", None)
 
     result = {
         "items": row.get("matched_items") or [],
         "unavailable_items": row.get("unavailable_items") or [],
-        "checkout_context": row.get("checkout_context") or {},
+        "checkout_context": checkout_context,
         "store_context": row.get("store_context") or {},
         "cart_summary": row.get("cart_summary") or {},
         "payment_options": row.get("payment_options") or [],
@@ -203,6 +203,7 @@ def refresh_checkout_eligibility(
         else None
     )
     updates = {
+        "checkout_context": checkout_context,
         "can_place_order": not blockers,
         "order_blockers": blockers,
         "confirmation_token": confirmation_token,
@@ -383,65 +384,6 @@ def update_draft_review_fields(
         provider=str(existing_row.get("provider") or ""),
         provider_environment=str(existing_row.get("provider_environment") or "production"),
     )) or {}
-
-
-def invalidate_draft_for_native_drift(
-    existing_row: Dict[str, Any],
-) -> Dict[str, Any]:
-    existing = draft_row_to_review(existing_row) or {}
-    blockers = list(existing.get("order_blockers") or [])
-    provider_label = str(existing.get("provider") or "provider").replace("_", " ").title()
-    blockers.append(f"The native grocery selection changed after the {provider_label} cart was reviewed.")
-    payload = {
-        "checkout_context": {
-            **(existing.get("checkout_context") or {}),
-            "native_cart_stale": True,
-            "native_cart_stale_at": _now_iso(),
-        },
-        "selected_payment_method_id": None,
-        "order_review_acknowledged": False,
-        "can_place_order": False,
-        "order_blockers": list(dict.fromkeys(blockers)),
-        "confirmation_token": None,
-        "status": "blocked",
-    }
-    payload["snapshot_hash"] = checkout_snapshot_hash({**existing, **payload})
-    return draft_row_to_review(save_provider_checkout_draft(
-        payload,
-        provider=str(existing_row.get("provider") or ""),
-        provider_environment=str(existing_row.get("provider_environment") or "production"),
-    )) or {}
-
-
-def native_snapshot_matches(
-    existing_row: Dict[str, Any],
-    current_cart: List[Dict[str, Any]],
-) -> bool:
-    existing = draft_row_to_review(existing_row) or {}
-    selected_ids = {str(item_id) for item_id in existing.get("selected_native_item_ids") or []}
-    current_selected = [
-        item
-        for item in current_cart
-        if str(item.get("id")) in selected_ids and float(item.get("purchaseAmount") or 0) > 0
-    ]
-
-    def stable(items: List[Dict[str, Any]]) -> str:
-        normalized = [
-            {
-                "id": str(item.get("id")),
-                "name": item.get("name"),
-                "requiredAmount": item.get("requiredAmount", item.get("amount")),
-                "requiredUnit": item.get("requiredUnit", item.get("unit")),
-                "purchaseAmount": item.get("purchaseAmount", item.get("amount")),
-                "purchaseUnit": item.get("purchaseUnit", item.get("unit")),
-                "category": item.get("category"),
-                "pantryAllocation": item.get("pantryAllocation") or {},
-            }
-            for item in items
-        ]
-        return json.dumps(sorted(normalized, key=lambda item: item["id"]), sort_keys=True, default=str)
-
-    return len(current_selected) == len(selected_ids) and stable(current_selected) == stable(existing.get("native_items") or [])
 
 
 def save_order_outcome(
