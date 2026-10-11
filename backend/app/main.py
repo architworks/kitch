@@ -33,7 +33,10 @@ from app.agent.tools import apply_zepto_brand_memory_to_cart_items
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
 from app.grocery_checkout import GroceryCheckoutService
 from app.providers.base import ProviderOperationError
-from app.providers.instamart import InstamartProviderAdapter
+from app.providers.instamart import (
+    InstamartProviderAdapter,
+    instamart_cancellation_guidance,
+)
 from app.providers.registry import provider_registry
 from app.household_config import canonical_user_name
 from app.auth import (
@@ -568,6 +571,10 @@ async def chat_endpoint(payload: ChatRequest):
             planner_week_start=payload.planner_context.visible_week_start,
             planner_selected_date=payload.planner_context.selected_date,
         )
+
+        cancellation_guidance = instamart_cancellation_guidance(payload.message)
+        if cancellation_guidance:
+            return ChatResponse(text=cancellation_guidance, action=None)
 
         meal_plan_before = get_meal_plan_snapshot()
         pantry_before = get_pantry_stock()

@@ -434,30 +434,34 @@ Architectural invariants:
 - The cart summary is included in the review snapshot hash.
 - Drafts are stored in `provider_checkout_drafts` with backend-only RLS and
   survive frontend/backend restarts.
-- Groceries-page entry restores drafts and automatically reads saved addresses,
-  but does not search products, mutate carts, or revalidate provider state.
-  Drafts older than five minutes are visibly stale and require explicit refresh
-  before payment or approval.
-- Instamart refresh and order preflight deterministically rebuild the cart from
-  the reviewed Swiggy product identifiers, then read the authoritative cart,
-  payment options, and bill. They do not invoke Gemini or reinterpret product
-  intent. A missing or unexpected provider row is a material review change.
+- Groceries-page entry restores drafts and automatically reads saved addresses.
+  Reviews older than one minute are quietly revalidated by reading the live
+  cart and payment options; background refresh never searches or mutates.
+- Instamart refresh and order preflight read the authoritative cart, payment
+  options, and bill without invoking Gemini or rewriting provider state. A
+  missing or unexpected provider row is a material review change.
 - Replacements, price changes, pack changes, quantity changes, and cart drift
   reset payment and acknowledgement. Unresolved native items remain in the
   approval snapshot as explicitly omitted rows; confirmed partial carts may
   proceed, while carts with no confirmed items remain blocked.
-- Instamart uses only `/im`. Its dedicated agent receives only
-  `get_addresses`, `search_products`, `your_go_to_items`, `update_cart`, and
-  `get_cart`; checkout and other mutations are absent.
+- Instamart uses only `/im`. Its synchronization mode receives the five tools
+  needed to map and confirm a Kitch cart. Its conversational mode receives a
+  separate direct allowlist for reversible cart operations, coupons, and
+  order/payment/delivery reads. A separate Kitch review-state
+  tool resolves address or payment text only against options already returned
+  for the current draft. Neither mode receives
+  `checkout` or `confirm_order`.
 - `CommerceToolPolicy` uses server-owned request authority. Cart writes are
   allowed only for explicit UI/chat sync, refresh, or order preflight.
   Checkout is independently allowed only for the UI place-order endpoint.
 - Exact MCP update/read results are captured after tool calls. Durable cart and
   bill state never comes from the model's textual reconstruction.
-- Instamart accepts only payment methods returned by the fresh confirmed cart
-  or provider payment capability. UPI is exclusive when returned; its opaque
-  app ID is echoed unchanged, or the documented QR flag is used. COD is offered
-  only when UPI is absent and Cash is returned.
+- Instamart accepts only enabled payment methods returned by the fresh provider
+  capability. UPI intent and QR identifiers are echoed unchanged, COD remains
+  available alongside UPI when returned, and Swiggy Money maps to `SwiggyPay`.
+  Pending UPI exposes the returned handoff URL and polling cadence transiently;
+  terminal successful payments are confirmed only when Swiggy reports that
+  auto-confirmation did not occur.
 - When Instamart returns exactly one supported payment method, Kitch records it
   automatically and presents it as a fixed checkout detail. Multiple Instamart
   methods still require a choice. Zepto retains its independent multi-option

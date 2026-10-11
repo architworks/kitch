@@ -13,8 +13,10 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.agent.instamart_cart_agent import (  # noqa: E402
     INSTAMART_AGENT_MCP_TOOLS,
+    INSTAMART_CONVERSATION_MCP_TOOLS,
     _after_instamart_tool,
     _before_instamart_tool,
+    _explicit_conversation_mutation,
 )
 from app.commerce_policy import (  # noqa: E402
     CommercePermission,
@@ -37,14 +39,45 @@ class CommerceToolPolicyTests(unittest.TestCase):
         self.assertNotIn("checkout", INSTAMART_AGENT_MCP_TOOLS)
         self.assertNotIn("clear_cart", INSTAMART_AGENT_MCP_TOOLS)
 
+    def test_conversation_toolset_has_safe_operations_but_never_checkout(self):
+        self.assertIn("clear_cart", INSTAMART_CONVERSATION_MCP_TOOLS)
+        self.assertIn("apply_coupon", INSTAMART_CONVERSATION_MCP_TOOLS)
+        self.assertIn("get_delivery_status", INSTAMART_CONVERSATION_MCP_TOOLS)
+        self.assertNotIn("checkout", INSTAMART_CONVERSATION_MCP_TOOLS)
+        self.assertNotIn("confirm_order", INSTAMART_CONVERSATION_MCP_TOOLS)
+
+    def test_conversation_cart_mutations_require_explicit_natural_language(self):
+        self.assertTrue(
+            _explicit_conversation_mutation(
+                "clear_cart", "Please clear my Swiggy Instamart cart."
+            )
+        )
+        self.assertFalse(
+            _explicit_conversation_mutation(
+                "clear_cart", "What is currently in my Swiggy Instamart cart?"
+            )
+        )
+        self.assertTrue(
+            _explicit_conversation_mutation(
+                "apply_coupon", "Apply the best available coupon."
+            )
+        )
+        self.assertFalse(
+            _explicit_conversation_mutation(
+                "apply_coupon", "Which coupons are available?"
+            )
+        )
+
+
     def test_reads_are_allowed_and_unknown_tools_fail_closed(self):
         CommerceToolPolicy.authorize("search_products")
         with self.assertRaises(CommercePolicyError):
             CommerceToolPolicy.authorize("new_mutating_provider_tool")
 
     def test_cart_write_requires_server_owned_cart_authority(self):
-        with self.assertRaises(CommercePolicyError):
-            CommerceToolPolicy.authorize("update_cart")
+        for tool_name in ("update_cart", "clear_cart", "apply_coupon"):
+            with self.assertRaises(CommercePolicyError):
+                CommerceToolPolicy.authorize(tool_name)
 
     def test_instamart_memory_tools_require_commerce_run_authority(self):
         for tool_name in (

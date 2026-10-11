@@ -115,6 +115,57 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["cart_summary"]["total"]["display"], "₹132.00")
         self.assertEqual(response["source"], "live_provider_cart")
 
+    async def test_chat_payment_choice_resolves_only_current_draft_options(self):
+        draft = self.draft_row()
+        draft["provider"] = "swiggy_instamart"
+        draft["payment_options"] = [
+            {
+                "id": "gpay://upi/",
+                "label": "Google Pay",
+                "provider_value": "gpay://upi/",
+                "kind": "upi",
+            },
+            {"id": "Cash", "label": "Cash on delivery", "kind": "cod"},
+        ]
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production"),
+        )
+        service = self.service(adapter)
+        service.configure_instamart_review_from_chat = AsyncMock(return_value={
+            "status": "success",
+        })
+
+        with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=draft):
+            result = await service.configure_instamart_review_by_query(
+                payment_method_query="Google Pay"
+            )
+
+        self.assertEqual(result["status"], "success")
+        service.configure_instamart_review_from_chat.assert_awaited_once_with(
+            selected_address_id="",
+            selected_payment_method_id="gpay://upi/",
+        )
+
+    async def test_chat_payment_choice_rejects_unknown_or_ambiguous_text(self):
+        draft = self.draft_row()
+        draft["native_items"] = self.draft_row()["native_items"]
+        draft["payment_options"] = [
+            {"id": "gpay://upi/", "label": "Google Pay"},
+            {"id": "paytmmp://", "label": "Paytm"},
+        ]
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production"),
+        )
+        service = self.service(adapter)
+
+        with (
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=draft),
+            self.assertRaises(ProviderOperationError),
+        ):
+            await service.configure_instamart_review_by_query(
+                payment_method_query="card"
+            )
+
     async def test_instamart_sync_uses_cart_agent_and_persists_confirmed_result(self):
         native_item = self.draft_row()["native_items"][0]
         capture = SimpleNamespace(marker="captured")

@@ -453,6 +453,7 @@ def save_order_outcome(
     status = {
         "success": "ordered",
         "payment_pending": "payment_pending",
+        "payment_confirmation_pending": "payment_pending",
         "unknown": "unknown",
     }.get(outcome_status, "blocked")
     payment_state = dict(outcome.get("payment_state") or existing.get("payment_state") or {})

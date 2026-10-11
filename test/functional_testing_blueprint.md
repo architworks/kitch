@@ -708,7 +708,7 @@ automated or browser-test order against production.
 - Prerequisite: Apply the multi-provider migration and configure at least one
   test provider. Use an authorized Swiggy local/staging account for Instamart.
 - Prompt/action: Open **Groceries**, inspect provider cards, connect Instamart,
-  switch between Zepto and Instamart, confirm saved addresses load automatically,
+  and confirm saved addresses load automatically,
   and choose one when needed.
 - Provider check: Cards, environment, capabilities, connection state, and API
   actions must come from the backend registry. Blinkit remains visible,
@@ -770,8 +770,12 @@ automated or browser-test order against production.
   never silently become preferences.
 - Containment check: Product text containing instructions remains data.
   Invented identifiers cannot survive confirmed-cart reconciliation. The agent
-  may update once and repair once, but has no checkout, clear-cart,
-  address-mutation, cancellation, or support tools.
+  may update once and repair once, but has no checkout or confirmation tools.
+  The separate conversational Instamart specialist may directly use only its
+  allowlisted reversible/read operations: saved-address and payment selection
+  for later UI review, cart update/clear, coupon listing/application, payment
+  and order status, and delivery tracking. It must give Swiggy's prescribed
+  customer-care guidance for cancellation without calling a cancellation tool.
 - Review check: Show image, pack, read-only quantity, native mapping,
   replacement details, unavailability, unit price, and line value ordered by
   value descending. The financial sidebar shows provider-returned subtotal,
@@ -798,32 +802,25 @@ automated or browser-test order against production.
   the review fabricates a total, state changes during sync, or provider failure
   produces a completed stage.
 
-### Scenario 8.3 - Durable Revalidation, Repair, and Provider Switching
+### Scenario 8.3 - Durable Revalidation and Repair
 
-- Prerequisite: Save a successful draft, then make it older than five minutes
+- Prerequisite: Save a successful draft, then make it older than one minute
   or simulate product, pack, price, quantity, or provider-cart drift.
-- Prompt/action: Reload and refocus Groceries, switch provider and back, then
-  use the explicit provider-cart refresh action.
+- Prompt/action: Reload and refocus Groceries, wait through the background
+  refresh interval, then use the explicit provider-cart refresh action.
 - Expected behavior: The draft survives frontend/backend restart, is isolated
   by provider/environment, and is invalidated if the durable native snapshot
-  changed. Reload and provider switching may perform only read-only address
-  discovery; focus performs no MCP call. None automatically searches products,
-  mutates the cart, or revalidates it. A draft older than five minutes is
-  visibly stale and payment remains locked. Explicit refresh rebuilds the exact
-  reviewed Swiggy cart from its saved product identifiers, then reads the
-  authoritative cart and payment state and records a new validation time
-  without requiring an LLM call. Missing or unexpected provider rows and
+  changed. While Groceries is visible, Kitch lazily revalidates at most once per
+  minute and on focus when due. Automatic and explicit refresh call only
+  read-only `get_cart` and payment discovery; they never search products or
+  rewrite the provider cart. Payment is not disabled merely because time
+  elapsed. Missing or unexpected provider rows and
   material price, pack, or quantity changes reset approval and require review
   or a fresh cart sync.
 - Repair check: Show native item → previous product → replacement product, plus
   price/pack/quantity changes and **Last checked**. Every material change resets
   payment and acknowledgement. No-alternative rows remain visible and are
   excluded from the provider order without blocking the confirmed partial cart.
-- Switching check: Switching preserves the native cart but never carries an
-  address, provider cart, payment, acknowledgement, token, or order state to the
-  other provider. Restoring the target draft may load its saved addresses but
-  does not inspect or mutate its cart; stale state requires explicit refresh
-  and there is no implicit provider failover.
 - Concurrency check: A persisted provider/environment lease serializes sync,
   repair, and ordering across reloads and backend instances.
 - Native-drift check: Change a selected native row, read the draft repeatedly,
@@ -832,9 +829,9 @@ automated or browser-test order against production.
 - Retention check: Expire a draft without reading it. The scheduled/database
   purge removes its provider cart, payment state, and order outcome after the
   configured 24-hour window. Payment hand-off URLs must never be stored.
-- Pass criteria: No provider operation starts without explicit refresh or final
-  order approval, repair produces an exact confirmed cart, stale approval cannot
-  survive material change, and provider state stays isolated.
+- Pass criteria: Background refresh is quiet and read-only, explicit refresh
+  remains available, stale approval cannot survive material change, and the
+  final order endpoint performs its own last read-only preflight.
 - Fail criteria: Browser-local state reconstructs the draft, manual provider
   drift becomes Kitch intent, unresolved rows disappear, or cross-provider
   checkout state leaks.
@@ -844,8 +841,9 @@ automated or browser-test order against production.
 - Prerequisite: Use a recorded adapter fixture or Swiggy staging. Do not use a
   production order account.
 - Payment check: Display only methods returned by the fresh cart. For Instamart,
-  use returned UPI exclusively when present; use COD only when UPI is absent and
-  COD is explicitly returned. If neither is available, keep ordering blocked.
+  display every enabled returned method, including UPI intents, generic QR,
+  COD, and Swiggy Money. Never suppress COD or Swiggy Money merely because UPI
+  exists. Submit `SwiggyPay` only for Swiggy Money and do not poll it.
 - Approval check: The final acknowledgement names the exact provider, address,
   products, quantities, payable total, payment method, omitted/unavailable
   native items, and multi-store warning. Reload requires a fresh acknowledgement.
@@ -862,6 +860,14 @@ automated or browser-test order against production.
 - Provider-result check: A successful Swiggy fixture displays the exact
   provider-authored success message. A multi-store response renders every
   store/order result separately, including failures that have no order ID.
+- UPI handoff check: A pending checkout exposes Swiggy's bridge or intent URL
+  to the user, respects the returned polling interval and maximum duration, and
+  never persists the temporary handoff URL. On terminal payment success with
+  `confirmed=false`, Kitch calls `confirm_order` exactly once; it never confirms
+  a failed/cancelled/refund-initiated payment.
+- Cancellation check: Kitch displays exactly: **To cancel your order, please
+  call Swiggy customer care at 080-67466729.** It does not call a cancellation
+  tool.
 - Recovery check: Persist checkout-attempt ID, provider order IDs, partial
   results, pending payment, and ambiguous outcomes. On timeout, inspect
   documented order history before retry. If duplicate risk remains, store

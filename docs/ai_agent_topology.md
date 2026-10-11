@@ -130,6 +130,14 @@ substitutes for preference memory.
 
 Recipe/Grocery Planner owns `sync_provider_cart_tool`. A provider named in chat applies only to that operation; otherwise the backend uses the provider last selected in the UI. Chat never changes that selection.
 
+Provider-specific Instamart conversation requests are delegated through one
+Kitch gateway to a dedicated Instamart agent. The agent calls its safe MCP
+allowlist directly for reversible cart changes, coupons, and status/tracking.
+The gateway is not a family of pass-through wrappers;
+Kitch's only local review-state tool resolves user-facing text against choices
+already returned for the current draft, then validates and persists the choice.
+Checkout and confirmation are never present in the conversational toolset.
+
 `CommerceToolPolicy` carries server-owned `read`, `cart_write`, or `checkout` authority. Cart mutation is reversible. Checkout is excluded from agent toolsets and permitted only in the UI Place Order endpoint after durable draft, lease, snapshot, address, payment, revalidation, and acknowledgement checks.
 
 ## Tool execution and failure handling

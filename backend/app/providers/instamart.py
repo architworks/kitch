@@ -30,14 +30,34 @@ REQUIRED_INSTAMART_TOOLS = {
     "get_cart",
 }
 ALLOWED_INSTAMART_TOOLS = REQUIRED_INSTAMART_TOOLS | {
+    "apply_coupon",
+    "clear_cart",
+    "list_coupons",
     "get_payment_options",
     "checkout",
     "get_orders",
     "get_order_details",
     "track_order",
+    "get_delivery_status",
     "check_payment_status",
     "confirm_order",
 }
+
+INSTAMART_CANCELLATION_MESSAGE = (
+    "To cancel your order, please call Swiggy customer care at 080-67466729."
+)
+
+
+def instamart_cancellation_guidance(user_request: str) -> str | None:
+    """Return Swiggy's mandatory wording for an explicit Instamart cancellation query."""
+    request = " ".join(str(user_request or "").casefold().split())
+    if (
+        "order" in request
+        and any(term in request for term in ("cancel", "cancellation"))
+        and any(term in request for term in ("instamart", "swiggy"))
+    ):
+        return INSTAMART_CANCELLATION_MESSAGE
+    return None
 
 
 class InstamartProviderAdapter(GroceryProviderAdapter):
@@ -397,21 +417,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
         unavailable.
         """
         selected_address_id = str(draft.get("selected_address_id") or "")
-        reviewed_cart_items: List[Dict[str, Any]] = []
-        for match in draft.get("matched_items") or []:
-            if not isinstance(match, dict):
-                continue
-            product = match.get("cart_item") or match.get("matched_product") or {}
-            spin_id = product.get("spin_id") or product.get("spinId")
-            sku_id = product.get("sku_id") or product.get("skuId")
-            quantity = product.get("quantity")
-            if spin_id and sku_id and quantity:
-                reviewed_cart_items.append({
-                    "spinId": str(spin_id),
-                    "skuId": str(sku_id),
-                    "quantity": int(quantity),
-                })
-        if not selected_address_id or not reviewed_cart_items:
+        if not selected_address_id or not (draft.get("matched_items") or []):
             raise ProviderOperationError(
                 provider=self.provider_id,
                 operation="revalidate_cart",
@@ -425,13 +431,8 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             tools, version = await self._validated_tools(
                 client,
                 session,
-                {"update_cart", "get_cart"},
+                {"get_cart"},
             )
-            CommerceToolPolicy.authorize("update_cart")
-            self._unwrap(await client.call_tool(session, "update_cart", {
-                "selectedAddressId": selected_address_id,
-                "items": reviewed_cart_items,
-            }))
             raw_cart = self._unwrap(
                 await client.call_tool(session, "get_cart", {})
             )
@@ -587,6 +588,8 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                         args["intentApp"] = selected.get("provider_value") or selected["id"]
                 elif selected.get("kind") == "cod":
                     args["paymentMethod"] = selected.get("provider_value") or "Cash"
+                elif selected.get("kind") == "swiggy_money":
+                    args["paymentMethod"] = "SwiggyPay"
                 else:
                     return self._error(
                         "payment_method_invalid",
@@ -599,9 +602,10 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 self._raise_tool_failure(payload, "checkout")
                 order_ids = self._find_values(payload, {"orderId", "order_id"})
                 status_text = " ".join(str(value) for value in self._find_values(payload, {"status", "paymentStatus"})).lower()
-                pending = "pending" in status_text
                 order_id = self._first(payload, "orderId", "order_id")
                 paas_id = self._first(payload, "paasId", "paas_id")
+                transaction_id = self._first(payload, "transactionId", "transaction_id")
+                pending = "pending" in status_text or bool(paas_id)
                 return {
                     "status": "payment_pending" if pending else "success",
                     "provider": self.provider_id,
@@ -612,6 +616,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                         "status": "pending" if pending else "confirmed",
                         "paas_id": str(paas_id) if paas_id else None,
                         "order_id": str(order_id) if order_id else None,
+                        "transaction_id": str(transaction_id) if transaction_id else None,
                         "upi_intent_url": self._first(payload, "upiIntentUrl", "upi_intent_url"),
                         "bridge_url": self._first(payload, "bridgeUrl", "bridge_url"),
                         "is_qr_flow": bool(self._first(payload, "isQrFlow", "is_qr_flow")),
@@ -622,7 +627,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                     # message verbatim.  It commonly lives in the MCP envelope,
                     # outside the nested data object used for order details.
                     "message": provider_message or str(
-                        payload.get("message") or "Instamart checkout completed."
+                        payload.get("message") or "Instamart order placed successfully."
                     ),
                 }
         except ProviderOperationError as exc:
@@ -669,17 +674,58 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             status = str(self._first(payload, "status") or "pending").lower()
             terminal = bool(self._first(payload, "terminal"))
             terminal_success = bool(self._first(payload, "isTerminalSuccess"))
+            confirmed = bool(self._first(payload, "confirmed"))
+            confirmation_payload: Dict[str, Any] | None = None
+            confirmation_message = ""
+            if terminal_success and not confirmed:
+                if "confirm_order" not in tools or not order_id:
+                    return self._error(
+                        "provider_order_confirmation_unavailable",
+                        "Instamart received the payment, but Kitch could not safely confirm the order.",
+                    )
+                CommerceToolPolicy.authorize("confirm_order")
+                confirmation_args = {"orderId": order_id, "paasId": paas_id}
+                if payment_state.get("transaction_id"):
+                    confirmation_args["transactionId"] = payment_state["transaction_id"]
+                raw_confirmation = await client.call_tool(
+                    session,
+                    "confirm_order",
+                    confirmation_args,
+                )
+                confirmation_message = self._provider_message(raw_confirmation)
+                confirmation_payload = self._unwrap(raw_confirmation)
+                self._raise_tool_failure(confirmation_payload, "confirm_order")
+                confirmation_result = str(
+                    self._first(confirmation_payload, "result") or ""
+                ).casefold()
+                confirmed = confirmation_result == "success"
             return {
-                "status": "success" if terminal_success else "payment_failed" if terminal else "payment_pending",
+                "status": (
+                    "success"
+                    if terminal_success and confirmed
+                    else "payment_confirmation_pending"
+                    if terminal_success
+                    else "payment_failed"
+                    if terminal
+                    else "payment_pending"
+                ),
                 "provider": self.provider_id,
+                "message": (
+                    confirmation_message
+                    if confirmation_payload is not None and confirmation_message
+                    else str(self._first(payload, "message") or "")
+                ),
                 "payment_state": {
                     **payment_state,
                     "status": status,
                     "terminal": terminal,
                     "terminal_success": terminal_success,
                     "terminal_failure": bool(self._first(payload, "isTerminalFailure")),
-                    "confirmed": bool(self._first(payload, "confirmed")),
-                    "order_status": self._first(payload, "orderStatus"),
+                    "confirmed": confirmed,
+                    "order_status": (
+                        self._first(confirmation_payload or {}, "orderStatus")
+                        or self._first(payload, "orderStatus")
+                    ),
                 },
             }
 
@@ -972,7 +1018,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 if not isinstance(value, dict):
                     continue
                 identifier = self._first(value, "id", "method", "paymentMethod")
-                if not identifier:
+                if not identifier or value.get("enabled") is False:
                     continue
                 options.append(
                     {
@@ -992,8 +1038,20 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             "allMethods", "availablePaymentMethods", "paymentMethods", "payment_methods",
         }))
         cod = payload.get("cod")
-        if cod:
+        if isinstance(cod, dict):
+            if cod.get("available") is True or cod.get("enabled") is True:
+                values.append({**cod, "id": self._first(cod, "id") or "COD"})
+        elif cod:
             values.append(cod)
+        swiggy_money = payload.get("swiggyMoney") or payload.get("swiggy_money")
+        if isinstance(swiggy_money, dict):
+            if swiggy_money.get("available") is True or swiggy_money.get("enabled") is True:
+                values.append({
+                    **swiggy_money,
+                    "id": self._first(swiggy_money, "id") or "SwiggyPay",
+                })
+        elif swiggy_money:
+            values.append(swiggy_money)
         flattened = [child for value in values for child in (value if isinstance(value, list) else [value])]
         for value in flattened:
             if isinstance(value, str):
@@ -1001,10 +1059,13 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 label = value
             elif isinstance(value, dict):
                 identifier = self._first(value, "id", "method", "paymentMethod", "type", "name")
-                label = self._first(value, "label", "title", "name", "method", "type") or identifier
+                label = self._first(value, "displayName", "label", "title", "name", "method", "type") or identifier
+                if value.get("enabled") is False or value.get("available") is False:
+                    continue
             else:
                 continue
-            text = f"{identifier} {label}".lower()
+            kind_hint = str(value.get("kind") or "") if isinstance(value, dict) else ""
+            text = f"{identifier} {label} {kind_hint}".lower()
             known_upi_identifiers = {
                 "gpay://upi/",
                 "phonepe://",
@@ -1016,9 +1077,13 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 "paywithqr",
             }
             kind = (
+                "swiggy_money"
+                if any(term in text for term in ("swiggypay", "swiggy money"))
+                else
                 "upi"
                 if str(identifier).casefold() in known_upi_identifiers
                 or any(term in text for term in ("upi", "paywithqr"))
+                or kind_hint.casefold() in {"qr", "intent"}
                 else "cod"
                 if any(term in text for term in ("cod", "cash"))
                 else "unsupported"
@@ -1030,13 +1095,23 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                     "id": str(identifier),
                     "label": self._payment_label(identifier, label),
                     "kind": kind,
-                    "provider_value": str(identifier),
-                    "flow": "upi_qr" if "paywithqr" in text else "upi_intent" if kind == "upi" else "cash",
+                    "provider_value": "SwiggyPay" if kind == "swiggy_money" else str(identifier),
+                    "flow": (
+                        "upi_qr"
+                        if kind == "upi" and ("paywithqr" in text or kind_hint.casefold() == "qr")
+                        else "upi_intent"
+                        if kind == "upi"
+                        else "wallet"
+                        if kind == "swiggy_money"
+                        else "cash"
+                    ),
                 }
             )
-        deduped = list({option["id"]: option for option in options}.values())
-        upi = [option for option in deduped if option["kind"] == "upi"]
-        return upi or [option for option in deduped if option["kind"] == "cod"]
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for option in options:
+            key = f"{option['id']}:{option.get('flow', '')}"
+            deduped[key] = option
+        return list(deduped.values())
 
     @staticmethod
     def _payment_label(identifier: Any, provider_label: Any = None) -> str:

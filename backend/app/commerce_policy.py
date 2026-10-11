@@ -72,12 +72,14 @@ class CommerceToolPolicy:
         "your_go_to_items",
         "get_cart",
         "get_payment_options",
+        "list_coupons",
         "get_orders",
         "get_order_details",
         "track_order",
+        "get_delivery_status",
         "check_payment_status",
     }
-    CART_WRITE_TOOLS: Set[str] = {"update_cart"}
+    CART_WRITE_TOOLS: Set[str] = {"update_cart", "apply_coupon", "clear_cart"}
     CHECKOUT_TOOLS: Set[str] = {"checkout", "confirm_order"}
     AGENT_LOCAL_TOOLS: Set[str] = {
         "read_scoped_native_cart_tool",

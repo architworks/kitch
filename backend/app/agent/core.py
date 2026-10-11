@@ -45,6 +45,8 @@ from .tools import (
     get_current_datetime,
     list_grocery_providers_tool,
     get_provider_cart_tool,
+    configure_instamart_review_tool,
+    instamart_conversation_tool,
     sync_provider_cart_tool,
     update_household_configuration_tool,
     update_nutrition_targets_tool,
@@ -247,8 +249,8 @@ recipe_grocery_planner = LlmAgent(
         "6. Standalone native-cart wording such as 'add two chocolates', 'change milk to 2 litres', or 'remove eggs from my grocery list' does NOT require a recipe. This rule applies to direct cart edits, not statements that items are already stocked or available at home. Call 'get_grocery_cart_tool', then 'modify_native_grocery_cart_tool' with explicit add, set/update, or remove changes. New standalone rows are manual native-cart intent and must not fabricate a recipe artifact.\n"
         "7. Pantry management belongs to you. Read get_pantry_state_tool first, then use patch_pantry_tool for atomic add/set/adjust/single-remove operations. Every add, set, or adjust operation must carry the quantity the user or Vision Scanner supplied; never omit it while relaying structured observations. Current-inventory observations use set; newly purchased stock uses add. Complete replacement, including an empty pantry, requires confirmation before replace_pantry_tool. Pantry changes never update the native cart implicitly. When a user says an item is stocked and explicitly asks to update or recalculate the grocery list, reconcile the native cart from pantry state; do not translate that pantry statement into manual cart removals.\n"
         "8. Keep recipe-derived rows connected to their saved artifact. Revise an existing recipe with update_recipe_grocery_plan_tool and delete one explicitly named recipe with delete_recipe_grocery_plan_tool. Standalone rows remain source=manual.\n"
-        "9. On an explicit request to move/sync items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection. Never authenticate, change the saved provider, select payment, or place/cancel an order.\n"
-        "10. Provider availability, current ordering-app cart contents, quantities, prices, and totals also belong to you. Use list_grocery_providers_tool or get_provider_cart_tool for these read-only questions. Reading a provider cart must never synchronize, repair, or otherwise mutate it.\n"
+        "9. On an explicit request to move/sync Kitch native-cart items to an ordering app, call sync_provider_cart_tool. A named provider applies only to this call; otherwise omit provider so the backend uses the last UI selection.\n"
+        "10. Provider availability and simple current-cart reads use list_grocery_providers_tool or get_provider_cart_tool. For an explicit Instamart saved-address or payment-method selection for later UI review, call configure_instamart_review_tool with the user-facing address or method text; it resolves only choices already returned for the current draft. For other Swiggy Instamart-specific catalogue/cart changes, coupons, payment/order status, or delivery tracking, call instamart_conversation_tool with the user's request unchanged. Never use either tool for checkout, payment execution, final order approval, cancellation, provider authentication, or changing the household's selected provider. Final review and Place Order remain UI-only.\n"
         "11. Present results in clean markdown. Mention that the native household grocery cart changed only after the relevant persistence tool returns status=success.\n"
         "12. Never describe memory, a recipe artifact, or a cart as saved based on intent alone. If a persistence tool fails or has no successful result, explicitly say nothing was saved."
     ),
@@ -270,6 +272,8 @@ recipe_grocery_planner = LlmAgent(
         reconcile_native_cart_with_pantry_tool,
         list_grocery_providers_tool,
         get_provider_cart_tool,
+        configure_instamart_review_tool,
+        instamart_conversation_tool,
         sync_provider_cart_tool,
         get_current_datetime
     ],
@@ -313,7 +317,8 @@ kitch_coordinator = LlmAgent(
         "→ 'recipe_grocery_planner': For detailed recipes, cooking steps, ingredients, "
         "  groceries, shopping lists, 'what do I need to buy', pantry-aware grocery planning, "
         "  standalone add/update/remove requests for the Kitch grocery cart, and household "
-        "  food preferences or exclusions, ordering-app availability, provider-cart contents, totals, or explicit provider synchronization.\n\n"
+        "  food preferences or exclusions, ordering-app availability, provider-cart contents, totals, explicit provider synchronization, "
+        "  and non-checkout Instamart tasks such as saved-address or payment-method selection for later UI review, coupons, order/payment status, and delivery tracking.\n\n"
         "GUIDELINES:\n"
         "1. Be warm and conversational. You're the household's kitchen buddy, not a robot.\n"
         "2. Route naturally — don't tell the user which agent you're using.\n"
@@ -322,7 +327,7 @@ kitch_coordinator = LlmAgent(
         "5. For nutrition intake, macro tracking, food-log corrections, or nutrition goals, delegate the "
         "complete request to nutrition_tracker. The coordinator must not estimate, log, modify, or claim "
         "success for nutrition records itself.\n"
-        "6. All recipes, pantry, native grocery cart, provider availability, provider-cart reads, and explicit provider-cart synchronization requests route to recipe_grocery_planner. Do not intercept provider requests with a coordinator tool.\n"
+        "6. All recipes, pantry, native grocery cart, and provider-specific requests route to recipe_grocery_planner. This includes provider availability, provider-cart reads or reversible changes, explicit synchronization, saved-address or payment-method selection for later UI review, coupons, order/payment status, and delivery tracking. Do not intercept these requests or mistake choosing a later review option for executing payment.\n"
         "7. Factual household size and timezone may be changed with update_household_configuration_tool. Dietary, food, allergy, planning-style, and brand preferences are natural-language agent memories and must never be written to the household profile. Personal calorie and macro goals belong to nutrition_tracker. Provider authentication and provider selection remain UI-only.\n"
         "8. Ordinary grocery planning changes only native Kitch state; provider synchronization requires explicit move/sync wording.\n"
         "9. Never attempt provider checkout from chat. Explain that final review and Place Order are available only in the Groceries UI.\n"

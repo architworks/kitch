@@ -143,8 +143,21 @@ const INITIAL_VISIBLE_CHAT_COUNT = 6;
 const CHAT_HISTORY_BATCH_SIZE = 6;
 const PERSISTENCE_FAILURE_MESSAGE = "Kitch couldn’t save this change because durable storage is unavailable. Nothing was saved.";
 const DEFAULT_ORDERING_PROVIDER = "";
-const PROVIDER_REVALIDATE_AFTER_MS = 5 * 60 * 1000;
+const PROVIDER_REVALIDATE_AFTER_MS = 60 * 1000;
 const SWIGGY_LOGO_URL = "/swiggy-logo.svg";
+const safeProviderPaymentUrl = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return [
+      "https:", "http:", "upi:", "gpay:", "phonepe:", "paytmmp:",
+      "bhim:", "credpay:", "super:", "fpupi:"
+    ].includes(url.protocol) ? raw : "";
+  } catch {
+    return "";
+  }
+};
 
 const withProviderRoutes = (provider) => {
   const base = provider?.api_base;
@@ -1006,11 +1019,11 @@ export default function Home() {
   const [excludedProviderItemIds, setExcludedProviderItemIds] = useState([]);
   const [isProviderSyncing, setIsProviderSyncing] = useState(false);
   const [providerSyncStage, setProviderSyncStage] = useState("idle");
-  const [providerFreshnessNow, setProviderFreshnessNow] = useState(() => Date.now());
   const [groceryMutationCount, setGroceryMutationCount] = useState(0);
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
   const [isCheckingProviderPayment, setIsCheckingProviderPayment] = useState(false);
   const [isProviderOrderComplete, setIsProviderOrderComplete] = useState(false);
+  const [providerPaymentHandoff, setProviderPaymentHandoff] = useState(null);
   const [scanningOverlay, setScanningOverlay] = useState({
     active: false,
     title: "",
@@ -1058,6 +1071,7 @@ export default function Home() {
       setProviderCartReview(null);
       setSelectedProviderPaymentMethod("");
       setProviderReviewAcknowledged(false);
+      setProviderPaymentHandoff(null);
       return;
     }
     setProviderCartReview(review);
@@ -1074,6 +1088,7 @@ export default function Home() {
     setSelectedProviderPaymentMethod("");
     setProviderReviewAcknowledged(false);
     setIsProviderOrderComplete(false);
+    setProviderPaymentHandoff(null);
   }, []);
 
   const applyConfirmedGroceryCart = useCallback((items) => {
@@ -1966,11 +1981,13 @@ export default function Home() {
     }
   };
 
-  const revalidateProviderCart = useCallback(async ({ announce = true } = {}) => {
+  const revalidateProviderCart = useCallback(async ({ announce = true, background = false } = {}) => {
     if (providerSyncInFlightRef.current || !selectedProviderRevalidateRoute) return null;
     providerSyncInFlightRef.current = true;
-    setIsProviderSyncing(true);
-    startProviderSyncProgress();
+    if (!background) {
+      setIsProviderSyncing(true);
+      startProviderSyncProgress();
+    }
     try {
       const res = await apiFetch(apiUrl(selectedProviderRevalidateRoute), {
         method: "POST",
@@ -1980,9 +1997,11 @@ export default function Home() {
       const data = await res.json();
       const review = data.draft || null;
       if (review) applyProviderDraft(review);
-      clearProviderSyncTimers();
-      setProviderSyncStage("complete");
-      await new Promise(resolve => window.setTimeout(resolve, 350));
+      if (!background) {
+        clearProviderSyncTimers();
+        setProviderSyncStage("complete");
+        await new Promise(resolve => window.setTimeout(resolve, 350));
+      }
       if (announce) {
         triggerBannerAlert(data.changed
           ? `${selectedProviderLabel} cart changed and needs another review.`
@@ -1992,18 +2011,22 @@ export default function Home() {
     } catch (e) {
       const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
       if (changedDraft) applyProviderDraft(changedDraft, { resetAcknowledgement: true });
-      clearProviderSyncTimers();
-      setProviderSyncStage("failed");
-      await new Promise(resolve => window.setTimeout(resolve, 500));
+      if (!background) {
+        clearProviderSyncTimers();
+        setProviderSyncStage("failed");
+        await new Promise(resolve => window.setTimeout(resolve, 500));
+      }
       if (announce || changedDraft) {
         triggerBannerAlert(apiErrorMessage(e, `Could not refresh the ${selectedProviderLabel} cart.`));
       }
       return null;
     } finally {
-      clearProviderSyncTimers();
+      if (!background) clearProviderSyncTimers();
       providerSyncInFlightRef.current = false;
-      setIsProviderSyncing(false);
-      setProviderSyncStage("idle");
+      if (!background) {
+        setIsProviderSyncing(false);
+        setProviderSyncStage("idle");
+      }
     }
   }, [
     applyProviderDraft,
@@ -2068,21 +2091,36 @@ export default function Home() {
   }, [activeTab, activeUser, liveStateUser, restoreProviderCheckoutDraft]);
 
   useEffect(() => {
-    if (activeTab !== "groceries" || !hasProviderCartReview) return undefined;
-    const validatedAt = Date.parse(providerReviewLastValidatedAt);
-    const now = Date.now();
-    const refreshTimer = window.setTimeout(() => setProviderFreshnessNow(Date.now()), 0);
-    const staleDelay = Number.isFinite(validatedAt)
-      ? Math.max(0, validatedAt + PROVIDER_REVALIDATE_AFTER_MS - now + 50)
-      : 0;
-    const staleTimer = staleDelay > 0
-      ? window.setTimeout(() => setProviderFreshnessNow(Date.now()), staleDelay)
-      : null;
-    return () => {
-      window.clearTimeout(refreshTimer);
-      if (staleTimer) window.clearTimeout(staleTimer);
+    if (
+      activeTab !== "groceries"
+      || !hasProviderCartReview
+      || !["ready", "success", "changed"].includes(providerCartReview?.status)
+    ) return undefined;
+    const refreshIfDue = () => {
+      const validatedAt = Date.parse(providerReviewLastValidatedAt);
+      if (
+        document.visibilityState === "visible"
+        && (!Number.isFinite(validatedAt) || Date.now() - validatedAt >= PROVIDER_REVALIDATE_AFTER_MS)
+      ) {
+        revalidateProviderCart({ announce: false, background: true });
+      }
     };
-  }, [activeTab, hasProviderCartReview, providerReviewLastValidatedAt]);
+    const refreshTimer = window.setInterval(refreshIfDue, PROVIDER_REVALIDATE_AFTER_MS);
+    window.addEventListener("focus", refreshIfDue);
+    document.addEventListener("visibilitychange", refreshIfDue);
+    refreshIfDue();
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshIfDue);
+      document.removeEventListener("visibilitychange", refreshIfDue);
+    };
+  }, [
+    activeTab,
+    hasProviderCartReview,
+    providerCartReview?.status,
+    providerReviewLastValidatedAt,
+    revalidateProviderCart
+  ]);
 
   const updateProviderReview = async (updates) => {
     if (!providerCartReview?.review_id || !selectedProvider.routes) return null;
@@ -2192,6 +2230,13 @@ export default function Home() {
       await requireSuccessfulResponse(res);
       const data = await res.json();
       setProviderCartReview(data.review || data);
+      const handoff = data.result?.payment_state || null;
+      setProviderPaymentHandoff(handoff && (
+        handoff.upi_intent_url || handoff.bridge_url || handoff.is_qr_flow
+      ) ? {
+        ...handoff,
+        remaining_poll_ms: Number(handoff.max_poll_time_ms || 120000)
+      } : null);
       setIsProviderOrderComplete(data.status === "success");
       clearProviderSyncTimers();
       setProviderSyncStage("complete");
@@ -2216,7 +2261,7 @@ export default function Home() {
     }
   };
 
-  const checkProviderPaymentStatus = async () => {
+  const checkProviderPaymentStatus = useCallback(async () => {
     if (!selectedProvider?.routes?.paymentStatus || providerSyncInFlightRef.current) return;
     providerSyncInFlightRef.current = true;
     setIsProviderSyncing(true);
@@ -2250,7 +2295,33 @@ export default function Home() {
       setIsCheckingProviderPayment(false);
       setProviderSyncStage("idle");
     }
-  };
+  }, [
+    applyProviderDraft,
+    clearProviderSyncTimers,
+    selectedProvider,
+    startProviderSyncProgress,
+    triggerBannerAlert
+  ]);
+
+  useEffect(() => {
+    if (!providerPaymentHandoff || providerCartReview?.status !== "payment_pending") return undefined;
+    const interval = Math.max(2000, Number(providerPaymentHandoff.polling_interval_ms || 5000));
+    const remaining = Number(providerPaymentHandoff.remaining_poll_ms || 0);
+    if (remaining < interval) return undefined;
+    const timer = window.setTimeout(async () => {
+      await checkProviderPaymentStatus();
+      setProviderPaymentHandoff(current => current ? {
+        ...current,
+        remaining_poll_ms: Math.max(0, Number(current.remaining_poll_ms || 0) - interval)
+      } : null);
+    }, interval);
+    return () => window.clearTimeout(timer);
+  }, [
+    checkProviderPaymentStatus,
+    providerCartReview?.status,
+    providerPaymentHandoff,
+    isCheckingProviderPayment
+  ]);
 
   const resetDailyLogs = async () => {
     const diaryDate = selectedNutritionDate || nutritionDashboard.today;
@@ -2840,11 +2911,6 @@ export default function Home() {
         minute: "2-digit"
       }).format(new Date(providerCartReview.last_validated_at))
     : "Not checked yet";
-  const providerLastValidatedAt = Date.parse(providerCartReview?.last_validated_at || "");
-  const providerDraftIsStale = Boolean(providerCartReview) && (
-    !Number.isFinite(providerLastValidatedAt)
-    || providerFreshnessNow - providerLastValidatedAt >= PROVIDER_REVALIDATE_AFTER_MS
-  );
   const providerCartDetails = providerCartReview?.provider_cart || providerCartReview?.result?.provider_cart || providerCartReview?.result || null;
   const providerStoreGroups = Array.isArray(providerCartDetails?.stores) ? providerCartDetails.stores : [];
   const providerMultiStore = Boolean(providerCartDetails?.multi_store || providerStoreGroups.length > 1);
@@ -2903,6 +2969,9 @@ export default function Home() {
     : "";
   const effectiveProviderPaymentMethod = selectedProviderPaymentMethod || instamartSolePaymentId;
   const providerPaymentState = providerCartReview?.payment_state || {};
+  const providerPaymentHandoffUrl = safeProviderPaymentUrl(
+    providerPaymentHandoff?.bridge_url || providerPaymentHandoff?.upi_intent_url
+  );
   const providerOrderMessage = providerCheckoutContext.provider_message || "";
   const providerOrderResults = Array.isArray(providerCartReview?.order_results)
     ? providerCartReview.order_results
@@ -2933,7 +3002,6 @@ export default function Home() {
     && providerOrderBlockers.length === 0
     && Boolean(effectiveProviderPaymentMethod)
     && providerReviewAcknowledged
-    && !providerDraftIsStale
     && !isUpdatingProviderReview;
   const providerStatusLabel = providerCartReview?.store_context?.state === "store_context_ready"
     ? `${selectedProvider.label} store ready`
@@ -4707,7 +4775,6 @@ export default function Home() {
                                   ? `${providerMatchedItems.length} selected ${providerMatchedItems.length === 1 ? "item is" : "items are"} ready in ${selectedProvider.label}. ${providerUnavailableItems.length} ${providerUnavailableItems.length === 1 ? "item was" : "items were"} not found and will not be included in this order.`
                                   : `Review the products, quantities, and subtotals returned by ${selectedProvider.label}.`
                                 : providerCartReview.message || `${selectedProvider.label} cart synchronization needs attention.`}
-                              {providerDraftIsStale && ` This review is older than five minutes. Refresh it before choosing payment or ordering.`}
                             </p>
                             <div className="provider-cart-notice-actions">
                               <small>Last checked {providerLastChecked}</small>
@@ -4847,14 +4914,26 @@ export default function Home() {
                               </div>
                             )}
                             {providerPaymentPending && selectedProvider.capabilities?.payment_status && (
-                              <button
-                                type="button"
-                                className="soft-action-btn"
-                                onClick={checkProviderPaymentStatus}
-                                disabled={isCheckingProviderPayment || isPlacingProviderOrder}
-                              >
-                                {isCheckingProviderPayment ? "Checking…" : "Check payment status once"}
-                              </button>
+                              <>
+                                {providerPaymentHandoffUrl && (
+                                  <a
+                                    className="soft-action-btn"
+                                    href={providerPaymentHandoffUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    Continue with Swiggy payment
+                                  </a>
+                                )}
+                                <button
+                                  type="button"
+                                  className="soft-action-btn"
+                                  onClick={checkProviderPaymentStatus}
+                                  disabled={isCheckingProviderPayment || isPlacingProviderOrder}
+                                >
+                                  {isCheckingProviderPayment ? "Checking…" : "Check payment status"}
+                                </button>
+                              </>
                             )}
                           </div>
                         )}
@@ -4888,7 +4967,7 @@ export default function Home() {
                               Payment method
                               <select
                                 value={selectedProviderPaymentMethod}
-                                disabled={!providerAddressDetailsReady || providerDraftIsStale || isUpdatingProviderReview || isPlacingProviderOrder}
+                                disabled={!providerAddressDetailsReady || isUpdatingProviderReview || isPlacingProviderOrder}
                                 onChange={(e) => {
                                   const value = e.target.value;
                                   setSelectedProviderPaymentMethod(value);
@@ -4912,7 +4991,7 @@ export default function Home() {
                           <input
                             type="checkbox"
                             checked={providerReviewAcknowledged}
-                            disabled={!providerAddressDetailsReady || providerDraftIsStale || isUpdatingProviderReview || isPlacingProviderOrder}
+                            disabled={!providerAddressDetailsReady || isUpdatingProviderReview || isPlacingProviderOrder}
                             onChange={(e) => {
                               const checked = e.target.checked;
                               setProviderReviewAcknowledged(checked);
@@ -4926,13 +5005,6 @@ export default function Home() {
                           <div className="provider-blocker-list">
                             <strong>Multi-store fulfillment</strong>
                             <span>{selectedProvider.label} split this cart across {providerStoreGroups.length || "multiple"} stores. Review every item and the complete provider bill before approval.</span>
-                          </div>
-                        )}
-
-                        {providerDraftIsStale && (
-                          <div className="provider-stale-review" role="status">
-                            <strong>Refresh required before checkout</strong>
-                            <span>The saved {selectedProvider.label} review remains visible, but Kitch will not use it for payment or ordering until you explicitly refresh it.</span>
                           </div>
                         )}
 

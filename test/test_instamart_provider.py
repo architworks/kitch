@@ -18,7 +18,11 @@ from app.commerce_policy import (  # noqa: E402
     CommerceRunCapture,
     commerce_request_context,
 )
-from app.providers.instamart import InstamartProviderAdapter  # noqa: E402
+from app.providers.instamart import (  # noqa: E402
+    INSTAMART_CANCELLATION_MESSAGE,
+    InstamartProviderAdapter,
+    instamart_cancellation_guidance,
+)
 from app.providers.base import ProviderOperationError  # noqa: E402
 
 
@@ -33,6 +37,22 @@ class FakeContext:
         return False
 
 
+class InstamartGuidanceTests(unittest.TestCase):
+    def test_cancellation_guidance_uses_exact_provider_wording(self):
+        self.assertEqual(
+            instamart_cancellation_guidance(
+                "How do I cancel my Swiggy Instamart order?"
+            ),
+            INSTAMART_CANCELLATION_MESSAGE,
+        )
+        self.assertIsNone(
+            instamart_cancellation_guidance("Where is my Instamart order?")
+        )
+        self.assertIsNone(
+            instamart_cancellation_guidance("Cancel tomorrow's dinner plan")
+        )
+
+
 class FakeInstamartClient:
     def __init__(
         self,
@@ -42,16 +62,20 @@ class FakeInstamartClient:
         checkout_payload=None,
         cart_payload=None,
         payment_payload=None,
+        payment_status_payload=None,
+        confirm_payload=None,
     ):
         self.calls = []
         self.checkout_error = checkout_error
         self.checkout_payload = checkout_payload
         self.cart_payload = cart_payload
         self.payment_payload = payment_payload
+        self.payment_status_payload = payment_status_payload
+        self.confirm_payload = confirm_payload
         names = {
             "get_addresses", "search_products", "your_go_to_items",
             "update_cart", "get_cart", "checkout", "get_orders",
-            "check_payment_status", "get_payment_options",
+            "check_payment_status", "confirm_order", "get_payment_options",
         }
         required = {
             "search_products": ["addressId", "query"],
@@ -129,6 +153,30 @@ class FakeInstamartClient:
             return self.payment_payload or {
                 "success": True,
                 "data": {"availablePaymentMethods": ["COD"]},
+            }
+        if name == "check_payment_status":
+            return self.payment_status_payload or {
+                "success": True,
+                "data": {
+                    "paasId": "paas-1",
+                    "orderId": "order-1",
+                    "status": "SUCCESS",
+                    "terminal": True,
+                    "isTerminalSuccess": True,
+                    "isTerminalFailure": False,
+                    "confirmed": True,
+                },
+            }
+        if name == "confirm_order":
+            return self.confirm_payload or {
+                "success": True,
+                "message": "Instamart order placed successfully",
+                "data": {
+                    "orderId": "order-1",
+                    "paasId": "paas-1",
+                    "result": "success",
+                    "orderStatus": "PLACED",
+                },
             }
         raise AssertionError(f"Unexpected direct tool call: {name}")
 
@@ -266,7 +314,7 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(len(result["items"]), 1)
         self.assertEqual(result["unavailable_items"][0]["name"], "Rare herb")
 
-    def test_revalidation_rebuilds_reviewed_cart_without_reselecting_products(self):
+    def test_revalidation_reads_live_cart_without_rewriting_it(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
         previous = self.adapter().confirmed_agent_result(
             native,
@@ -305,16 +353,8 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["native_item"]["name"], "Eggs")
         self.assertEqual(
             [name for name, _arguments in client.calls],
-            ["update_cart", "get_cart", "get_payment_options"],
+            ["get_cart", "get_payment_options"],
         )
-        self.assertEqual(client.calls[0][1], {
-            "selectedAddressId": "home-1",
-            "items": [{
-                "spinId": "eggs-spin-12",
-                "skuId": "eggs-sku-12",
-                "quantity": 1,
-            }],
-        })
 
     def test_revalidation_marks_a_removed_reviewed_line_unavailable(self):
         native = [{"id": 180, "name": "Eggs", "amount": 12, "unit": "piece"}]
@@ -382,6 +422,22 @@ class InstamartProviderTests(unittest.TestCase):
             ],
         )
 
+    def test_payment_options_keep_upi_cod_swiggy_money_and_generic_qr(self):
+        options = self.adapter()._payment_options({
+            "allMethods": [
+                {"id": "generic-qr", "displayName": "Scan any UPI QR", "kind": "qr", "enabled": True},
+                {"id": "disabled-upi", "displayName": "Disabled UPI", "kind": "intent", "enabled": False},
+            ],
+            "cod": {"available": True},
+            "swiggyMoney": {"available": True},
+        })
+
+        by_kind = {option["kind"]: option for option in options}
+        self.assertEqual(by_kind["upi"]["flow"], "upi_qr")
+        self.assertEqual(by_kind["cod"]["provider_value"], "COD")
+        self.assertEqual(by_kind["swiggy_money"]["provider_value"], "SwiggyPay")
+        self.assertNotIn("disabled-upi", {option["id"] for option in options})
+
     def test_checkout_requires_ui_authority(self):
         adapter = self.adapter(FakeInstamartClient())
         review = {
@@ -429,6 +485,133 @@ class InstamartProviderTests(unittest.TestCase):
         self.assertEqual(len(result["order_results"]), 2)
         self.assertEqual(result["order_results"][1]["status"], "FAILED")
         self.assertEqual(result["order_results"][1]["message"], "Store two became unavailable")
+
+    def test_swiggy_money_checkout_uses_swiggy_pay_without_upi_arguments(self):
+        client = FakeInstamartClient()
+        review = {
+            "selected_address_id": "home-1",
+            "selected_payment_method_id": "SwiggyPay",
+            "payment_options": [{
+                "id": "SwiggyPay",
+                "kind": "swiggy_money",
+                "provider_value": "SwiggyPay",
+            }],
+        }
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id="test-swiggy-money",
+        ):
+            result = asyncio.run(self.adapter(client).place_order(review))
+
+        self.assertEqual(result["status"], "success")
+        checkout_args = next(args for name, args in client.calls if name == "checkout")
+        self.assertEqual(checkout_args, {"addressId": "home-1", "paymentMethod": "SwiggyPay"})
+
+    def test_upi_checkout_with_payment_reference_stays_pending(self):
+        client = FakeInstamartClient(checkout_payload={
+            "success": True,
+            "data": {
+                "orderId": "order-1",
+                "transactionId": "txn-1",
+                "paasId": "paas-1",
+                "upiIntentUrl": "upi://pay?pa=merchant@example",
+                "bridgeUrl": "https://payments.example/bridge",
+                "isQrFlow": False,
+                "pollingIntervalInMs": 5000,
+                "maxTimeToPollForInMs": 120000,
+                "paymentMethod": "UPI",
+            },
+        })
+        review = {
+            "selected_address_id": "home-1",
+            "selected_payment_method_id": "gpay://upi/",
+            "payment_options": [{
+                "id": "gpay://upi/",
+                "kind": "upi",
+                "flow": "upi_intent",
+                "provider_value": "gpay://upi/",
+            }],
+        }
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id="test-upi-pending",
+        ):
+            result = asyncio.run(self.adapter(client).place_order(review))
+
+        self.assertEqual(result["status"], "payment_pending")
+        self.assertEqual(result["payment_state"]["transaction_id"], "txn-1")
+        self.assertEqual(
+            result["payment_state"]["bridge_url"],
+            "https://payments.example/bridge",
+        )
+
+    def test_successful_unconfirmed_payment_is_confirmed_once(self):
+        client = FakeInstamartClient(payment_status_payload={
+            "success": True,
+            "data": {
+                "paasId": "paas-1",
+                "orderId": "order-1",
+                "status": "SUCCESS",
+                "terminal": True,
+                "isTerminalSuccess": True,
+                "isTerminalFailure": False,
+                "confirmed": False,
+            },
+        })
+        review = {
+            "provider_order_ids": ["order-1"],
+            "payment_state": {"paas_id": "paas-1", "order_id": "order-1"},
+        }
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id="test-payment-confirm",
+        ):
+            result = asyncio.run(self.adapter(client).payment_status(review))
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["payment_state"]["confirmed"])
+        self.assertEqual(
+            [name for name, _args in client.calls],
+            ["check_payment_status", "confirm_order"],
+        )
+        self.assertEqual(client.calls[-1][1], {"orderId": "order-1", "paasId": "paas-1"})
+
+    def test_payment_confirmation_echoes_optional_transaction_id(self):
+        client = FakeInstamartClient(
+            payment_status_payload={
+                "success": True,
+                "data": {
+                    "status": "SUCCESS",
+                    "terminal": True,
+                    "isTerminalSuccess": True,
+                    "confirmed": False,
+                },
+            },
+        )
+        review = {
+            "provider_order_ids": ["order-1"],
+            "payment_state": {
+                "paas_id": "paas-1",
+                "order_id": "order-1",
+                "transaction_id": "txn-1",
+            },
+        }
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id="test-payment-confirm-transaction",
+        ):
+            result = asyncio.run(self.adapter(client).payment_status(review))
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(client.calls[-1][1], {
+            "orderId": "order-1",
+            "paasId": "paas-1",
+            "transactionId": "txn-1",
+        })
 
     def test_price_parser_rejects_display_text_with_multiple_amounts(self):
         adapter = self.adapter()

@@ -392,24 +392,25 @@ Example prompts:
    total. A complete line-price sum may be shown only as `Item subtotal`, never
    as the final payable total when adjustments are unknown.
 10. Returning later restores the provider/environment draft and automatically
-   loads read-only saved addresses without refreshing the provider cart. After
-   five minutes, Kitch marks the cart review stale and asks the user to refresh
-   explicitly before payment or ordering.
-11. Refresh rebuilds the exact reviewed Swiggy cart from its saved product IDs
-    and reads the live provider result directly. It does not repeat semantic
-    product selection or depend on an LLM. Any missing, unexpected, price,
+   loads read-only saved addresses. While Groceries is visible, a review at
+   least one minute old is quietly refreshed with read-only provider calls;
+   elapsed time alone does not disable payment selection.
+11. Automatic, explicit, and final pre-order refresh read the live Swiggy cart
+    and payment options without rewriting the cart or repeating semantic
+    product selection. Any missing, unexpected, price,
     quantity, or pack change resets approval.
 12. Replacements and other material changes are highlighted and reset payment
     and approval. Unresolved selected items are prominently listed as omitted;
     the confirmed partial cart can proceed after review.
-13. Kitch offers only fresh provider-returned payment methods. Instamart calls
-    `get_payment_options`, passes the selected UPI app/QR flow unchanged, or
-    offers explicit Cash only when UPI is absent.
+13. Kitch offers every enabled provider-returned payment method. Instamart
+    passes a selected UPI app/QR flow unchanged, retains COD alongside UPI when
+    returned, and uses `SwiggyPay` for Swiggy Money.
 14. The user acknowledges the exact provider, address, products, quantities,
     payable total, payment method, and any multi-store warning. Kitch then runs
     a final revalidation immediately before ordering.
 15. Pending, partial, or ambiguous order state survives reload. A timeout is
-    not blindly retried while duplicate-order risk remains.
+    not blindly retried while duplicate-order risk remains. Temporary UPI
+    handoff links are shown only for the immediate flow and are not persisted.
 
 For a combined explicit chat request, Kitch first applies the declared
 standalone native change and then invokes the same provider synchronization

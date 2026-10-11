@@ -46,8 +46,13 @@ MCP integrations.
 - Keep credentials and server-owned authority outside model-visible context.
   Backend middleware authorizes every MCP tool call and denies unknown or
   consequential mutations by default.
-- Never expose checkout, payment authorization, cancellation, account changes,
-  or address mutation to a provider cart agent. Checkout remains callable only
+- Expose safe provider-specific conversation tools—reversible cart changes,
+  coupons, and status/tracking—through a separate strict
+  allowlist on the dedicated provider agent. Kitch may retain a local state
+  tool where provider-returned choices must be validated before updating a
+  durable draft.
+- Never expose checkout, payment execution, cancellation, account changes,
+  or address creation/deletion to a provider agent. Checkout remains callable only
   by the backend after the user presses the final UI order button and all
   approval checks succeed.
 - Keep `GroceryCheckoutService` as the provider-neutral workflow owner. It

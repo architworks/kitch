@@ -459,6 +459,29 @@ async def get_provider_cart_tool(provider: str = "") -> Dict[str, Any]:
     provider_id=str(provider or "").strip(),
   )
 
+
+async def instamart_conversation_tool(user_request: str) -> Dict[str, Any]:
+  """Handle safe Instamart-specific chat without payment or checkout authority."""
+  from app.main import grocery_checkout_service
+
+  request = str(user_request or "").strip()
+  if not request:
+    return {"status": "error", "message": "An Instamart request is required."}
+  return await grocery_checkout_service.converse_with_instamart(request)
+
+
+async def configure_instamart_review_tool(
+  address: str = "",
+  payment_method: str = "",
+) -> Dict[str, Any]:
+  """Select a live Instamart address or payment method for later UI review only."""
+  from app.main import grocery_checkout_service
+
+  return await grocery_checkout_service.configure_instamart_review_by_query(
+    address_query=str(address or "").strip(),
+    payment_method_query=str(payment_method or "").strip(),
+  )
+
 async def sync_provider_cart_tool(
   user_request: str,
   provider: str = "",

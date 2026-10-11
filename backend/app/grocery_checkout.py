@@ -536,12 +536,196 @@ class GroceryCheckoutService:
                 message="No provider checkout draft exists.",
                 status_code=404,
             )
-        outcome = await adapter.payment_status(draft_row_to_review(row) or {})
+        operation_id = str(uuid4())
+        with commerce_request_context(
+            source="ui_place_order",
+            permissions={CommercePermission.READ, CommercePermission.CHECKOUT},
+            operation_id=operation_id,
+        ):
+            outcome = await adapter.payment_status(draft_row_to_review(row) or {})
         self._raise_result_error(provider_id, "payment_status", outcome)
         return {
             "status": outcome.get("status", "success"),
             "provider": provider_id,
             "review": save_order_outcome(row, outcome),
+        }
+
+    async def configure_instamart_review_from_chat(
+        self,
+        *,
+        selected_address_id: str = "",
+        selected_payment_method_id: str = "",
+    ) -> Dict[str, Any]:
+        """Persist safe review choices while keeping final approval in the UI."""
+        provider_id = "swiggy_instamart"
+        adapter = self.registry.get(provider_id)
+        environment = adapter.descriptor().environment
+        row = get_provider_checkout_draft(provider_id, environment)
+        if not row or not row.get("native_items"):
+            raise ProviderOperationError(
+                provider=provider_id,
+                operation="configure_review",
+                code="checkout_draft_missing",
+                message="Prepare an Instamart cart before changing its address or payment method.",
+                status_code=404,
+            )
+
+        review = draft_row_to_review(row) or {}
+        if selected_address_id:
+            addresses = await adapter.list_addresses()
+            valid_ids = {
+                str(value.get("id"))
+                for value in addresses.get("addresses") or []
+                if isinstance(value, dict) and value.get("id")
+            }
+            if selected_address_id not in valid_ids:
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="configure_review",
+                    code="provider_address_invalid",
+                    message="Select an address returned by the current Swiggy account.",
+                    status_code=422,
+                )
+            result = await self.sync(
+                provider_id,
+                {
+                    "cart_item_ids": review.get("selected_native_item_ids") or [],
+                    "selected_address_id": selected_address_id,
+                    "user_instruction": "Use the saved Swiggy address selected in chat.",
+                },
+                authority_source="chat_sync",
+            )
+            review = result.get("review") or {}
+
+        if selected_payment_method_id:
+            updated = self.update_draft(
+                provider_id,
+                {"selected_payment_method_id": selected_payment_method_id},
+            )
+            review = updated.get("draft") or review
+
+        if not selected_address_id and not selected_payment_method_id:
+            raise ProviderOperationError(
+                provider=provider_id,
+                operation="configure_review",
+                code="checkout_update_empty",
+                message="Choose an address or payment method to update.",
+                status_code=422,
+            )
+        return {
+            "status": "success",
+            "provider": provider_id,
+            "selected_address_id": review.get("selected_address_id"),
+            "selected_payment_method_id": review.get("selected_payment_method_id"),
+            "order_review_acknowledged": False,
+            "message": "The Instamart review choice was saved. Final review and ordering remain in Groceries.",
+            "review": review,
+        }
+
+    async def configure_instamart_review_by_query(
+        self,
+        *,
+        address_query: str = "",
+        payment_method_query: str = "",
+    ) -> Dict[str, Any]:
+        """Resolve text only against choices already returned for the current draft."""
+        provider_id = "swiggy_instamart"
+        adapter = self.registry.get(provider_id)
+        row = get_provider_checkout_draft(provider_id, adapter.descriptor().environment)
+        if not row or not row.get("native_items"):
+            raise ProviderOperationError(
+                provider=provider_id,
+                operation="configure_review",
+                code="checkout_draft_missing",
+                message="Prepare an Instamart cart before changing its address or payment method.",
+                status_code=404,
+            )
+
+        def resolve(
+            query: str,
+            values: List[Dict[str, Any]],
+            fields: tuple[str, ...],
+        ) -> str:
+            needle = " ".join(str(query or "").casefold().split())
+            if not needle:
+                return ""
+            exact: List[str] = []
+            partial: List[str] = []
+            for value in values:
+                if not isinstance(value, dict) or not value.get("id"):
+                    continue
+                texts = {
+                    " ".join(str(value.get(field) or "").casefold().split())
+                    for field in fields
+                    if value.get(field)
+                }
+                if needle in texts:
+                    exact.append(str(value["id"]))
+                elif any(needle in text or text in needle for text in texts):
+                    partial.append(str(value["id"]))
+            matches = list(dict.fromkeys(exact or partial))
+            if len(matches) != 1:
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="configure_review",
+                    code="provider_review_choice_ambiguous",
+                    message="Choose one address or payment method exactly as Instamart returned it.",
+                    status_code=422,
+                )
+            return matches[0]
+
+        selected_address_id = ""
+        if str(address_query or "").strip():
+            addresses = await adapter.list_addresses()
+            selected_address_id = resolve(
+                address_query,
+                list(addresses.get("addresses") or []),
+                ("id", "label", "address"),
+            )
+
+        selected_payment_method_id = ""
+        if str(payment_method_query or "").strip():
+            review = draft_row_to_review(row) or {}
+            selected_payment_method_id = resolve(
+                payment_method_query,
+                list(review.get("payment_options") or []),
+                ("id", "label", "provider_value"),
+            )
+
+        return await self.configure_instamart_review_from_chat(
+            selected_address_id=selected_address_id,
+            selected_payment_method_id=selected_payment_method_id,
+        )
+
+    async def converse_with_instamart(self, user_request: str) -> Dict[str, Any]:
+        """Delegate provider-specific, non-checkout chat to the Instamart agent."""
+        provider_id = "swiggy_instamart"
+        adapter = self.registry.get(provider_id)
+        outcome = await self.instamart_agent.converse(
+            adapter=adapter,
+            user_request=user_request,
+        )
+        mutation_tools = {"update_cart", "clear_cart", "apply_coupon"}
+        mutated = bool(mutation_tools.intersection(outcome.capture.tool_results))
+        review = None
+        if mutated:
+            row = get_provider_checkout_draft(
+                provider_id,
+                adapter.descriptor().environment,
+            )
+            if row and row.get("native_items"):
+                try:
+                    refreshed = await self.revalidate(provider_id)
+                    review = refreshed.get("draft")
+                except ProviderOperationError as exc:
+                    review = exc.draft
+        return {
+            "status": "success",
+            "provider": provider_id,
+            "message": outcome.final_text or "Instamart completed the requested operation.",
+            "provider_cart_changed": mutated,
+            "review": review,
+            "ui_action": "UPDATE_PROVIDER_CART" if mutated or review else None,
         }
 
     async def sync_from_chat(
