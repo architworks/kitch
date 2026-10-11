@@ -4022,10 +4022,10 @@ export default function Home() {
                           {recipeCalories && <span><b aria-hidden="true">▥</b>{recipeCalories} kcal</span>}
                           <span><b aria-hidden="true">♙</b>Serves {recipeServings}</span>
                         </div>
-                        <div className="recipe-action-row">
+                        <div className="hero-actions recipe-action-row">
                           <button
                             type="button"
-                            className="recipe-primary-btn"
+                            className="primary-action"
                             onClick={() => {
                               setChatInput(`Swap ${activeRecipeTitle} with another suitable meal`);
                               setSmartDockExpanded(false);

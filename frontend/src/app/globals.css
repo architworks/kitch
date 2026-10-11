@@ -186,7 +186,7 @@ button {
   padding: clamp(28px, 4vw, 64px);
   background:
     linear-gradient(90deg, rgba(255, 252, 248, 0.12), rgba(255, 252, 248, 0.02)),
-    url("/login-background.png") center center / cover no-repeat;
+    url("/login-background-v3.png") center center / cover no-repeat;
 }
 
 .kitch-login-layout {
@@ -464,23 +464,291 @@ button {
 .household-member-editor-list button { padding: 0 18px; border: 1px solid var(--sage); border-radius: 12px; background: var(--sage-deep); color: white; font-weight: 800; }
 .household-member-editor-list button:disabled { opacity: .45; cursor: not-allowed; }
 
-@media (max-width: 1160px) {
+@media (min-width: 901px) and (max-width: 1500px), (min-width: 901px) and (max-height: 900px) {
   .kitch-login-shell {
-    padding: 30px;
+    height: 100dvh;
+    min-height: 0;
+    padding: clamp(14px, 2vw, 28px);
+    overflow: hidden;
+    background-position: center top;
   }
 
   .kitch-login-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 410px);
-    gap: 30px;
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    gap: clamp(18px, 2.2vw, 34px);
+  }
+
+  .kitch-login-story {
+    align-self: start;
+    padding: 0;
+  }
+
+  .kitch-login-brand {
+    gap: 9px;
+  }
+
+  .kitch-login-brand img {
+    width: 44px;
+    height: 44px;
+  }
+
+  .kitch-login-brand strong {
+    font-size: clamp(29px, 2.7vw, 37px);
+  }
+
+  .kitch-login-copy {
+    margin-top: clamp(8px, 1.4vh, 14px);
   }
 
   .kitch-login-copy h1 {
-    font-size: clamp(42px, 5vw, 58px);
+    font-size: clamp(36px, 3.7vw, 52px);
+    line-height: 1;
+  }
+
+  .kitch-login-copy > p {
+    max-width: 680px;
+    margin-top: 10px;
+    font-size: clamp(14px, 1.25vw, 17px);
+    line-height: 1.35;
+  }
+
+  .kitch-login-flow {
+    margin-top: clamp(8px, 1.2vh, 12px);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .kitch-login-flow-arrow {
+    display: none;
+  }
+
+  .kitch-login-flow-card {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .kitch-login-flow-card .about-icon-badge {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .kitch-login-flow-card .about-icon-badge svg {
+    width: 25px;
+    height: 25px;
+  }
+
+  .kitch-login-flow-card h2 {
+    font-size: 12px;
+  }
+
+  .kitch-login-flow-card p {
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.32;
+  }
+
+  .kitch-login-provider-logos {
+    gap: 6px;
+    margin-top: 7px;
+  }
+
+  .kitch-login-provider-logos > span {
+    min-width: 30px;
+    gap: 2px;
+  }
+
+  .kitch-login-provider-logos img {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .kitch-login-provider-logos small {
+    font-size: 7px;
+  }
+
+  .kitch-sign-in-card {
+    max-height: 100%;
+    padding: clamp(20px, 2.3vw, 30px) clamp(20px, 2.5vw, 32px);
+    border-radius: 24px;
+  }
+
+  .kitch-sign-in-logo {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 12px;
+  }
+
+  .kitch-sign-in-card h2 {
+    font-size: clamp(30px, 3vw, 40px);
+    line-height: 1.04;
+  }
+
+  .kitch-sign-in-card > p:not(.household-onboarding-error) {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.38;
+  }
+
+  .google-sign-in-button {
+    min-height: 40px;
+    margin-top: 14px;
+  }
+
+  .kitch-sign-in-card .household-onboarding-error {
+    margin-top: 8px;
+    font-size: 11px;
+  }
+
+  .kitch-sign-in-divider {
+    margin: 16px 0 14px;
+  }
+
+  .kitch-sign-in-benefits {
+    gap: 10px;
+  }
+
+  .kitch-sign-in-benefits article {
+    gap: 10px;
+  }
+
+  .kitch-sign-in-benefits .about-icon-badge {
+    width: 38px;
+    height: 38px;
+  }
+
+  .kitch-sign-in-benefits .about-icon-badge svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .kitch-sign-in-benefits h3 {
+    font-size: 12px;
+  }
+
+  .kitch-sign-in-benefits p {
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+}
+
+@media (max-width: 1160px) {
+  .kitch-login-shell {
+    padding: clamp(16px, 2.4vw, 24px);
+  }
+
+  .kitch-login-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+    gap: 24px;
+  }
+
+  .kitch-login-copy h1 {
+    font-size: clamp(36px, 4.5vw, 48px);
   }
 
   .kitch-login-flow-card {
     display: grid;
-    padding: 13px;
+    padding: 9px;
+  }
+}
+
+@media (min-width: 901px) and (max-height: 700px) {
+  .kitch-login-shell {
+    padding: 10px 16px;
+  }
+
+  .kitch-login-brand img {
+    width: 36px;
+    height: 36px;
+  }
+
+  .kitch-login-brand strong {
+    font-size: 29px;
+  }
+
+  .kitch-login-copy {
+    margin-top: 6px;
+  }
+
+  .kitch-login-copy h1 {
+    font-size: clamp(32px, 3.4vw, 44px);
+  }
+
+  .kitch-login-copy > p {
+    margin-top: 7px;
+    font-size: 13px;
+  }
+
+  .kitch-login-flow {
+    margin-top: 7px;
+  }
+
+  .kitch-login-flow-card {
+    padding: 8px;
+  }
+
+  .kitch-login-flow-card .about-icon-badge {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+  }
+
+  .kitch-login-flow-card .about-icon-badge svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .kitch-login-provider-logos img {
+    width: 26px;
+    height: 26px;
+  }
+
+  .kitch-sign-in-card {
+    padding: 16px 22px;
+  }
+
+  .kitch-sign-in-logo {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 7px;
+  }
+
+  .kitch-sign-in-card h2 {
+    font-size: 28px;
+  }
+
+  .kitch-sign-in-card > p:not(.household-onboarding-error) {
+    margin-top: 7px;
+    font-size: 11px;
+  }
+
+  .google-sign-in-button {
+    min-height: 36px;
+    margin-top: 10px;
+  }
+
+  .kitch-sign-in-divider {
+    margin: 10px 0;
+  }
+
+  .kitch-sign-in-benefits {
+    gap: 7px;
+  }
+
+  .kitch-sign-in-benefits .about-icon-badge {
+    width: 32px;
+    height: 32px;
+  }
+
+  .kitch-sign-in-benefits .about-icon-badge svg {
+    width: 22px;
+    height: 22px;
   }
 }
 
@@ -6176,8 +6444,7 @@ button {
   font-weight: 600;
 }
 
-.recipe-stat-row,
-.recipe-action-row {
+.recipe-stat-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -6204,31 +6471,20 @@ button {
 
 .recipe-action-row {
   margin-top: 28px;
+  flex-wrap: nowrap;
 }
 
 .recipe-action-row button {
-  min-height: 44px;
-  padding: 0 17px;
-  color: var(--ink-soft);
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(115, 121, 111, 0.18);
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 900;
-  transition: var(--transition-smooth);
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.recipe-action-row button:hover {
-  transform: translateY(-1px);
-  border-color: rgba(74, 103, 65, 0.3);
-  box-shadow: 0 12px 24px rgba(52, 44, 36, 0.08);
-}
-
-.recipe-action-row .recipe-primary-btn {
-  color: #fff;
-  background: linear-gradient(145deg, var(--sage), var(--sage-deep));
-  border-color: transparent;
+.recipe-action-row button:last-child {
+  display: grid;
+  flex-basis: 42px;
+  width: 42px;
+  padding: 0;
+  place-items: center;
 }
 
 .recipe-hero-visual {
