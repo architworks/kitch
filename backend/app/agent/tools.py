@@ -34,6 +34,7 @@ from app.storage import (
     delete_recipe_grocery_plan as db_delete_recipe_grocery_plan,
 )
 from app.providers.registry import provider_registry
+from app.providers.base import ProviderOperationError
 from app.agent.memory import search_household_memory_tool
 
 # --- Safety Parsing Helper ---
@@ -446,6 +447,11 @@ def list_grocery_providers_tool() -> Dict[str, Any]:
   return {"status": "success", "providers": provider_registry.descriptors()}
 
 
+def _provider_operation_error_result(error: ProviderOperationError) -> Dict[str, Any]:
+  """Return expected provider failures to the agent instead of crashing chat."""
+  return {"status": "error", **error.public_detail()}
+
+
 async def get_provider_cart_tool(provider: str = "") -> Dict[str, Any]:
   """
   Read the current ordering-app cart without changing it. The provider is
@@ -455,9 +461,12 @@ async def get_provider_cart_tool(provider: str = "") -> Dict[str, Any]:
   """
   from app.main import grocery_checkout_service
 
-  return await grocery_checkout_service.read_cart_from_chat(
-    provider_id=str(provider or "").strip(),
-  )
+  try:
+    return await grocery_checkout_service.read_cart_from_chat(
+      provider_id=str(provider or "").strip(),
+    )
+  except ProviderOperationError as error:
+    return _provider_operation_error_result(error)
 
 
 async def instamart_conversation_tool(user_request: str) -> Dict[str, Any]:
@@ -467,7 +476,10 @@ async def instamart_conversation_tool(user_request: str) -> Dict[str, Any]:
   request = str(user_request or "").strip()
   if not request:
     return {"status": "error", "message": "An Instamart request is required."}
-  return await grocery_checkout_service.converse_with_instamart(request)
+  try:
+    return await grocery_checkout_service.converse_with_instamart(request)
+  except ProviderOperationError as error:
+    return _provider_operation_error_result(error)
 
 
 async def configure_instamart_review_tool(
@@ -477,10 +489,13 @@ async def configure_instamart_review_tool(
   """Select a live Instamart address or payment method for later UI review only."""
   from app.main import grocery_checkout_service
 
-  return await grocery_checkout_service.configure_instamart_review_by_query(
-    address_query=str(address or "").strip(),
-    payment_method_query=str(payment_method or "").strip(),
-  )
+  try:
+    return await grocery_checkout_service.configure_instamart_review_by_query(
+      address_query=str(address or "").strip(),
+      payment_method_query=str(payment_method or "").strip(),
+    )
+  except ProviderOperationError as error:
+    return _provider_operation_error_result(error)
 
 async def sync_provider_cart_tool(
   user_request: str,
@@ -523,13 +538,21 @@ async def sync_provider_cart_tool(
         "available only from the reviewed Groceries UI. No cart was changed."
       ),
     }
-  result = await grocery_checkout_service.sync_from_chat(
-    provider_id=str(provider or "").strip(),
-    cart_item_ids=[str(value) for value in (cart_item_ids or [])],
-    selected_address_id=str(selected_address_id or ""),
-    user_instruction=request,
-    native_cart_changes=native_cart_changes or [],
-  )
+  try:
+    result = await grocery_checkout_service.sync_from_chat(
+      provider_id=str(provider or "").strip(),
+      cart_item_ids=[str(value) for value in (cart_item_ids or [])],
+      selected_address_id=str(selected_address_id or ""),
+      user_instruction=request,
+      native_cart_changes=native_cart_changes or [],
+    )
+  except ProviderOperationError as error:
+    return {
+      **_provider_operation_error_result(error),
+      "native_cart_changed": False,
+      "provider_cart_changed": False,
+      "ui_action": None,
+    }
   review = result.get("review") or {}
   provider_cart_changed = bool(review) and result.get("status") != "error"
   return {

@@ -19,6 +19,7 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 
 from app.agent import tools  # noqa: E402
+from app.providers.base import ProviderOperationError  # noqa: E402
 
 
 class NativeGroceryCartMutationTests(unittest.TestCase):
@@ -136,6 +137,26 @@ class ProviderChatSyncToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["provider"], "swiggy_instamart")
         self.assertEqual(result["cart_summary"]["total"]["display"], "₹120.00")
+
+    async def test_disconnected_provider_is_a_tool_result_not_a_chat_exception(self):
+        service = AsyncMock()
+        service.read_cart_from_chat.side_effect = ProviderOperationError(
+            provider="swiggy_instamart",
+            operation="read_cart",
+            code="provider_not_connected",
+            message="Connect a household Swiggy account to use Instamart.",
+            status_code=401,
+        )
+        fake_main = ModuleType("app.main")
+        fake_main.grocery_checkout_service = service
+
+        with patch.dict(sys.modules, {"app.main": fake_main}):
+            result = await tools.get_provider_cart_tool("Instamart")
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "provider_not_connected")
+        self.assertEqual(result["provider"], "swiggy_instamart")
+        self.assertIn("Connect a household Swiggy account", result["message"])
 
     async def test_combined_request_mutates_native_cart_before_existing_sync_path(self):
         service = AsyncMock()
