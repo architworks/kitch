@@ -60,6 +60,8 @@ INSTAMART_CONVERSATION_MCP_TOOLS = [
     "check_payment_status",
 ]
 
+INSTAMART_CONVERSATION_MAX_TOOL_CALLS = 50
+
 
 def _before_instamart_tool(
     tool: Any,
@@ -69,7 +71,7 @@ def _before_instamart_tool(
     capture: CommerceRunCapture,
     selected_address_id: str,
 ) -> None:
-    """Apply server-owned cart authority before an ADK tool invocation."""
+    """Validate the selected address and capture an ADK tool invocation."""
     del tool_context
     CommerceToolPolicy.authorize(tool.name)
     capture.record_tool_arguments(tool.name, to_plain(args or {}))
@@ -107,26 +109,6 @@ def _after_instamart_tool(
     return None
 
 
-def _explicit_conversation_mutation(tool_name: str, user_request: str) -> bool:
-    request = " ".join(str(user_request or "").casefold().split())
-    if tool_name == "clear_cart":
-        return (
-            "cart" in request
-            and any(term in request for term in ("instamart", "swiggy"))
-            and any(term in request for term in ("clear", "empty"))
-        )
-    if tool_name == "apply_coupon":
-        return "coupon" in request and any(
-            term in request for term in ("apply", "use", "add")
-        )
-    if tool_name == "update_cart":
-        return (
-            any(term in request for term in ("instamart", "swiggy", "provider cart"))
-            and any(term in request for term in ("add", "remove", "change", "update", "set", "move", "sync"))
-        )
-    return True
-
-
 def _before_instamart_conversation_tool(
     tool: Any,
     args: Dict[str, Any],
@@ -138,21 +120,10 @@ def _before_instamart_conversation_tool(
     CommerceToolPolicy.authorize(tool.name)
     capture.record_tool_arguments(tool.name, to_plain(args or {}))
     total_calls = sum(len(values) for values in capture.tool_arguments.values())
-    if total_calls > 12:
+    if total_calls > INSTAMART_CONVERSATION_MAX_TOOL_CALLS:
         raise CommercePolicyError(
             tool.name,
             "The conversational Instamart agent exceeded its bounded tool-call budget.",
-        )
-    if tool.name in {"update_cart", "apply_coupon", "clear_cart"}:
-        if not _explicit_conversation_mutation(tool.name, capture.user_instruction):
-            raise CommercePolicyError(
-                tool.name,
-                f"{tool.name} requires an explicit user request for that Instamart change.",
-            )
-    if tool.name == "update_cart" and len(capture.tool_arguments[tool.name]) > 1:
-        raise CommercePolicyError(
-            tool.name,
-            "A conversational Instamart request may update the provider cart only once.",
         )
     return None
 
@@ -332,7 +303,7 @@ class InstamartCartAgentService:
         try:
             with commerce_request_context(
                 source=source,
-                permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+                permissions={CommercePermission.READ},
                 operation_id=run_id,
                 capture=capture,
             ):
@@ -448,7 +419,7 @@ class InstamartCartAgentService:
         try:
             with commerce_request_context(
                 source="chat_instamart",
-                permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+                permissions={CommercePermission.READ},
                 operation_id=run_id,
                 capture=capture,
             ):

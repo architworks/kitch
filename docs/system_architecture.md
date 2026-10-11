@@ -451,9 +451,8 @@ Architectural invariants:
   tool resolves address or payment text only against options already returned
   for the current draft. Neither mode receives
   `checkout` or `confirm_order`.
-- `CommerceToolPolicy` uses server-owned request authority. Cart writes are
-  allowed only for explicit UI/chat sync, refresh, or order preflight.
-  Checkout is independently allowed only for the UI place-order endpoint.
+- `CommerceToolPolicy` allowlists provider tools. Checkout is independently
+  allowed only for the UI place-order endpoint.
 - Exact MCP update/read results are captured after tool calls. Durable cart and
   bill state never comes from the model's textual reconstruction.
 - Instamart accepts only enabled payment methods returned by the fresh provider

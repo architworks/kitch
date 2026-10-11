@@ -11,7 +11,6 @@ from typing import Any, Dict, Iterator, Set
 
 class CommercePermission(StrEnum):
     READ = "read"
-    CART_WRITE = "cart_write"
     CHECKOUT = "checkout"
 
 
@@ -66,7 +65,7 @@ class CommercePolicyError(PermissionError):
 class CommerceToolPolicy:
     """Fail-closed policy shared by agentic and direct MCP execution."""
 
-    READ_TOOLS: Set[str] = {
+    NON_CHECKOUT_TOOLS: Set[str] = {
         "get_addresses",
         "search_products",
         "your_go_to_items",
@@ -78,8 +77,10 @@ class CommerceToolPolicy:
         "track_order",
         "get_delivery_status",
         "check_payment_status",
+        "update_cart",
+        "apply_coupon",
+        "clear_cart",
     }
-    CART_WRITE_TOOLS: Set[str] = {"update_cart", "apply_coupon", "clear_cart"}
     CHECKOUT_TOOLS: Set[str] = {"checkout", "confirm_order"}
     AGENT_LOCAL_TOOLS: Set[str] = {
         "read_scoped_native_cart_tool",
@@ -96,14 +97,8 @@ class CommerceToolPolicy:
             if authority is None:
                 raise CommercePolicyError(name, "Commerce request authority is missing.")
             return
-        if name in cls.READ_TOOLS:
-            # Provider reads are safe for readiness/address/status paths even
-            # when they are not part of an agent operation.
+        if name in cls.NON_CHECKOUT_TOOLS:
             return
-        if name in cls.CART_WRITE_TOOLS:
-            if authority and CommercePermission.CART_WRITE in authority.permissions:
-                return
-            raise CommercePolicyError(name, "Provider cart mutation is not authorized for this request.")
         if name in cls.CHECKOUT_TOOLS:
             if (
                 authority

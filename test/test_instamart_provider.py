@@ -343,7 +343,7 @@ class InstamartProviderTests(unittest.TestCase):
 
         with commerce_request_context(
             source="test_revalidation",
-            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            permissions={CommercePermission.READ},
             operation_id="revalidate-1",
         ):
             result = asyncio.run(self.adapter(client).revalidate_cart(draft))
@@ -375,7 +375,7 @@ class InstamartProviderTests(unittest.TestCase):
 
         with commerce_request_context(
             source="test_revalidation",
-            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            permissions={CommercePermission.READ},
             operation_id="revalidate-2",
         ):
             result = asyncio.run(self.adapter(client).revalidate_cart(draft))

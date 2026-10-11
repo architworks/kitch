@@ -13,10 +13,11 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.agent.instamart_cart_agent import (  # noqa: E402
     INSTAMART_AGENT_MCP_TOOLS,
+    INSTAMART_CONVERSATION_MAX_TOOL_CALLS,
     INSTAMART_CONVERSATION_MCP_TOOLS,
     _after_instamart_tool,
+    _before_instamart_conversation_tool,
     _before_instamart_tool,
-    _explicit_conversation_mutation,
 )
 from app.commerce_policy import (  # noqa: E402
     CommercePermission,
@@ -46,27 +47,57 @@ class CommerceToolPolicyTests(unittest.TestCase):
         self.assertNotIn("checkout", INSTAMART_CONVERSATION_MCP_TOOLS)
         self.assertNotIn("confirm_order", INSTAMART_CONVERSATION_MCP_TOOLS)
 
-    def test_conversation_cart_mutations_require_explicit_natural_language(self):
-        self.assertTrue(
-            _explicit_conversation_mutation(
-                "clear_cart", "Please clear my Swiggy Instamart cart."
-            )
+    def test_conversation_allows_multiple_cart_updates(self):
+        capture = CommerceRunCapture(
+            user_instruction="Remove rice from my Swiggy Instamart cart."
         )
-        self.assertFalse(
-            _explicit_conversation_mutation(
-                "clear_cart", "What is currently in my Swiggy Instamart cart?"
+        tool = SimpleNamespace(name="update_cart")
+        with commerce_request_context(
+            source="chat_instamart",
+            permissions={CommercePermission.READ},
+            operation_id="multiple-cart-updates",
+            capture=capture,
+        ):
+            _before_instamart_conversation_tool(
+                tool=tool,
+                args={"items": []},
+                tool_context=object(),
+                capture=capture,
             )
-        )
-        self.assertTrue(
-            _explicit_conversation_mutation(
-                "apply_coupon", "Apply the best available coupon."
+            _before_instamart_conversation_tool(
+                tool=tool,
+                args={"items": []},
+                tool_context=object(),
+                capture=capture,
             )
+
+        self.assertEqual(len(capture.tool_arguments["update_cart"]), 2)
+
+    def test_conversation_tool_call_limit_is_fifty(self):
+        capture = CommerceRunCapture(
+            user_instruction="Show my Swiggy Instamart cart.",
+            tool_arguments={"get_cart": [{}] * (INSTAMART_CONVERSATION_MAX_TOOL_CALLS - 1)},
         )
-        self.assertFalse(
-            _explicit_conversation_mutation(
-                "apply_coupon", "Which coupons are available?"
+        tool = SimpleNamespace(name="get_cart")
+        with commerce_request_context(
+            source="chat_instamart",
+            permissions={CommercePermission.READ},
+            operation_id="tool-call-limit",
+            capture=capture,
+        ):
+            _before_instamart_conversation_tool(
+                tool=tool,
+                args={},
+                tool_context=object(),
+                capture=capture,
             )
-        )
+            with self.assertRaises(CommercePolicyError):
+                _before_instamart_conversation_tool(
+                    tool=tool,
+                    args={},
+                    tool_context=object(),
+                    capture=capture,
+                )
 
 
     def test_reads_are_allowed_and_unknown_tools_fail_closed(self):
@@ -74,10 +105,9 @@ class CommerceToolPolicyTests(unittest.TestCase):
         with self.assertRaises(CommercePolicyError):
             CommerceToolPolicy.authorize("new_mutating_provider_tool")
 
-    def test_cart_write_requires_server_owned_cart_authority(self):
+    def test_allowlisted_cart_operations_do_not_require_request_authority(self):
         for tool_name in ("update_cart", "clear_cart", "apply_coupon"):
-            with self.assertRaises(CommercePolicyError):
-                CommerceToolPolicy.authorize(tool_name)
+            CommerceToolPolicy.authorize(tool_name)
 
     def test_instamart_memory_tools_require_commerce_run_authority(self):
         for tool_name in (
@@ -88,16 +118,10 @@ class CommerceToolPolicyTests(unittest.TestCase):
                 CommerceToolPolicy.authorize(tool_name)
             with commerce_request_context(
                 source="ui_sync",
-                permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+                permissions={CommercePermission.READ},
                 operation_id=f"{tool_name}-1",
             ):
                 CommerceToolPolicy.authorize(tool_name)
-        with commerce_request_context(
-            source="chat_sync",
-            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
-            operation_id="chat-1",
-        ):
-            CommerceToolPolicy.authorize("update_cart")
 
     def test_checkout_is_rejected_from_chat_and_cart_agent(self):
         for source in ("chat_sync", "ui_sync", "ui_order_preflight"):
@@ -105,7 +129,6 @@ class CommerceToolPolicyTests(unittest.TestCase):
                 source=source,
                 permissions={
                     CommercePermission.READ,
-                    CommercePermission.CART_WRITE,
                     CommercePermission.CHECKOUT,
                 },
                 operation_id=source,
@@ -126,7 +149,7 @@ class CommerceToolPolicyTests(unittest.TestCase):
         tool = SimpleNamespace(name="search_products")
         with commerce_request_context(
             source="ui_sync",
-            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            permissions={CommercePermission.READ},
             operation_id="sync-1",
             capture=capture,
         ):

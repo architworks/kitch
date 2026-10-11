@@ -805,7 +805,7 @@ class GroceryCheckoutService:
         del provider_id
         with commerce_request_context(
             source=source,
-            permissions={CommercePermission.READ, CommercePermission.CART_WRITE},
+            permissions={CommercePermission.READ},
             operation_id=operation_id,
         ):
             refreshed = await adapter.revalidate_cart(review)

@@ -138,7 +138,7 @@ Kitch's only local review-state tool resolves user-facing text against choices
 already returned for the current draft, then validates and persists the choice.
 Checkout and confirmation are never present in the conversational toolset.
 
-`CommerceToolPolicy` carries server-owned `read`, `cart_write`, or `checkout` authority. Cart mutation is reversible. Checkout is excluded from agent toolsets and permitted only in the UI Place Order endpoint after durable draft, lease, snapshot, address, payment, revalidation, and acknowledgement checks.
+`CommerceToolPolicy` allowlists the provider tools available to Kitch and keeps checkout under separate server-owned authority. Cart mutation is reversible. Checkout is excluded from agent toolsets and permitted only in the UI Place Order endpoint after durable draft, lease, snapshot, address, payment, revalidation, and acknowledgement checks.
 
 ## Tool execution and failure handling
 
