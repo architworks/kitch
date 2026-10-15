@@ -50,6 +50,9 @@ import {
   INITIAL_CHAT
 } from "./lib/helpers.js";
 
+const SESSION_REQUEST_TIMEOUT_MS = 90_000;
+const STARTUP_WAKE_WINDOW_MS = 150_000;
+
 // The household controller: every piece of state, request, and derived value the
 // views render. Moved from the previous single-file page with behaviour intact.
 export function useKitch() {
@@ -88,6 +91,8 @@ export function useKitch() {
   const [onboardingError, setOnboardingError] = useState("");
   const [authState, setAuthState] = useState({ loading: true, required: false, authenticated: false, email: "" });
   const [authError, setAuthError] = useState("");
+  const [startupState, setStartupState] = useState({ attempts: 0, retrying: false, failed: false, message: "" });
+  const startupRunRef = useRef(0);
   const [timeGreeting, setTimeGreeting] = useState("Welcome");
   const googleButtonRef = useRef(null);
   const [memberEditorOpen, setMemberEditorOpen] = useState(false);
@@ -434,7 +439,12 @@ export function useKitch() {
   }, []);
 
   const loadAuthSession = useCallback(async () => {
-    const response = await apiFetch(apiUrl("/api/auth/session"), { credentials: "include" });
+    // A hosted backend that has been idle cold-starts on this request, which
+    // can take far longer than an ordinary call.
+    const response = await apiFetch(apiUrl("/api/auth/session"), {
+      credentials: "include",
+      timeoutMs: SESSION_REQUEST_TIMEOUT_MS
+    });
     await requireSuccessfulResponse(response);
     const session = await response.json();
     setAuthState({
@@ -452,15 +462,45 @@ export function useKitch() {
     return session;
   }, [applyBootstrappedHousehold]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      loadAuthSession().catch(error => {
-        setAuthError(apiErrorMessage(error, "Kitch could not verify your sign-in."));
-        setAuthState({ loading: false, required: true, authenticated: false, email: "" });
-      });
-    }, 0);
-    return () => window.clearTimeout(timer);
+  // Keep retrying while the backend wakes: network failures, timeouts and 5xx
+  // responses are transient during a cold start. Only after the wake window
+  // closes does the splash offer a manual retry; it never drops the visitor on
+  // the sign-in page with a misleading error.
+  const startSession = useCallback(async () => {
+    const runId = startupRunRef.current + 1;
+    startupRunRef.current = runId;
+    setStartupState({ attempts: 0, retrying: false, failed: false, message: "" });
+    setAuthState(current => ({ ...current, loading: true }));
+    const deadline = Date.now() + STARTUP_WAKE_WINDOW_MS;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await loadAuthSession();
+        return;
+      } catch (error) {
+        if (startupRunRef.current !== runId) return;
+        const transient = error?.name === "AbortError"
+          || !(error instanceof ApiResponseError)
+          || error.status >= 500;
+        if (!transient || Date.now() >= deadline) {
+          setStartupState({
+            attempts: attempt,
+            retrying: false,
+            failed: true,
+            message: apiErrorMessage(error, "Kitch could not be reached.")
+          });
+          return;
+        }
+        setStartupState({ attempts: attempt, retrying: true, failed: false, message: "" });
+        await new Promise(resolve => window.setTimeout(resolve, Math.min(8000, 1500 * attempt)));
+        if (startupRunRef.current !== runId) return;
+      }
+    }
   }, [loadAuthSession]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { startSession(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [startSession]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setTimeGreeting(getTimeBasedGreeting()), 0);
@@ -2215,6 +2255,8 @@ export function useKitch() {
   };
 
   return {
+    startupState,
+    startSession,
     notices,
     dismissNotice,
     noticeIdRef,

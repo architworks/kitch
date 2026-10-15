@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Script from "next/script";
 import Icon from "./Icon.js";
 import Art, { HERO_FALLBACK } from "./Art.js";
@@ -9,11 +10,52 @@ function Mark({ size = 40 }) {
   return <img src="/kitch-chef-hat.svg" alt="" width={size} height={size} />;
 }
 
-export function SplashScreen() {
+// The first screen after a quiet spell on Vercel: the backend may need most of
+// a minute to wake. Copy follows real elapsed time and real retries; nothing
+// pretends to be progress it isn't.
+export function SplashScreen({ startup, onRetry }) {
+  const [elapsed, setElapsed] = useState(0);
+  const failed = Boolean(startup?.failed);
+
+  useEffect(() => {
+    if (failed) return undefined;
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [failed, startup?.attempts]);
+
+  const waking = elapsed >= 3 || startup?.retrying;
+  const title = failed ? "Kitch couldn’t wake up" : waking ? "Warming up the kitchen" : "Opening your kitchen";
+  const body = failed
+    ? "The kitchen server didn’t answer. Your plans, pantry and lists are safe; nothing changed."
+    : startup?.retrying
+      ? "The server isn’t answering yet. Kitch keeps trying on its own."
+      : elapsed >= 20
+        ? "Still lighting the stove. Thanks for waiting; it’s nearly there."
+        : waking
+          ? "Kitch has been resting, so the first visit after a quiet spell takes a little longer. Usually under a minute."
+          : "";
+
   return (
-    <main className="splash" aria-busy="true">
-      <Mark size={52} />
-      <p>Opening your kitchen…</p>
+    <main className={`warmup ${failed ? "failed" : ""} ${waking ? "waking" : ""}`} aria-busy={!failed}>
+      <div className="brand on-dark warmup-brand"><Mark size={30} /><span>Kitch</span></div>
+      <div className="warmup-center">
+        <div className="warmup-stove" aria-hidden="true">
+          <span className="warmup-glow" />
+          {!failed && <span className="steam"><i /><i /><i /></span>}
+          <Art className="warmup-kadai" src="/art/spot-recipe.png" alt="" />
+        </div>
+        <h1>{title}</h1>
+        <p className="warmup-body" aria-live="polite">{body}</p>
+        {failed ? (
+          <div className="warmup-actions">
+            <button type="button" className="btn hero-primary" onClick={onRetry}>Try again</button>
+            {startup?.message && <p className="warmup-detail">{startup.message}</p>}
+          </div>
+        ) : waking && (
+          <p className="warmup-time"><span className="warmup-dot" />Waking for {elapsed}s</p>
+        )}
+      </div>
     </main>
   );
 }
@@ -32,7 +74,7 @@ export function SignInScreen({ k }) {
       <Art className="signin-art" src="/art/signin.png" fallback={HERO_FALLBACK} alt="" />
       <section className="signin-panel" aria-labelledby="signin-title">
         <div className="brand on-dark"><Mark size={34} /><span>Kitch</span></div>
-        <h1 id="signin-title">Your household kitchen, planned together.</h1>
+        <h1 id="signin-title"><span>Your household kitchen,</span> <span>planned together</span></h1>
         <p className="signin-lede">Kitch plans meals, writes recipes from what you have, prepares grocery carts, and keeps each person’s nutrition log. Nothing is ordered until you approve it.</p>
         <ul className="signin-points">
           {SIGN_IN_POINTS.map(point => (
@@ -46,6 +88,7 @@ export function SignInScreen({ k }) {
           <div ref={googleButtonRef} className="google-button" />
           {!clientId && <p className="form-error">Google Sign-In is not configured for this deployment.</p>}
           {authError && <p className="form-error" role="alert">{authError}</p>}
+          <p className="signin-owner"><Icon name="household" size="sm" />One Google account owns the household. Everyone else is a member you switch to inside Kitch, so they don’t need to sign in.</p>
         </div>
       </section>
     </main>

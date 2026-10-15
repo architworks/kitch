@@ -195,6 +195,9 @@ Seven equal day tiles, each showing the weekday, the date numeral in the display
 ### Change receipt (signature)
 A sage-outlined strip under an agent reply, made of an icon, a sentence ("Shopping list updated") and one link ("Open list"). It is driven only by the backend's returned action, never by the reply's prose.
 
+### Warm-up screen (signature)
+The cold-start screen sits on an olive ground with a warm radial stove glow. The kadai illustration has three blurred steam strands rising above it, and that steam is the only loading indicator. The copy follows real elapsed time and real retries: "Opening your kitchen" first, an explanation after 3 seconds, reassurance after 20 seconds, and an honest failure with "Try again". It never shows a fake progress bar or step list. Under reduced motion the steam holds still.
+
 ### Checkout steps
 A numbered vertical stepper (1–6) with a connecting rail. Pending markers are sage; completed markers are filled green; locked steps are outlined and paper-coloured and show a lock note saying what unlocks them. "Place order" is the only large primary button on the page and sits after a dashed divider.
 

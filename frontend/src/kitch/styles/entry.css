@@ -1,23 +1,61 @@
 /* Splash, sign-in, onboarding, about, dialogs */
 
-.splash { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--ink-2); font-weight: 600; }
-.splash img { animation: breathe 1.6s ease-in-out infinite; }
-@keyframes breathe { 50% { transform: scale(0.94); opacity: 0.75; } }
+/* Warm-up (cold start) */
+.warmup {
+  position: relative; min-height: 100dvh; display: grid; place-items: center; padding: 24px;
+  background: radial-gradient(700px 520px at 50% 46%, #565a37 0%, var(--olive) 62%, #34371f 100%);
+  color: var(--on-olive); text-align: center; overflow: hidden;
+}
+.warmup-brand { position: absolute; top: 28px; left: 32px; font-size: 22px; }
+.warmup-center { display: grid; justify-items: center; gap: 10px; max-width: 520px; }
+.warmup-stove { position: relative; width: 220px; height: 220px; display: grid; place-items: center; margin-bottom: 6px; }
+.warmup-kadai { position: relative; z-index: 1; width: 190px; height: 190px; object-fit: contain; filter: drop-shadow(0 18px 24px rgb(20 22 12 / 0.45)); }
+.warmup-glow { position: absolute; inset: 22% 14% 4%; border-radius: 50%; background: radial-gradient(closest-side, rgb(241 176 92 / 0.55), rgb(241 176 92 / 0)); animation: glow 2.8s ease-in-out infinite; }
+.warmup.failed .warmup-glow { animation: none; opacity: 0.25; }
+.warmup.failed .warmup-kadai { filter: grayscale(0.5) drop-shadow(0 18px 24px rgb(20 22 12 / 0.45)); opacity: 0.85; }
+@keyframes glow { 50% { transform: scale(1.06); opacity: 0.8; } }
+
+/* Steam: three soft strands rising from the kadai, the only loading indicator */
+.steam { position: absolute; z-index: 2; left: 50%; top: 4%; width: 90px; height: 90px; transform: translateX(-50%); pointer-events: none; }
+.steam i { position: absolute; bottom: 0; width: 14px; height: 54px; border-radius: 50%; background: rgb(251 245 233 / 0.55); filter: blur(7px); opacity: 0; animation: steam 2.6s ease-out infinite; }
+.steam i:nth-child(1) { left: 18px; animation-delay: 0s; }
+.steam i:nth-child(2) { left: 38px; animation-delay: 0.85s; height: 64px; }
+.steam i:nth-child(3) { left: 58px; animation-delay: 1.7s; }
+@keyframes steam {
+  0% { opacity: 0; transform: translateY(18px) scaleX(0.7); }
+  25% { opacity: 0.9; }
+  100% { opacity: 0; transform: translateY(-34px) scaleX(1.4) skewX(-8deg); }
+}
+
+.warmup h1 { font: 700 34px/1.1 var(--font-display-stack); letter-spacing: -0.03em; text-wrap: balance; }
+.warmup-body { min-height: 3em; color: var(--on-olive-2); font-size: 16px; max-width: 44ch; text-wrap: pretty; opacity: 0; transition: opacity 400ms var(--ease-out); }
+.warmup.waking .warmup-body, .warmup.failed .warmup-body { opacity: 1; }
+.warmup-time { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; color: #f1c27f; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.warmup-dot { width: 7px; height: 7px; border-radius: 50%; background: #f1c27f; animation: glow 1.4s ease-in-out infinite; }
+.warmup-actions { display: grid; justify-items: center; gap: 10px; margin-top: 8px; }
+.warmup-detail { color: var(--on-olive-2); font-size: 13px; max-width: 44ch; opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  .steam i { animation: none; opacity: 0.5; transform: none; }
+}
 
 /* Sign-in */
 .signin { position: relative; isolation: isolate; min-height: 100dvh; display: flex; align-items: center; background: var(--olive); color: var(--on-olive); overflow: hidden; }
 .signin-art { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 100% 60%; }
 .signin::before { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, var(--olive) 0%, rgb(63 66 41 / 0.94) 38%, rgb(63 66 41 / 0) 70%); }
-.signin-panel { width: min(560px, 100%); padding: 48px clamp(24px, 6vw, 80px); display: grid; gap: 22px; }
-.signin-panel h1 { font: 700 46px/1.04 var(--font-display-stack); letter-spacing: -0.035em; text-wrap: balance; }
+.signin-panel { width: min(760px, 100%); padding: 48px clamp(24px, 6vw, 80px); display: grid; gap: 22px; }
+.signin-panel h1 span { display: block; white-space: nowrap; }
+.signin-panel h1 { font: 700 50px/1.04 var(--font-display-stack); letter-spacing: -0.035em; text-wrap: balance; }
 .signin-lede { color: var(--on-olive-2); font-size: 16.5px; max-width: 46ch; }
+.signin-points, .signin-card { max-width: 460px; }
 .signin-points { list-style: none; display: grid; gap: 10px; }
 .signin-points li { display: flex; align-items: center; gap: 10px; font-size: 15px; }
 .signin-points .icon { color: #f1c27f; }
-.signin-card { margin-top: 6px; padding: 22px; border-radius: var(--r-lg); background: var(--card); color: var(--ink); box-shadow: var(--shadow-float); display: grid; gap: 10px; justify-items: start; }
+.signin-card { margin-top: 6px; max-width: 440px; padding: 22px; border-radius: var(--r-lg); background: var(--card); color: var(--ink); box-shadow: var(--shadow-float); display: grid; gap: 10px; justify-items: start; }
 .signin-card h2 { font: 700 20px var(--font-display-stack); letter-spacing: -0.02em; }
 .signin-card p { color: var(--ink-2); font-size: 14.5px; }
 .google-button { min-height: 44px; }
+.signin-owner { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line-soft); color: var(--mute); font-size: 13px; line-height: 1.45; }
+.signin-owner .icon { color: var(--green-2); margin-top: 1px; }
 
 /* Onboarding */
 .onboarding { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: radial-gradient(1200px 600px at 80% -10%, #ece5d3 0%, var(--paper) 60%); }
@@ -86,9 +124,15 @@
 
 @media (max-width: 1023px) {
   .signin { align-items: flex-end; }
-  .signin::before { background: linear-gradient(180deg, rgb(63 66 41 / 0.1) 0%, rgb(63 66 41 / 0.88) 34%, var(--olive) 56%); }
-  .signin-panel { padding: 140px 20px 28px; }
+  .signin-art { height: 46%; bottom: auto; object-position: 76% 62%; }
+  .signin::before { background: linear-gradient(180deg, rgb(63 66 41 / 0) 0%, rgb(63 66 41 / 0) 26%, rgb(63 66 41 / 0.9) 42%, var(--olive) 50%); }
+  .signin-panel { padding: 220px 20px 28px; gap: 16px; }
   .signin-panel h1 { font-size: 34px; }
+  .signin-panel h1 span { display: inline; white-space: normal; }
+  .signin-lede { font-size: 15.5px; }
+  .signin-points { display: none; }
+  .warmup-brand { left: 20px; top: 20px; }
+  .warmup h1 { font-size: 28px; }
   .about-hero-copy { padding: 24px 20px; }
   .about-hero h1 { font-size: 30px; }
   .about-split { grid-template-columns: 1fr; }

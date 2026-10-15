@@ -114,7 +114,7 @@ export default function KitchApp() {
 
   const { authState, householdBootstrap } = k;
 
-  if (authState.loading) return <SplashScreen />;
+  if (authState.loading) return <SplashScreen startup={k.startupState} onRetry={k.startSession} />;
   if (authState.required && !authState.authenticated) return <SignInScreen k={k} />;
   if (householdBootstrap === null) return <SplashScreen />;
   if (!householdBootstrap.initialized) return <OnboardingScreen k={k} />;
