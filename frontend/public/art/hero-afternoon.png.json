@@ -1,0 +1,11 @@
+{
+  "prompt": "Warm painterly digital illustration of a real Indian home kitchen, matching the soft, flat-shaded storybook illustration style, brushwork and lighting of the reference image. Wide landscape composition. The left 42% of the frame is an empty, smooth deep olive-green wall (#3f4229) with nothing on it, gently vignetted, reserved for text. The kitchen scene occupies the right side on a light wooden counter in front of a cream tiled wall with a small window. Palette: olive and forest green, warm wood, turmeric orange, steel grey, cream. No people, no text, no lettering, no logos, no brand marks.\nTime of day: bright midday. Clear daylight through the window. On the counter: a stainless-steel pressure cooker, a pot of yellow dal, a bowl of steamed rice, a stacked steel tiffin carrier, a chopping board with tomatoes, green chillies and coriander, a small brass bowl of ghee.\n",
+  "createdAt": "2026-10-15T18:44:55.945Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "opaque",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png"
+  ]
+}

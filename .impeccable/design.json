@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-15T18:30:00Z",
+  "title": "Design System: Kitch — The Warm Working Kitchen",
+  "extensions": {
+    "colorMeta": {
+      "green": { "role": "primary", "displayName": "Kitchen Green", "tonalRamp": ["#14261a", "#1e3824", "#264a2d", "#2f5536", "#3f6b45", "#6c9170", "#cfdcc0", "#e3ead8"] },
+      "olive": { "role": "primary", "displayName": "Olive Wall", "tonalRamp": ["#1f2114", "#2c2f1d", "#3f4229", "#55593a", "#7b7f5c", "#a8ab8c", "#d8d4c1", "#fbf5e9"] },
+      "turmeric": { "role": "secondary", "displayName": "Turmeric", "tonalRamp": ["#5a3409", "#7a470d", "#9a5a10", "#c47a1d", "#d98b2b", "#e8b067", "#f4d6a6", "#fbefd9"] },
+      "plum": { "role": "secondary", "displayName": "Plum", "tonalRamp": ["#2a2946", "#3b3a61", "#4d4b7d", "#6f6d9c", "#9896bb", "#c3c1da", "#e8e6f2"] },
+      "tomato": { "role": "danger", "displayName": "Tomato", "tonalRamp": ["#5a2418", "#8a3322", "#b4402a", "#d0705c", "#e7b9ad", "#fbe6df"] },
+      "paper": { "role": "neutral", "displayName": "Paper", "tonalRamp": ["#e5ddcd", "#ede7da", "#f5f1e8", "#fffdf8"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "tonalRamp": ["#1f2a1f", "#474f42", "#6b6d60", "#8b8c7f"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Greeting", "purpose": "Hero greeting and sign-in headline only." },
+      "page-title": { "displayName": "Page title", "purpose": "One per page." },
+      "section-title": { "displayName": "Section title", "purpose": "Card and section headings." },
+      "body": { "displayName": "Body", "purpose": "All UI text, data and controls." },
+      "label": { "displayName": "Label", "purpose": "Metadata, column headers, field labels." }
+    },
+    "shadows": [
+      { "name": "raise", "value": "0 1px 0 #e5ddcd, 0 8px 18px -12px rgb(63 66 41 / 0.35)", "purpose": "Active nav item, selected segmented option, suggestion chips." },
+      { "name": "float", "value": "0 18px 40px -18px rgb(63 66 41 / 0.45), 0 2px 6px -2px rgb(63 66 41 / 0.12)", "purpose": "Composer, popovers, dialogs, notices." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "All state transitions, 160–280ms." },
+      { "name": "press", "value": "transform: scale(0.97) over 120ms", "purpose": "Button and tile press feedback." },
+      { "name": "page-in", "value": "opacity + 6px rise, 260ms", "purpose": "Section change; disabled under reduced motion." }
+    ],
+    "breakpoints": [
+      { "name": "mobile-shell", "value": "1023px (viewport)" },
+      { "name": "drawer-docks", "value": "1360px (viewport)" },
+      { "name": "single-column", "value": "1000–1060px (workspace container)" },
+      { "name": "compact-rows", "value": "660–780px (workspace container)" }
+    ]
+  },
+  "components": [
+    { "name": "Primary Button", "kind": "button", "refersTo": "button-primary", "description": "Main action in a region.", "html": "<button class=\"k-btn k-primary\">Plan next week</button>", "css": ".k-btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:12px;font:650 14.5px Figtree,system-ui,sans-serif;border:1px solid #e5ddcd;background:#fffdf8;color:#1f2a1f;transition:transform 120ms cubic-bezier(.22,1,.36,1)}.k-btn:active{transform:scale(.97)}.k-primary{background:#2f5536;border-color:#2f5536;color:#fbf5e9}.k-primary:hover{background:#264a2d}" },
+    { "name": "Soft Button", "kind": "button", "refersTo": "button-soft", "description": "Suggestive secondary action.", "html": "<button class=\"k-btn k-soft\">Plan dinner</button>", "css": ".k-btn{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:12px;font:650 14.5px Figtree,system-ui,sans-serif;border:1px solid transparent}.k-soft{background:#e3ead8;color:#2f5536}" },
+    { "name": "Field", "kind": "input", "refersTo": "input", "description": "Text and number entry.", "html": "<input class=\"k-input\" placeholder=\"Add an item, e.g. Amul butter\">", "css": ".k-input{height:40px;padding:0 12px;border-radius:11px;border:1px solid #e5ddcd;background:#fff;font:500 14.5px Figtree,system-ui,sans-serif;color:#1f2a1f}.k-input:focus{outline:none;border-color:#3f6b45;box-shadow:0 0 0 3px rgb(63 107 69/.15)}" },
+    { "name": "Rail Link", "kind": "nav", "refersTo": "nav-item-active", "description": "Primary navigation item.", "html": "<a class=\"k-nav on\">Household</a><a class=\"k-nav\">Groceries</a>", "css": ".k-nav{display:flex;align-items:center;height:44px;padding:0 12px;border-radius:12px;font:600 15px Figtree,system-ui,sans-serif;color:#474f42}.k-nav.on{background:#fffdf8;color:#2f5536;box-shadow:0 1px 0 #e5ddcd,0 8px 18px -12px rgb(63 66 41/.35)}" },
+    { "name": "Day Tile", "kind": "custom", "description": "Week timetable day with planned-meal dots.", "html": "<div class=\"k-day today\"><small>Today</small><b>15</b><span><i class=on></i><i class=on></i><i></i></span></div>", "css": ".k-day{display:grid;justify-items:center;width:64px;padding:10px 0 9px;border-radius:14px;border:1px solid #eee7da;background:#fffdf8;font-family:Figtree,system-ui}.k-day small{font-size:12.5px;font-weight:600;color:#6b6d60}.k-day b{font:700 22px 'Bricolage Grotesque',system-ui}.k-day span{display:flex;gap:4px;margin-top:5px}.k-day i{width:6px;height:6px;border-radius:50%;box-shadow:inset 0 0 0 1.5px #cfdcc0}.k-day i.on{background:#3f6b45;box-shadow:none}.k-day.today{background:#2f5536;color:#fbf5e9}.k-day.today small{color:#cfe0c8}.k-day.today i.on{background:#fbf5e9}" },
+    { "name": "Change Receipt", "kind": "custom", "description": "What an agent reply changed, with a link to it.", "html": "<div class=\"k-receipt\"><span>Shopping list updated</span><button>Open list</button></div>", "css": ".k-receipt{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border-radius:12px;border:1px solid #cfdcc0;background:#f1f6ea;color:#2f5536;font:600 13.5px Figtree,system-ui}.k-receipt span{flex:1}.k-receipt button{padding:5px 10px;border-radius:8px;background:#fffdf8;border:1px solid #cfdcc0;color:#2f5536;font:inherit}" }
+  ],
+  "narrative": {
+    "northStar": "The Warm Working Kitchen",
+    "overview": "A lit home kitchen for the emotional moments, a dependable tool for the work. Painterly illustrations on a deep olive wall carry the greeting and tonight's meal; calm warm-white cards carry plans, lists, checkout and diaries. Shared household state and personal nutrition are visibly different, and every agent change is shown as a receipt.",
+    "keyCharacteristics": ["Time-of-day hero illustration on olive", "Week timetable with meal-coverage dots", "Fixed meal-slot colours", "Docked conversation with change receipts", "Locked, numbered checkout steps"],
+    "rules": [
+      { "name": "Fixed meal colours", "body": "Breakfast turmeric, lunch sage, dinner plum, snack wood, everywhere.", "section": "colors" },
+      { "name": "Personal gets warmth", "body": "Only cards showing one member's data carry the turmeric wash.", "section": "colors" },
+      { "name": "No eyebrows", "body": "Headings stand alone; no tracked uppercase kickers.", "section": "typography" },
+      { "name": "Nothing floats over content", "body": "Composer and drawer reserve their space at every width.", "section": "elevation" }
+    ],
+    "dos": ["Show 'Not synced' instead of a price until the provider returns one.", "Keep destructive actions in a separated danger zone.", "Use the single stroke icon family."],
+    "donts": ["No emoji or unicode glyph icons.", "No glass, gradient text, or decorative pills.", "Never nest cards."]
+  }
+}

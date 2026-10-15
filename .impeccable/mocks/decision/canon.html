@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Kitch — Standard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{font-family:Inter,system-ui,sans-serif;color:#111827;background:#f9fafb;display:grid;grid-template-columns:240px 1fr}
+nav{background:#fff;border-right:1px solid #e5e7eb;padding:20px 14px}
+nav b{display:block;font-size:20px;padding:0 10px 24px}
+nav a{display:block;padding:9px 10px;border-radius:8px;color:#374151;text-decoration:none;font-size:14px;font-weight:500}
+nav a.on{background:#f0fdf4;color:#15803d}
+main{padding:28px 32px}
+h1{font-size:28px;font-weight:700}
+.sub{color:#6b7280;font-size:14px;margin:4px 0 20px}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:12px}
+.day{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px}
+.day.t{border-color:#16a34a;box-shadow:0 0 0 1px #16a34a}
+.day h3{font-size:13px;color:#6b7280;font-weight:600}
+.day h4{font-size:22px;margin-bottom:10px}
+.meal{background:#f9fafb;border-radius:8px;padding:8px;font-size:13px;margin-bottom:6px}
+.meal small{display:block;color:#9ca3af;font-size:11px}
+.row{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:20px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
+.card h2{font-size:18px}
+.bar{height:8px;background:#e5e7eb;border-radius:4px;margin-top:12px}.bar i{display:block;width:22%;height:100%;background:#16a34a;border-radius:4px}
+.chat{position:absolute;left:50%;transform:translateX(-30%);bottom:24px;width:640px;height:52px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08);display:flex;align-items:center;padding:0 8px 0 16px;color:#9ca3af;font-size:14px}
+.chat span{flex:1}.chat b{width:36px;height:36px;border-radius:8px;background:#16a34a;color:#fff;display:grid;place-items:center}
+</style></head><body>
+<nav><b>Kitch</b><a class="on" href="#">Meal plan</a><a href="#">Recipes</a><a href="#">Groceries</a><a href="#">Nutrition</a></nav>
+<main><h1>Meal plan</h1><p class="sub">Oct 12 – Oct 18, 2026 · 3 people</p>
+<div class="grid">
+<div class="day"><h3>Mon</h3><h4>12</h4><div class="meal"><small>Breakfast</small>Poha</div><div class="meal"><small>Lunch</small>Rajma chawal</div><div class="meal"><small>Dinner</small>Lauki kofta</div></div>
+<div class="day"><h3>Tue</h3><h4>13</h4><div class="meal"><small>Breakfast</small>Besan chilla</div><div class="meal"><small>Lunch</small>Chole rice</div><div class="meal"><small>Dinner</small>Egg curry</div></div>
+<div class="day"><h3>Wed</h3><h4>14</h4><div class="meal"><small>Breakfast</small>Idli sambar</div><div class="meal"><small>Lunch</small>Palak dal</div><div class="meal"><small>Dinner</small>Veg pulao</div></div>
+<div class="day t"><h3>Thu · Today</h3><h4>15</h4><div class="meal"><small>Breakfast</small>Smoothie bowl</div><div class="meal"><small>Lunch</small>Rajma chawal</div><div class="meal"><small>Dinner</small>Aloo gobi</div></div>
+<div class="day"><h3>Fri</h3><h4>16</h4><div class="meal"><small>Breakfast</small>Masala oats</div><div class="meal"><small>Lunch</small>Paneer wrap</div><div class="meal"><small>Dinner</small>Methi thepla</div></div>
+<div class="day"><h3>Sat</h3><h4>17</h4><div class="meal"><small>Breakfast</small>Aloo paratha</div></div>
+<div class="day"><h3>Sun</h3><h4>18</h4><div class="meal"><small>Breakfast</small>Upma</div></div>
+</div>
+<div class="row"><div class="card"><h2>Tonight: Aloo gobi with roti</h2><p class="sub">6 in pantry · 3 to buy</p></div><div class="card"><h2>Your nutrition</h2><p class="sub">450 / 2100 kcal</p><div class="bar"><i></i></div></div></div>
+</main>
+<div class="chat"><span>Ask Kitch anything…</span><b>↑</b></div>
+</body></html>

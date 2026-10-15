@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Kitch — Bill Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1b1b24;--ink2:#4b4a5c;--mute:#7c7b8c;--carbon:#2a2775;--carbon2:#3d39a0;--carbonT:#e6e5f4;--paper:#fbfbf8;--ground:#efeff2;--line:#dcdbe4;--canary:#f2d65c;--canaryT:#fbf2c4;--pink:#f3b9c6;--pinkT:#fbe4ea;--red:#c4302b}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{font-family:Archivo,system-ui,sans-serif;font-variation-settings:"wdth" 100;color:var(--ink);background:var(--ground);display:grid;grid-template-columns:224px 1fr 372px;font-feature-settings:"tnum" 1}
+.c{font-variation-settings:"wdth" 72}
+/* rail */
+.rail{background:var(--carbon);color:#d9d8f0;display:flex;flex-direction:column;padding:22px 14px}
+.brand{display:flex;align-items:baseline;gap:8px;padding:0 10px 26px;color:#fff}
+.brand b{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variation-settings:"wdth" 75}
+.brand span{font-size:12px;color:#a9a7da}
+.nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 10px;border-radius:6px;font-size:15px;font-weight:550;color:#d9d8f0;text-decoration:none;margin-bottom:2px}
+.nav a.on{background:var(--paper);color:var(--carbon)}
+.nav a em{font-style:normal;font-size:12px;color:#a9a7da}
+.nav a.on em{color:var(--carbon2)}
+.member{margin-top:auto;background:var(--pink);color:var(--ink);border-radius:6px;padding:12px}
+.member small{display:block;font-size:12px;color:#6b3a47}
+.member strong{font-size:17px}
+.member .sw{display:flex;gap:6px;margin-top:10px}
+.member .sw i{font-style:normal;font-size:12px;padding:4px 8px;border-radius:4px;background:#fff6f8;color:#6b3a47}
+/* main */
+main{padding:24px 28px;overflow:hidden}
+.top{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+h1{font-size:44px;font-weight:780;letter-spacing:-.025em;line-height:1;font-variation-settings:"wdth" 72}
+.top p{font-size:14px;color:var(--ink2);margin-top:6px}
+.btns{display:flex;gap:6px}
+.btn{height:36px;padding:0 14px;border:1px solid var(--line);background:var(--paper);border-radius:6px;font:inherit;font-size:14px;font-weight:600;color:var(--ink)}
+.btn.p{background:var(--carbon);color:#fff;border-color:var(--carbon)}
+/* week timetable */
+.week{background:var(--paper);border:1px solid var(--line);border-radius:8px;display:grid;grid-template-columns:96px repeat(7,1fr);overflow:hidden}
+.week div{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 10px;font-size:13.5px;line-height:1.3;min-height:66px}
+.week .h{min-height:auto;padding:10px;display:flex;align-items:baseline;gap:6px}
+.week .h b{font-size:26px;font-weight:760;font-variation-settings:"wdth" 70}
+.week .h span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.week .slot{color:var(--mute);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:flex-start}
+.week .today{background:var(--carbonT)}
+.week .h.today b{color:var(--carbon)}
+.week .past{color:var(--mute)}
+.week .tag{display:inline-block;margin-top:5px;font-size:11px;font-weight:700;color:#fff;background:var(--carbon);border-radius:3px;padding:1px 5px}
+.week .empty{color:var(--mute);font-style:italic}
+/* tonight */
+.row{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;margin-top:16px}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:18px 20px}
+.panel h2{font-size:24px;font-weight:740;letter-spacing:-.015em;font-variation-settings:"wdth" 80}
+.panel .sub{font-size:13px;color:var(--ink2);margin:4px 0 14px}
+.cov{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
+.cov div{padding:12px 0 0;font-size:13px;color:var(--ink2)}
+.cov b{display:block;font-size:30px;font-weight:760;color:var(--ink);font-variation-settings:"wdth" 70}
+.cov .cart b{color:#8a6a00}
+.list{list-style:none;font-size:14px}
+.list li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}
+.list li span:last-child{color:var(--ink2)}
+.low{color:var(--red)!important;font-weight:600}
+/* chat */
+aside{background:var(--paper);border-left:1px solid var(--line);display:flex;flex-direction:column}
+.ch{padding:20px 20px 12px;border-bottom:1px solid var(--line)}
+.ch h3{font-size:20px;font-weight:740;font-variation-settings:"wdth" 80}
+.ch p{font-size:12.5px;color:var(--mute)}
+.thread{flex:1;padding:16px 20px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+.me{align-self:flex-end;background:var(--ground);border-radius:8px;padding:10px 12px;font-size:14px;max-width:85%}
+.k{font-size:14px;line-height:1.45;color:var(--ink)}
+.slip{border:1px solid var(--carbon);border-radius:6px;overflow:hidden;margin-top:8px}
+.slip header{background:var(--carbon);color:#fff;display:flex;justify-content:space-between;padding:6px 10px;font-size:12px;font-weight:650}
+.slip ol{list-style:none;font-size:13px}
+.slip li{display:grid;grid-template-columns:22px 1fr auto;gap:6px;padding:7px 10px;border-top:1px solid var(--carbonT)}
+.slip li i{font-style:normal;color:var(--carbon2);font-weight:700}
+.slip li em{font-style:normal;color:var(--mute)}
+.compose{margin:12px 16px 16px;border:1.5px solid var(--carbon);border-radius:8px;padding:12px;display:flex;gap:10px;align-items:center;font-size:14px;color:var(--mute)}
+.compose span{flex:1}
+.compose b{width:34px;height:34px;border-radius:6px;background:var(--carbon);display:grid;place-items:center;color:#fff;font-size:16px}
+</style></head>
+<body>
+<nav class="rail">
+  <div class="brand"><b>Kitch</b><span>Mishra household</span></div>
+  <div class="nav">
+    <a class="on" href="#">Week <em>12–18 Oct</em></a>
+    <a href="#">Recipes <em>4</em></a>
+    <a href="#">Pantry <em>38</em></a>
+    <a href="#">Groceries <em>9</em></a>
+    <a href="#">Nutrition</a>
+  </div>
+  <div class="member"><small>Logging for</small><strong>Archit</strong>
+    <div class="sw"><i>Anubhav</i><i>Naman</i></div></div>
+</nav>
+<main>
+  <div class="top">
+    <div><h1>Week of 12 – 18 October</h1><p>Shared by 3 people · 17 of 21 meals planned</p></div>
+    <div class="btns"><button class="btn">← Prev</button><button class="btn">Today</button><button class="btn">Next →</button><button class="btn p">Plan next week</button></div>
+  </div>
+  <div class="week">
+    <div class="h"></div>
+    <div class="h past"><b>12</b><span>Mon</span></div><div class="h past"><b>13</b><span>Tue</span></div><div class="h past"><b>14</b><span>Wed</span></div>
+    <div class="h today"><b>15</b><span>Thu · today</span></div><div class="h"><b>16</b><span>Fri</span></div><div class="h"><b>17</b><span>Sat</span></div><div class="h"><b>18</b><span>Sun</span></div>
+    <div class="slot">Breakfast</div>
+    <div class="past">Poha with peanuts</div><div class="past">Besan chilla</div><div class="past">Idli, sambar</div>
+    <div class="today">Berry smoothie bowl</div><div>Masala oats</div><div>Aloo paratha, curd</div><div>Upma</div>
+    <div class="slot">Lunch</div>
+    <div class="past">Rajma chawal</div><div class="past">Chole, jeera rice</div><div class="past">Palak dal, roti</div>
+    <div class="today">Rajma chawal</div><div>Paneer bhurji wrap<br><span class="tag">No. 142</span></div><div class="empty">Not planned</div><div class="empty">Not planned</div>
+    <div class="slot">Dinner</div>
+    <div class="past">Lauki kofta, roti</div><div class="past">Egg curry, rice</div><div class="past">Veg pulao, raita</div>
+    <div class="today"><b>Aloo gobi, roti, dal fry</b></div><div>Methi thepla<br><span class="tag">No. 142</span></div><div class="empty">Not planned</div><div class="empty">Not planned</div>
+  </div>
+  <div class="row">
+    <section class="panel"><h2>Tonight: Aloo gobi, roti, dal fry</h2><p class="sub">Dinner for 3 · recipe saved · 35 min</p>
+      <div class="cov"><div><b>6</b>in pantry</div><div class="cart"><b>3</b>in cart, not synced</div><div><b>0</b>missing</div></div></section>
+    <section class="panel"><h2>Pantry running low</h2><p class="sub">Last reviewed Tuesday, 13 Oct</p>
+      <ul class="list"><li><span>Toor dal</span><span class="low">200 g</span></li><li><span>Atta</span><span class="low">0.5 kg</span></li><li><span>Paneer</span><span>200 g</span></li></ul></section>
+  </div>
+</main>
+<aside>
+  <div class="ch"><h3>Kitch</h3><p>Plans, pantry and carts are shared. Logs go to Archit.</p></div>
+  <div class="thread">
+    <div class="me">Plan Friday lunch and dinner, something with the paneer</div>
+    <div class="k">Done. Friday uses the 200 g paneer you have; methi needs buying.
+      <div class="slip"><header><span>Slip No. 142</span><span>3 changes</span></header>
+        <ol><li><i>1</i><span>Fri lunch → Paneer bhurji wrap</span><em>Plan</em></li>
+        <li><i>2</i><span>Fri dinner → Methi thepla</span><em>Plan</em></li>
+        <li><i>3</i><span>Methi, 2 bunches</span><em>Cart</em></li></ol></div></div>
+  </div>
+  <div class="compose"><span>Ask Kitch to plan, log, or add items…</span><b>↑</b></div>
+</aside>
+</body></html>

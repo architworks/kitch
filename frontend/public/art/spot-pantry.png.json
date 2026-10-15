@@ -1,0 +1,11 @@
+{
+  "prompt": "Warm painterly storybook illustration matching the soft flat shading, brushwork and palette of the reference image (olive and forest green, warm wood, turmeric orange, steel grey, cream). No people, no text, no lettering, no logos. A single isolated object group, centred, on a fully transparent background with no floor, no backdrop, no cast shadow plate, and generous empty margin so the object fills about 70% of the frame. Subject: a short wooden shelf holding stacked stainless-steel dabbas and glass jars of toor dal, rice and spices.\n",
+  "createdAt": "2026-10-15T18:45:42.766Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "transparent",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png"
+  ]
+}

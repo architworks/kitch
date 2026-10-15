@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Kitch — Household</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f5f1e8; --card:#fffdf8; --line:#e7dfd0; --line2:#efe8db;
+  --ink:#1f2a1f; --ink2:#4c5446; --mute:#7a7c6c;
+  --olive:#3f4229; --olive2:#55593a; --green:#2f5536; --green2:#3f6b45; --sage:#e3ead8; --sage2:#cfdcc0;
+  --turmeric:#d98b2b; --turmericT:#fbecd6; --wood:#b08560; --tomato:#c4472f;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif; --ui:"Figtree",ui-sans-serif,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{font:15px/1.45 var(--ui);color:var(--ink);background:var(--paper);display:grid;grid-template-columns:232px 1fr;font-variant-numeric:tabular-nums}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+/* rail */
+.rail{display:flex;flex-direction:column;padding:22px 16px 18px;border-right:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;padding:2px 8px 30px}
+.brand img{width:34px;height:34px}
+.brand b{font:700 25px/1 var(--display);letter-spacing:-.02em;color:var(--green)}
+.nav a{display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;border-radius:12px;color:var(--ink2);font-weight:600;font-size:15px;text-decoration:none;margin-bottom:2px}
+.nav a.on{background:var(--card);color:var(--green);box-shadow:0 1px 0 var(--line),0 6px 16px -10px rgba(63,66,41,.35)}
+.nav a em{margin-left:auto;font-style:normal;font-size:12.5px;color:var(--mute);font-weight:600}
+.me{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
+.av{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;background:var(--turmeric);font-size:15px}
+.me div{line-height:1.2}.me small{display:block;color:var(--mute);font-size:12.5px}.me strong{font-size:15px}
+.me .sw{margin-left:auto;display:flex}
+.me .sw span{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:var(--ink2);background:var(--sage);border:2px solid var(--card);margin-left:-6px}
+/* main */
+main{padding:22px 30px 0;display:flex;flex-direction:column;gap:20px;position:relative}
+.hero{position:relative;height:300px;border-radius:26px;overflow:hidden;background:var(--olive) url(../../../frontend/public/countertop.png) 100% 60%/96% auto no-repeat;color:#fbf5e9;padding:34px 40px;display:flex;flex-direction:column}
+.hero h1{font:700 46px/1.02 var(--display);letter-spacing:-.03em}
+.hero .tonight{margin-top:auto;max-width:520px}
+.hero .when{display:flex;align-items:center;gap:8px;color:#f1c27f;font-weight:600;font-size:14.5px}
+.hero .when svg{width:17px;height:17px}
+.hero h2{font:650 30px/1.12 var(--display);letter-spacing:-.02em;margin:6px 0 8px}
+.hero .meta{color:#d9d5c2;font-size:14.5px}
+.hero .meta b{color:#fbf5e9;font-weight:600}
+.acts{display:flex;gap:10px;margin-top:18px}
+.b{height:42px;padding:0 18px;border-radius:12px;font-weight:650;font-size:15px;display:inline-flex;align-items:center;gap:8px}
+.b.light{background:#fbf5e9;color:var(--olive)}
+.b.ghost{color:#fbf5e9;box-shadow:inset 0 0 0 1px rgba(251,245,233,.38)}
+/* grid */
+.grid{display:grid;grid-template-columns:1fr 340px;gap:20px;min-height:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:22px 24px}
+.head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.head h3{font:700 22px/1 var(--display);letter-spacing:-.02em}
+.head span{color:var(--mute);font-weight:500}
+.head .nav2{margin-left:auto;display:flex;gap:6px}
+.ib{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;border:1px solid var(--line);color:var(--ink2)}
+.tb{height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);font-weight:600;font-size:14px;color:var(--ink2)}
+.tb.g{border-color:transparent;background:var(--sage);color:var(--green)}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:14px}
+.day{border-radius:14px;padding:10px 0 9px;text-align:center;border:1px solid var(--line2)}
+.day small{display:block;font-size:12.5px;font-weight:600;color:var(--mute)}
+.day b{display:block;font:700 22px/1.15 var(--display)}
+.dots{display:flex;justify-content:center;gap:4px;margin-top:5px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--green2)}
+.dots i.o{background:none;box-shadow:inset 0 0 0 1.5px var(--sage2)}
+.day.past{opacity:.55}
+.day.today{background:var(--green);border-color:var(--green);color:#fbf5e9}
+.day.today small{color:#cfe0c8}.day.today .dots i{background:#fbf5e9}
+.meals{display:flex;flex-direction:column}
+.meal{display:grid;grid-template-columns:44px 150px 1fr auto;align-items:center;gap:14px;padding:11px 4px;border-top:1px solid var(--line2)}
+.mi{width:44px;height:44px;border-radius:13px;display:grid;place-items:center}
+.mi.b1{background:#fbefd9;color:#c47a1d}.mi.l1{background:var(--sage);color:var(--green)}.mi.d1{background:#e6e4f1;color:#4b4a7a}
+.meal small{display:block;color:var(--mute);font-size:13px}
+.meal .slot{font-weight:650}
+.meal strong{font-size:16.5px;font-weight:650}
+.meal .st{font-size:13.5px;color:var(--mute);display:flex;align-items:center;gap:6px}
+.meal .st.now{color:var(--turmeric);font-weight:650}
+.meal .st svg{width:16px;height:16px}
+/* right */
+.col{display:flex;flex-direction:column;gap:20px}
+.nut{display:grid;grid-template-columns:104px 1fr;gap:18px;align-items:center}
+.ring{position:relative;width:104px;height:104px}
+.ring svg{width:104px;height:104px;transform:rotate(-90deg)}
+.ring div{position:absolute;inset:0;display:grid;place-content:center;text-align:center;line-height:1.1}
+.ring b{font:700 24px var(--display)}.ring small{color:var(--mute);font-size:12px}
+.mac{display:flex;flex-direction:column;gap:9px}
+.mac div{font-size:13.5px;display:flex;justify-content:space-between;color:var(--ink2)}
+.mac div b{color:var(--ink);font-weight:650}
+.bar{height:7px;border-radius:5px;background:var(--line2);overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;border-radius:5px}
+.kit a{display:flex;align-items:center;gap:12px;padding:10px 0;text-decoration:none;color:inherit;border-top:1px solid var(--line2)}
+.kit a:first-of-type{border-top:0;padding-top:0}
+.kit .mi{width:40px;height:40px}
+.kit strong{display:block;font-weight:650}.kit small{color:var(--mute);font-size:13.5px}
+.kit small.warn{color:var(--turmeric);font-weight:600}
+.kit .ch{margin-left:auto;color:var(--mute)}
+/* composer */
+.composer{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);width:min(760px,calc(100% - 60px));background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:0 18px 40px -18px rgba(63,66,41,.45);display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px}
+.composer img{width:26px;height:26px}
+.composer span{flex:1;color:var(--mute);font-size:15.5px}
+.composer .ib{border:0}
+.send{width:42px;height:42px;border-radius:13px;background:var(--green);color:#fbf5e9;display:grid;place-items:center}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="home" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+<symbol id="book" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+<symbol id="basket" viewBox="0 0 24 24"><path d="m15 11-1 9M19 11l-4-7M2 11h20M3.5 11l1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4M5 11l4-7M9 11l1 9"/></symbol>
+<symbol id="chart" viewBox="0 0 24 24"><path d="M3 3v18h18M19 9l-5 5-4-4-3 3"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="sunrise" viewBox="0 0 24 24"><path d="M12 2v6M4.9 10.9l1.4 1.4M2 18h2M20 18h2M19.1 10.9l-1.4 1.4M22 22H2M8 6l4-4 4 4M16 18a4 4 0 0 0-8 0"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></symbol>
+<symbol id="moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+<symbol id="img" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+<symbol id="cam" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+<symbol id="l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="box" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+</defs></svg>
+
+<nav class="rail">
+  <div class="brand"><img src="../../../frontend/public/kitch-chef-hat.svg" alt=""><b>Kitch</b></div>
+  <div class="nav">
+    <a class="on" href="#"><svg class="i"><use href="#home"/></svg>Household</a>
+    <a href="#"><svg class="i"><use href="#book"/></svg>Recipes</a>
+    <a href="#"><svg class="i"><use href="#basket"/></svg>Groceries <em>9</em></a>
+    <a href="#"><svg class="i"><use href="#chart"/></svg>Nutrition</a>
+    <a href="#"><svg class="i"><use href="#info"/></svg>About Kitch</a>
+  </div>
+  <div class="me"><span class="av">A</span><div><small>Logging as</small><strong>Archit</strong></div>
+    <div class="sw"><span>An</span><span>N</span></div></div>
+</nav>
+
+<main>
+  <section class="hero">
+    <h1>Good evening, Archit</h1>
+    <div class="tonight">
+      <p class="when"><svg class="i"><use href="#moon"/></svg>Tonight’s dinner · Thursday, 15 October</p>
+      <h2>Aloo gobi with roti and dal fry</h2>
+      <p class="meta">For 3 people · 35 min · <b>3 ingredients to buy</b></p>
+      <div class="acts"><button class="b light">Open recipe</button><button class="b ghost">Swap meal</button><button class="b ghost">Log as eaten</button></div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <div class="head"><h3>This week</h3><span>12 – 18 October</span>
+        <div class="nav2"><button class="ib" aria-label="Previous week"><svg class="i"><use href="#l"/></svg></button><button class="tb">Today</button><button class="ib" aria-label="Next week"><svg class="i"><use href="#r"/></svg></button><button class="tb g">Plan next week</button></div></div>
+      <div class="days">
+        <div class="day past"><small>Mon</small><b>12</b><div class="dots"><i></i><i></i><i></i></div></div>
+        <div class="day past"><small>Tue</small><b>13</b><div class="dots"><i></i><i></i><i></i></div></div>
+        <div class="day past"><small>Wed</small><b>14</b><div class="dots"><i></i><i></i><i></i></div></div>
+        <div class="day today"><small>Today</small><b>15</b><div class="dots"><i></i><i></i><i></i></div></div>
+        <div class="day"><small>Fri</small><b>16</b><div class="dots"><i></i><i></i><i></i></div></div>
+        <div class="day"><small>Sat</small><b>17</b><div class="dots"><i></i><i class="o"></i><i class="o"></i></div></div>
+        <div class="day"><small>Sun</small><b>18</b><div class="dots"><i class="o"></i><i class="o"></i><i class="o"></i></div></div>
+      </div>
+      <div class="meals">
+        <div class="meal"><span class="mi b1"><svg class="i"><use href="#sunrise"/></svg></span><div><span class="slot">Breakfast</span><small>8:30 am</small></div><strong>Berry smoothie bowl with chia seeds</strong><span class="st"><svg class="i"><use href="#check"/></svg>Logged</span></div>
+        <div class="meal"><span class="mi l1"><svg class="i"><use href="#sun"/></svg></span><div><span class="slot">Lunch</span><small>1:00 pm</small></div><strong>Rajma chawal</strong><span class="st"><svg class="i"><use href="#check"/></svg>Logged</span></div>
+        <div class="meal"><span class="mi d1"><svg class="i"><use href="#moon"/></svg></span><div><span class="slot">Dinner</span><small>8:30 pm</small></div><strong>Aloo gobi with roti and dal fry</strong><span class="st now"><svg class="i"><use href="#clock"/></svg>Up next</span></div>
+      </div>
+    </section>
+
+    <div class="col">
+      <section class="card">
+        <div class="head"><h3>Archit today</h3></div>
+        <div class="nut">
+          <div class="ring"><svg viewBox="0 0 104 104"><circle cx="52" cy="52" r="44" fill="none" stroke="#efe8db" stroke-width="10"/><circle cx="52" cy="52" r="44" fill="none" stroke="#2f5536" stroke-width="10" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="217"/></svg><div><b>450</b><small>of 2,100 kcal</small></div></div>
+          <div class="mac">
+            <div><span>Protein</span><b>14 / 150 g</b></div><div class="bar"><i style="width:9%;background:#3f6b45"></i></div>
+            <div><span>Carbs</span><b>70 / 200 g</b></div><div class="bar"><i style="width:35%;background:#d98b2b"></i></div>
+            <div><span>Fats</span><b>10 / 67 g</b></div><div class="bar"><i style="width:15%;background:#b08560"></i></div>
+          </div>
+        </div>
+      </section>
+      <section class="card kit">
+        <a href="#"><span class="mi l1"><svg class="i"><use href="#box"/></svg></span><div><strong>Pantry · 38 items</strong><small class="warn">Toor dal and atta running low</small></div><svg class="i ch"><use href="#r"/></svg></a>
+        <a href="#"><span class="mi b1"><svg class="i"><use href="#basket"/></svg></span><div><strong>Groceries · 9 to buy</strong><small>Not yet sent to Instamart</small></div><svg class="i ch"><use href="#r"/></svg></a>
+      </section>
+    </div>
+  </div>
+
+  <form class="composer"><img src="../../../frontend/public/kitch-chef-hat.svg" alt=""><span>Ask Kitch to plan, cook, shop, or log a meal…</span>
+    <button class="ib" type="button" aria-label="Attach photo"><svg class="i"><use href="#img"/></svg></button><button class="ib" type="button" aria-label="Take photo"><svg class="i"><use href="#cam"/></svg></button><button class="send" aria-label="Send"><svg class="i"><use href="#up"/></svg></button></form>
+</main>
+</body></html>

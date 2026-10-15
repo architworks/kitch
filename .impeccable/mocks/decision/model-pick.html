@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Kitch — Steel Tiffin</title>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--steel:#d9dde0;--steel2:#c3c9cd;--steelD:#9aa3aa;--ink:#22282c;--ink2:#56606a;--white:#f6f7f8;--red:#d2452f;--green:#2f7a4f;--blue:#2b5fa8}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{font-family:"Hanken Grotesk",system-ui,sans-serif;color:var(--ink);background:var(--steel);font-variant-numeric:tabular-nums}
+header{height:64px;display:flex;align-items:center;gap:28px;padding:0 32px;background:var(--ink);color:#e7eaec}
+header b{font-size:24px;font-weight:800;margin-right:20px}
+header a{color:#b9c0c5;text-decoration:none;font-size:15px;font-weight:600}
+header a.on{color:#fff;border-bottom:3px solid var(--red);padding-bottom:18px;margin-top:21px}
+header .me{margin-left:auto;font-size:14px;background:#3a4247;padding:8px 12px;border-radius:999px}
+main{padding:28px 32px}
+h1{font-size:40px;font-weight:800;letter-spacing:-.02em}
+.sub{font-size:15px;color:var(--ink2);margin:6px 0 22px}
+.rack{display:grid;grid-template-columns:1.8fr repeat(6,1fr);gap:14px;align-items:end}
+.tiffin{display:flex;flex-direction:column;gap:6px}
+.lid{height:18px;border-radius:12px 12px 4px 4px;background:var(--steelD)}
+.tier{background:var(--white);border-radius:14px;padding:12px 14px;min-height:74px;box-shadow:inset 0 -3px 0 var(--steel2)}
+.tier small{display:block;font-size:12px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.06em}
+.tier p{font-size:14px;font-weight:600;margin-top:4px}
+.day{text-align:center;font-weight:800;font-size:15px;margin-top:6px}
+.open .lid{background:var(--red)}
+.open .tier{min-height:120px;padding:16px 18px}
+.open .tier p{font-size:20px;font-weight:700}
+.open .day{font-size:20px}
+.empty p{color:var(--steelD)}
+.bottom{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:26px}
+.card{background:var(--white);border-radius:16px;padding:20px}
+.card h2{font-size:22px;font-weight:800}
+.bar{height:10px;background:var(--steel);border-radius:6px;margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green);width:22%}
+.chat{position:absolute;left:32px;right:32px;bottom:24px;height:58px;background:var(--ink);border-radius:999px;display:flex;align-items:center;padding:0 10px 0 26px;color:#9aa3aa;font-size:16px}
+.chat span{flex:1}.chat b{width:40px;height:40px;border-radius:50%;background:var(--red);color:#fff;display:grid;place-items:center}
+</style></head><body>
+<header><b>Kitch</b><a class="on" href="#">Week</a><a href="#">Recipes</a><a href="#">Groceries</a><a href="#">Nutrition</a><span class="me">Archit ▾</span></header>
+<main>
+<h1>This week's tiffins</h1><p class="sub">12 – 18 October · household of 3 · 17 of 21 meals packed</p>
+<div class="rack">
+  <div class="tiffin open"><div class="lid"></div>
+    <div class="tier"><small>Breakfast</small><p>Berry smoothie bowl</p></div>
+    <div class="tier"><small>Lunch</small><p>Rajma chawal</p></div>
+    <div class="tier"><small>Dinner · tonight</small><p>Aloo gobi, roti, dal fry</p></div>
+    <div class="day">Thursday 15 · today</div></div>
+  <div class="tiffin"><div class="lid"></div><div class="tier"><small>B</small><p>Masala oats</p></div><div class="tier"><small>L</small><p>Paneer wrap</p></div><div class="tier"><small>D</small><p>Methi thepla</p></div><div class="day">Fri 16</div></div>
+  <div class="tiffin empty"><div class="lid"></div><div class="tier"><small>B</small><p>Aloo paratha</p></div><div class="tier"><small>L</small><p>Not packed</p></div><div class="tier"><small>D</small><p>Not packed</p></div><div class="day">Sat 17</div></div>
+  <div class="tiffin empty"><div class="lid"></div><div class="tier"><small>B</small><p>Upma</p></div><div class="tier"><small>L</small><p>Not packed</p></div><div class="tier"><small>D</small><p>Not packed</p></div><div class="day">Sun 18</div></div>
+  <div class="tiffin"><div class="lid"></div><div class="tier"><small>B</small><p>Poha</p></div><div class="tier"><small>L</small><p>Rajma chawal</p></div><div class="tier"><small>D</small><p>Lauki kofta</p></div><div class="day">Mon 12</div></div>
+  <div class="tiffin"><div class="lid"></div><div class="tier"><small>B</small><p>Besan chilla</p></div><div class="tier"><small>L</small><p>Chole rice</p></div><div class="tier"><small>D</small><p>Egg curry</p></div><div class="day">Tue 13</div></div>
+  <div class="tiffin"><div class="lid"></div><div class="tier"><small>B</small><p>Idli sambar</p></div><div class="tier"><small>L</small><p>Palak dal</p></div><div class="tier"><small>D</small><p>Veg pulao</p></div><div class="day">Wed 14</div></div>
+</div>
+<div class="bottom"><div class="card"><h2>Tonight needs 3 items</h2><p class="sub">Cauliflower, coriander, toor dal · not synced to Instamart</p></div>
+<div class="card"><h2>Archit · 450 / 2100 kcal</h2><div class="bar"><i></i></div></div></div>
+</main>
+<div class="chat"><span>Ask Kitch to plan, log, or add items…</span><b>↑</b></div>
+</body></html>

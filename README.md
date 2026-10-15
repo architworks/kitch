@@ -110,7 +110,13 @@ backend/
     migrations/         Versioned deployment migrations
 
 frontend/
-  src/app/              Next.js UI
+  src/app/              Next.js entry, root layout, design tokens (globals.css)
+  src/kitch/            Kitch UI
+    useKitch.js         Household controller: state, API calls, derived values
+    lib/helpers.js      Request, formatting, and provider-normalisation helpers
+    components/         Views (Household, Recipes, Groceries, Nutrition, About), chat, overlays
+    styles/             Per-area stylesheets
+  public/art/           Commissioned illustrations (see .impeccable/prompts/ART_BRIEF.md)
 
 docs/                   Product, architecture, runtime, UX, and issue references
 test/                   Functional blueprint, fixtures, and automated tests

@@ -1,0 +1,97 @@
+/* Conversation: floating composer and the docked drawer */
+
+.composer { display: grid; gap: 8px; }
+.composer.floating {
+  position: fixed; z-index: 35; bottom: 20px;
+  left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2); transform: translateX(-50%);
+  width: min(780px, calc(100vw - var(--rail-w) - 64px));
+}
+.composer-row {
+  display: flex; align-items: flex-end; gap: 4px; padding: 7px 7px 7px 8px;
+  border-radius: 20px; background: var(--card); border: 1px solid var(--line);
+  transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+.composer.floating .composer-row { box-shadow: var(--shadow-float); }
+.composer-row:focus-within { border-color: var(--sage-2); box-shadow: var(--shadow-float), 0 0 0 3px rgb(63 107 69 / 0.12); }
+.composer textarea {
+  flex: 1; min-width: 0; min-height: 42px; max-height: 140px; resize: none; padding: 10px 8px;
+  border: 0; background: transparent; font-size: 15.5px; line-height: 1.4; color: var(--ink); outline: none;
+}
+.composer textarea::placeholder { color: #8b8c7f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer textarea { height: 42px; }
+.composer .icon-btn { width: 42px; height: 42px; border-radius: 12px; cursor: pointer; }
+.composer-history { position: relative; }
+.composer-dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--turmeric); box-shadow: 0 0 0 2px var(--card); }
+.send { width: 42px; height: 42px; flex: none; border-radius: 13px; display: grid; place-items: center; background: var(--green); color: var(--on-olive); transition: background-color 160ms var(--ease-out), transform 120ms var(--ease-out), opacity 160ms var(--ease-out); }
+.send:hover:not(:disabled) { background: var(--green-hover); }
+.send:active:not(:disabled) { transform: scale(0.94); }
+.send:disabled { opacity: 0.4; }
+
+.prompt-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; animation: rise-in 200ms var(--ease-out); }
+.prompt-row button, .drawer-prompts button {
+  padding: 8px 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--line);
+  font-size: 13.5px; font-weight: 600; color: var(--ink-2); box-shadow: var(--shadow-raise);
+  transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.prompt-row button:hover, .drawer-prompts button:hover { border-color: var(--sage-2); color: var(--green); }
+
+.attachment { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-radius: 14px; background: var(--sage); color: var(--green); font-size: 13.5px; }
+.attachment span { flex: 1; min-width: 0; color: var(--ink-2); }
+.attachment strong { color: var(--ink); margin-right: 4px; }
+.composer.floating .attachment { box-shadow: var(--shadow-raise); }
+
+/* Drawer */
+.drawer-scrim { position: fixed; inset: 0; z-index: 44; background: rgb(31 34 22 / 0.3); animation: fade-in 200ms var(--ease-out); }
+.drawer {
+  position: fixed; z-index: 45; top: 0; right: 0; bottom: 0; width: min(var(--drawer-w), 100vw);
+  display: flex; flex-direction: column; background: var(--card); border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px -28px rgb(63 66 41 / 0.5);
+  animation: drawer-in 280ms var(--ease-out);
+}
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
+@media (min-width: 1360px) { .drawer-scrim { display: none; } }
+
+.drawer-head { display: flex; align-items: center; gap: 12px; padding: 18px 16px 14px 20px; border-bottom: 1px solid var(--line-soft); }
+.drawer-head div { flex: 1; min-width: 0; }
+.drawer-head h2 { font: 700 20px/1.1 var(--font-display-stack); letter-spacing: -0.02em; }
+.drawer-head p { color: var(--mute); font-size: 13px; }
+
+.messages { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.messages .older { align-self: center; }
+.msg { display: grid; gap: 4px; max-width: 92%; animation: rise-in 220ms var(--ease-out); }
+.msg.user { align-self: flex-end; justify-items: end; }
+.msg time { font-size: 11.5px; color: var(--mute); padding: 0 4px; }
+.bubble { padding: 10px 14px; border-radius: 16px; font-size: 14.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--green); color: var(--on-olive); border-bottom-right-radius: 6px; }
+.msg.user .bubble code { background: rgb(255 255 255 / 0.15); }
+.msg.agent .bubble { background: var(--paper); color: var(--ink); border-bottom-left-radius: 6px; }
+
+.receipt { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-radius: 12px; border: 1px solid var(--sage-2); background: #f1f6ea; color: var(--green); font-size: 13.5px; font-weight: 600; }
+.receipt span { flex: 1; }
+.receipt button { padding: 5px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--sage-2); font-weight: 650; font-size: 13px; color: var(--green); }
+.receipt button:hover { background: #fff; }
+
+.typing { display: flex; gap: 5px; padding: 14px 16px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); animation: typing 1.2s infinite ease-in-out; }
+.typing i:nth-child(2) { animation-delay: 0.15s; }
+.typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+.drawer-empty { margin: auto 0; display: grid; gap: 14px; color: var(--ink-2); font-size: 14.5px; }
+.drawer-prompts { display: grid; gap: 8px; }
+.drawer-prompts button { text-align: left; box-shadow: none; }
+
+.composer.docked { padding: 12px 14px 14px; border-top: 1px solid var(--line-soft); }
+.composer.docked .composer-row { border-radius: 16px; }
+
+@media (max-width: 1023px) {
+  .composer.floating { left: 12px; right: 12px; width: auto; transform: none; bottom: calc(70px + env(safe-area-inset-bottom)); }
+  .composer.floating .composer-row { border-radius: 18px; }
+  .composer.floating textarea { font-size: 16px; }
+  .composer .icon-btn, .send { width: 40px; height: 40px; }
+  .drawer { width: 100vw; border-left: 0; }
+  .drawer-scrim { display: none; }
+  .composer.docked { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .composer.docked textarea { font-size: 16px; }
+  .notices { top: auto; bottom: calc(140px + env(safe-area-inset-bottom)); right: 12px; left: 12px; width: auto; }
+}

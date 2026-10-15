@@ -3,6 +3,19 @@ const developmentScriptPolicy = process.env.NODE_ENV === "development"
   ? " 'unsafe-eval'"
   : "";
 
+// The browser talks to the FastAPI gateway directly in development; allow
+// whichever base URL is configured in addition to the default local ports.
+const configuredApiOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_API_BASE_URL ? new URL(process.env.NEXT_PUBLIC_API_BASE_URL).origin : "";
+  } catch {
+    return "";
+  }
+})();
+const apiConnectSources = ["http://localhost:8000", "http://127.0.0.1:8000", configuredApiOrigin]
+  .filter((origin, index, all) => origin && all.indexOf(origin) === index)
+  .join(" ");
+
 const nextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   images: {
@@ -35,7 +48,7 @@ const nextConfig = {
         { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
         {
           key: "Content-Security-Policy",
-          value: `default-src 'self'; script-src 'self' 'unsafe-inline'${developmentScriptPolicy} https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: blob: https://cdn.zeptonow.com https://media-assets.swiggy.com https://*.googleusercontent.com; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'`
+          value: `default-src 'self'; script-src 'self' 'unsafe-inline'${developmentScriptPolicy} https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: blob: https://cdn.zeptonow.com https://media-assets.swiggy.com https://*.googleusercontent.com; connect-src 'self' ${apiConnectSources} https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'`
         }
       ]
     }];

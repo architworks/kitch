@@ -1,0 +1,11 @@
+{
+  "prompt": "Warm painterly storybook illustration matching the soft flat shading, brushwork and palette of the reference image (olive and forest green, warm wood, turmeric orange, steel grey, cream). No people, no text, no lettering, no logos. Wide landscape composition of the same Indian home kitchen in late-afternoon sunlight. The left 45% of the frame is an empty, smooth deep olive-green wall (#3f4229), gently vignetted, with nothing on it, reserved for a sign-in card. On the right, on a light wooden counter in front of a cream tiled wall with an arched window: a woven jute grocery bag spilling fresh vegetables (tomatoes, spinach, okra, onions), a steel thali set with small steel katoris, a stack of steel tumblers, a potted plant, warm sunlight across the counter.\n",
+  "createdAt": "2026-10-15T18:45:37.669Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "opaque",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png"
+  ]
+}
