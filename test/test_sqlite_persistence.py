@@ -85,6 +85,54 @@ print('persisted')
             )
             self.assertIn("persisted", completed.stdout)
 
+    def test_recipe_cart_rows_keep_recipe_ingredient_amount_and_unit(self):
+        output = self.run_isolated("""
+            from app import supabase_client as db
+            from app.agent import tools
+            db.bootstrap_household(['Ada'], 'UTC')
+            plan = {
+                'scope': {'label': 'Chia Pudding'},
+                'request': 'Buy what I need for chia pudding',
+                'recipeCards': [{
+                    'title': 'Chia Pudding',
+                    'ingredients': [
+                        {'name': 'Chia Seeds', 'amount': 3, 'unit': 'tbsp'},
+                        {'name': 'Milk', 'amount': 1, 'unit': 'cup'},
+                        {'name': 'Vanilla Extract', 'quantity': '1/2', 'unit': 'tsp'},
+                    ],
+                }],
+            }
+            # Planner rows as observed: purchase quantity in amount, alias
+            # keys, and rows carrying only purchase fields.
+            cart_items = [
+                {'name': 'Chia Seeds', 'amount': 0.1, 'purchaseAmount': 0.1,
+                 'purchaseUnit': 'tbsp', 'category': 'Pantry',
+                 'pantryAllocation': {'allocated_amount': 2.9, 'allocated_unit': 'tbsp'}},
+                {'name': 'milk', 'requiredAmount': 1, 'requiredUnit': 'cup',
+                 'category': 'Dairy'},
+                {'name': 'Vanilla Extract', 'purchaseAmount': 0.5,
+                 'purchaseUnit': 'tsp', 'category': 'Baking'},
+                {'name': 'Maple Syrup', 'purchaseAmount': 1, 'purchaseUnit': 'bottle'},
+            ]
+            result = tools.save_recipe_grocery_plan_tool(
+                plan=plan, cart_items=cart_items, update_cart=True,
+            )
+            assert result['status'] == 'success', result
+            rows = {
+                row['name']: (row['amount'], row['unit'],
+                              row['purchaseAmount'], row['purchaseUnit'])
+                for row in db.get_grocery_cart()
+            }
+            assert rows == {
+                'Chia Seeds': (3, 'tbsp', 0.1, 'tbsp'),
+                'milk': (1, 'cup', 1, 'cup'),
+                'Vanilla Extract': (0.5, 'tsp', 0.5, 'tsp'),
+                'Maple Syrup': (1, 'bottle', 1, 'bottle'),
+            }, rows
+            print('ok')
+        """)
+        self.assertIn("ok", output)
+
     def test_oauth_state_is_single_use_and_checkout_lease_is_atomic(self):
         output = self.run_isolated("""
             from datetime import datetime, timedelta, timezone

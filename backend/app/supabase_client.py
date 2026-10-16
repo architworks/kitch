@@ -7,6 +7,7 @@ results remain valid, but writes must return provider-confirmed rows.
 from __future__ import annotations
 
 import json
+import math
 import os
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
@@ -275,6 +276,41 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _first_present(item: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if item.get(key) is not None:
+            return item[key]
+    return None
+
+
+def _first_text(item: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        text = str(item.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _parse_quantity(value: Any) -> float | None:
+    """Parse a finite quantity such as 3, "0.5", "1/2" or "1 1/2"."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            number = float(value)
+        else:
+            parts = str(value).split()
+            if not parts:
+                return None
+            number = 0.0
+            for part in parts:
+                numerator, _, denominator = part.partition("/")
+                number += float(numerator) / float(denominator or 1)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _normalize_grocery_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
     name = str(
         item.get("name")
@@ -284,12 +320,19 @@ def _normalize_grocery_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
     ).strip()
     if not name:
         return None
-    try:
-        amount = float(
-            item.get("amount", item.get("quantity", item.get("qty", 1))) or 1
+    purchase_amount = _first_present(item, "purchaseAmount", "purchase_amount")
+    purchase_unit = _first_text(item, "purchaseUnit", "purchase_unit")
+    parsed_purchase_amount = _parse_quantity(purchase_amount)
+    amount = _parse_quantity(
+        _first_present(
+            item, "amount", "requiredAmount", "required_amount", "quantity", "qty"
         )
-    except (TypeError, ValueError):
-        amount = 1
+    ) or parsed_purchase_amount or 1
+    unit = (
+        _first_text(item, "unit", "requiredUnit", "required_unit")
+        or purchase_unit
+        or "piece"
+    )
     source = str(item.get("source") or "agent").strip().lower() or "agent"
     if source not in {"agent", "manual"}:
         source = "agent"
@@ -297,21 +340,17 @@ def _normalize_grocery_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
         "id": item.get("id"),
         "name": name,
         "amount": amount,
-        "unit": str(item.get("unit") or "piece").strip() or "piece",
+        "unit": unit,
         "category": str(
             item.get("category") or item.get("section") or "General"
         ).strip()
         or "General",
         "source": source,
         "checked": _coerce_bool(item.get("checked", False)),
-        "purchaseAmount": float(
-            item.get("purchaseAmount", item.get("purchase_amount", amount))
-            if item.get("purchaseAmount", item.get("purchase_amount")) is not None
-            else amount
-        ),
-        "purchaseUnit": str(
-            item.get("purchaseUnit") or item.get("purchase_unit") or item.get("unit") or "piece"
-        ).strip() or "piece",
+        "purchaseAmount": parsed_purchase_amount
+        if parsed_purchase_amount is not None
+        else amount,
+        "purchaseUnit": purchase_unit or unit,
         "pantryAllocation": _coerce_json(
             item.get("pantryAllocation", item.get("pantry_allocation", {})), {}
         ),
@@ -372,6 +411,57 @@ def _recipe_card_ingredients(recipe_cards: List[Dict[str, Any]]) -> List[Any]:
             if isinstance(card_ingredients, list):
                 ingredients.extend(card_ingredients)
     return ingredients
+
+
+def _recipe_ingredient_requirements(
+    ingredients: List[Any],
+) -> Dict[str, tuple[float, str]]:
+    """Total required amount and unit per recipe ingredient name.
+
+    Names listed with conflicting units, or without a usable amount, are left
+    out so their cart rows keep the agent-supplied quantity.
+    """
+    totals: dict[str, tuple[float, str] | None] = {}
+    for ingredient in ingredients:
+        if not isinstance(ingredient, dict):
+            continue
+        key = _first_text(
+            ingredient, "name", "ingredient_name", "item", "ingredient"
+        ).casefold()
+        if not key:
+            continue
+        amount = _parse_quantity(
+            _first_present(ingredient, "amount", "quantity", "qty")
+        )
+        unit = _first_text(ingredient, "unit")
+        previous = totals.get(key, (0.0, unit))
+        if (
+            previous is None
+            or amount is None
+            or amount <= 0
+            or previous[1].casefold() != unit.casefold()
+        ):
+            totals[key] = None
+            continue
+        totals[key] = (previous[0] + amount, previous[1])
+    return {key: total for key, total in totals.items() if total is not None}
+
+
+def _apply_recipe_requirement(
+    item: Dict[str, Any], requirements: Dict[str, tuple[float, str]]
+) -> Dict[str, Any]:
+    """Use the recipe ingredient as a cart row's required amount and unit.
+
+    The planner may describe a row only by its purchase quantity or under
+    alias keys; the saved recipe ingredient is the source of truth for what
+    the household needs. Purchase quantities stay as the planner derived them.
+    """
+    requirement = requirements.get(item["name"].casefold())
+    if requirement:
+        amount, unit = requirement
+        item["amount"] = amount
+        item["unit"] = unit or item["unit"]
+    return item
 
 
 def _normalize_recipe_grocery_plan(
@@ -1608,8 +1698,9 @@ def save_recipe_grocery_plan(
     )
     if not normalized_plan:
         raise ValueError("A structured recipe grocery plan is required.")
+    requirements = _recipe_ingredient_requirements(normalized_plan["ingredients"])
     normalized_cart = [
-        item
+        _apply_recipe_requirement(item, requirements)
         for item in (
             _normalize_grocery_item({**raw, "source": "agent"})
             for raw in cart_items
