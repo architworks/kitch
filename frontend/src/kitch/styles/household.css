@@ -133,3 +133,8 @@
   .week .section-head .push .btn.soft { margin-left: auto; }
   .today-nutrition { grid-template-columns: auto 1fr; }
 }
+
+.week-loading { display: grid; gap: 12px; }
+.week-loading .day-strip { margin-bottom: 4px; }
+.day-skeleton { border-radius: 14px; width: 100%; }
+@container workspace (max-width: 700px) { .week-loading .day-strip { display: grid; } }

@@ -2,6 +2,7 @@
 
 import Icon from "./Icon.js";
 import Art from "./Art.js";
+import { SkeletonLine } from "./Skeleton.js";
 import {
   GROCERY_CATEGORY_DESCRIPTIONS,
   cartItemKey,
@@ -29,6 +30,15 @@ function ProviderLogo({ provider, size = 36 }) {
   return <img className="provider-logo" src={src} alt="" width={size} height={size} />;
 }
 
+function ListLoading({ label }) {
+  return (
+    <div className="list-loading" aria-busy="true">
+      <span className="visually-hidden">{label}</span>
+      {[0, 1, 2, 3].map(index => <SkeletonLine key={index} height={40} width={`${100 - index * 6}%`} />)}
+    </div>
+  );
+}
+
 /* ---------- Shopping list ---------- */
 
 function ShoppingList({ k, ask, go }) {
@@ -48,7 +58,9 @@ function ShoppingList({ k, ask, go }) {
         </button>
       </div>
 
-      {k.totalCount === 0 ? (
+      {k.totalCount === 0 && k.liveStateUser !== k.activeUser ? (
+        <ListLoading label="Loading the shopping list" />
+      ) : k.totalCount === 0 ? (
         <div className="empty">
           <Art className="spot" src="/art/spot-groceries.png" alt="" />
           <h3>The shopping list is empty</h3>
@@ -225,7 +237,9 @@ function PantryPanel({ k }) {
         </button>
       </div>
 
-      {k.pantryStock.length === 0 ? (
+      {k.pantryStock.length === 0 && k.liveStateUser !== k.activeUser ? (
+        <ListLoading label="Loading the pantry" />
+      ) : k.pantryStock.length === 0 ? (
         <div className="empty">
           <Art className="spot" src="/art/spot-pantry.png" alt="" />
           <h3>The pantry is empty</h3>
@@ -494,7 +508,7 @@ function ProviderReview({ k }) {
       )}
 
       {k.providerCartRows.length === 0 ? (
-        <p className="muted">The {label} cart is empty.</p>
+        !k.providerLiveCart && <p className="muted">The {label} cart is empty.</p>
       ) : (
         <div className="product-table" role="table" aria-label={`${label} cart, highest subtotal first`}>
           <div className="product-row head" role="row">
@@ -685,6 +699,7 @@ function OrderSummary({ k }) {
   const p = k.selectedProvider;
   const label = p.id ? p.label : "App";
   const shown = k.hasProviderCartDisplay;
+  const emptyCart = shown && k.providerDisplayedItems.length === 0;
   return (
     <section className="card card-pad summary" aria-labelledby="summary-title">
       <div className="summary-head">
@@ -694,13 +709,15 @@ function OrderSummary({ k }) {
       <dl className="totals">
         <div><dt>Items to buy</dt><dd>{k.eligibleBuyCount}</dd></div>
         <div><dt>Selected to order</dt><dd>{k.pendingBuyCount}</dd></div>
-        <div className="sep"><dt>Subtotal</dt><dd>{k.providerSubtotal || (shown ? "Not returned" : "Not synced")}</dd></div>
+        <div className="sep"><dt>Subtotal</dt><dd>{k.providerSubtotal || (emptyCart ? "—" : shown ? "Not returned" : "Not synced")}</dd></div>
         {k.providerFees.map(fee => <div key={`${fee.label}-${fee.value}`}><dt>{fee.label}</dt><dd>{fee.value}</dd></div>)}
         {k.providerDiscount && <div className="discount"><dt>Discount</dt><dd>−{k.providerDiscount}</dd></div>}
-        <div className="grand"><dt>{label} total</dt><dd>{k.providerTotal || (shown ? "Unavailable" : "Not synced")}</dd></div>
+        <div className="grand"><dt>{label} total</dt><dd>{k.providerTotal || (emptyCart ? "Empty" : shown ? "Unavailable" : "Not synced")}</dd></div>
       </dl>
       <p className="summary-note">
-        {shown
+        {emptyCart
+          ? `The ${label} cart has no items yet. Send your selection to see real prices.`
+          : shown
           ? <><b>{k.providerTotalSource === "provider" ? "Total from the app." : k.providerTotalSource === "line_items" ? "Exact sum of line items." : "Total unavailable."}</b> {k.providerTotalNotice}</>
           : `Prices appear once ${label} returns the cart. Kitch never estimates them.`}
       </p>

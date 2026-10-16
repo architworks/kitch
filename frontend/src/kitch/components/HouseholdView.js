@@ -3,6 +3,7 @@
 import Icon from "./Icon.js";
 import Art, { heroArtFor, HERO_FALLBACK } from "./Art.js";
 import { MacroBars, CalorieRing } from "./NutritionBits.js";
+import { SkeletonLine } from "./Skeleton.js";
 import { formatPlanDate, getWeekStartForDate, shiftIsoDate, MEAL_SLOTS } from "../../app/householdConfig.js";
 import { getMealTitle, hasMealTitle, formatRelativeCheckedTime, MEAL_SLOT_LABELS } from "../lib/helpers.js";
 
@@ -26,12 +27,21 @@ function Hero({ k, ask, go }) {
     : "No meals planned yet";
   const recipeReady = planned && sameTitle(k.activeRecipeTitle, focus.title);
   const greeting = k.timeGreeting === "Welcome" ? `Welcome, ${k.activeUser}` : `${k.timeGreeting}, ${k.activeUser}`;
+  // Until the week has loaded, "no meals planned" would be a guess, not a fact.
+  const loading = !planned && !k.mealPlan.week_start;
 
   return (
     <section className="hero" aria-labelledby="hero-title">
       <Art className="hero-art" src={heroArtFor(k.timeGreeting)} fallback={HERO_FALLBACK} alt="" />
       <div className="hero-copy">
         <h1 id="hero-title">{greeting}</h1>
+        {loading ? (
+          <div className="hero-focus" aria-busy="true">
+            <p className="hero-when"><Icon name="calendar" size="sm" />Checking today’s plan…</p>
+            <SkeletonLine className="on-dark" width="62%" height={30} />
+            <SkeletonLine className="on-dark" width="30%" height={14} />
+          </div>
+        ) : (
         <div className="hero-focus">
           <p className="hero-when"><Icon name={planned ? focus.slot : "calendar"} size="sm" />{when}</p>
           {planned ? (
@@ -57,6 +67,7 @@ function Hero({ k, ask, go }) {
             </>
           )}
         </div>
+        )}
       </div>
     </section>
   );
@@ -91,7 +102,7 @@ function WeekPlan({ k, ask, go }) {
           <button type="button" className="icon-btn" aria-label="Previous week" disabled={!mealPlan.week_start} onClick={() => k.loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, -7))}><Icon name="left" /></button>
           <button type="button" className="btn sm" disabled={!today || containsToday} onClick={() => k.loadMealPlanWeek(getWeekStartForDate(today), today)}>Today</button>
           <button type="button" className="icon-btn" aria-label="Next week" disabled={!mealPlan.week_start} onClick={() => k.loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, 7))}><Icon name="right" /></button>
-          <button type="button" className="btn soft sm" onClick={() => ask(planPrompt)}>{containsToday ? "Plan next week" : "Plan this week"}</button>
+          <button type="button" className="btn soft sm" disabled={days.length === 0} onClick={() => ask(planPrompt)}>{containsToday ? "Plan next week" : "Plan this week"}</button>
         </div>
       </div>
 
@@ -118,6 +129,14 @@ function WeekPlan({ k, ask, go }) {
           );
         })}
       </div>
+
+      {days.length === 0 && (
+        <div className="week-loading" aria-busy="true">
+          <span className="visually-hidden">Loading the week</span>
+          <div className="day-strip">{Array.from({ length: 7 }).map((_, index) => <SkeletonLine key={index} height={66} className="day-skeleton" />)}</div>
+          {[0, 1, 2].map(index => <SkeletonLine key={index} height={18} width={`${70 - index * 12}%`} className="meal-skeleton" />)}
+        </div>
+      )}
 
       {weekIsEmpty && (
         <div className="callout week-callout">
@@ -171,6 +190,9 @@ function WeekPlan({ k, ask, go }) {
 }
 
 function TodayNutrition({ k, go }) {
+  if (k.liveStateUser !== k.activeUser) {
+    return <section className="card card-pad personal loading-card" aria-busy="true"><span className="visually-hidden">Loading {k.activeUser}’s day</span><SkeletonLine width="46%" height={20} /><SkeletonLine height={108} width="108px" /><SkeletonLine width="80%" /></section>;
+  }
   return (
     <section className="card card-pad personal" aria-labelledby="today-nutrition-title">
       <div className="section-head">
@@ -191,6 +213,9 @@ function TodayNutrition({ k, go }) {
 }
 
 function KitchenStatus({ k, go }) {
+  if (k.liveStateUser !== k.activeUser) {
+    return <section className="card card-pad loading-card" aria-busy="true"><span className="visually-hidden">Loading pantry and groceries</span><SkeletonLine width="52%" height={16} /><SkeletonLine width="70%" /><SkeletonLine width="48%" height={16} /><SkeletonLine width="64%" /></section>;
+  }
   const pantryCount = k.pantryStock.length;
   const toBuy = k.eligibleBuyCount;
   const providerLabel = k.selectedProvider.id ? k.selectedProvider.label : "an ordering app";

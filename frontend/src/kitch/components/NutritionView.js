@@ -2,6 +2,7 @@
 
 import Icon from "./Icon.js";
 import Art from "./Art.js";
+import { LoadingCard } from "./Skeleton.js";
 import { CalorieRing, MacroBars } from "./NutritionBits.js";
 import { formatPlanDate, shiftIsoDate } from "../../app/householdConfig.js";
 import { NUTRITION_MEALS, formatNutritionNumber, currentNutritionMealType } from "../lib/helpers.js";
@@ -102,6 +103,12 @@ export default function NutritionView({ k, ask }) {
         </div>
       </header>
 
+      {!k.nutritionDashboard.start_date ? (
+        <div className="nutrition-top">
+          <LoadingCard label={`Loading ${k.activeUser}’s diary`} rows={3} />
+          <LoadingCard label="Loading this week" rows={3} />
+        </div>
+      ) : (<>
       <div className="nutrition-top">
         <section className="card card-pad day-summary" aria-labelledby="day-summary-title">
           <h2 id="day-summary-title" className="visually-hidden">Day summary</h2>
@@ -223,6 +230,7 @@ export default function NutritionView({ k, ask }) {
           </section>
         </aside>
       </div>
+      </>)}
     </div>
   );
 }

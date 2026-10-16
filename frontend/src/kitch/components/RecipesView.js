@@ -2,6 +2,7 @@
 
 import Icon from "./Icon.js";
 import Art from "./Art.js";
+import { LoadingCard } from "./Skeleton.js";
 import { MEAL_SLOTS, formatPlanDate } from "../../app/householdConfig.js";
 import { getIngredientName, getIngredientQuantity, getMealTitle, cartPurchaseAmount, formatCartQuantity, renderMarkdownContent } from "../lib/helpers.js";
 
@@ -35,6 +36,14 @@ function RecipeEmpty({ k, ask }) {
 }
 
 export default function RecipesView({ k, ask, go }) {
+  if (!k.activeRecipeCard && k.liveStateUser !== k.activeUser) {
+    return (
+      <div className="page recipes">
+        <header className="page-header"><h1 className="page-title">Recipes</h1></header>
+        <LoadingCard label="Loading the latest recipe" rows={4} />
+      </div>
+    );
+  }
   if (!k.activeRecipeCard) {
     return (
       <div className="page recipes">
