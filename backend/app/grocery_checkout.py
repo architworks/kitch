@@ -34,6 +34,64 @@ from app.storage import (
 
 CartMapper = Callable[[List[Dict[str, Any]]], Awaitable[List[Dict[str, Any]]]]
 CHECKOUT_OPERATION_LEASE_SECONDS = 300
+# A review read from Instamart this recently is what the person just looked at;
+# re-reading it again at the moment they press Place order adds latency and
+# false alarms, not safety.
+PREFLIGHT_FRESH_SECONDS = 60
+
+
+def _review_is_fresh(review: Dict[str, Any], now: datetime | None = None) -> bool:
+    raw = str(review.get("last_validated_at") or "")
+    if not raw:
+        return False
+    try:
+        validated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if validated.tzinfo is None:
+        validated = validated.replace(tzinfo=timezone.utc)
+    age = ((now or datetime.now(timezone.utc)) - validated).total_seconds()
+    return 0 <= age <= PREFLIGHT_FRESH_SECONDS
+
+
+def _rupees(minor: Any) -> str:
+    try:
+        value = int(minor) / 100
+    except (TypeError, ValueError):
+        return "an unknown amount"
+    return f"₹{value:,.0f}" if value == int(value) else f"₹{value:,.2f}"
+
+
+def describe_material_changes(changes: List[Dict[str, Any]], provider_label: str) -> str:
+    """One plain sentence a person can act on, built from the material changes."""
+    parts: List[str] = []
+    for change in changes or []:
+        kind = change.get("type")
+        if kind == "bill_changed":
+            fees = [
+                f"{fee['label']} {_rupees(fee['amount_minor'])} added"
+                for fee in change.get("added_fees") or []
+            ] + [
+                f"{fee['label']} went from {_rupees(fee['previous_minor'])} to {_rupees(fee['amount_minor'])}"
+                for fee in change.get("changed_fees") or []
+            ]
+            total = (
+                f"total {_rupees(change.get('previous_total_minor'))} → {_rupees(change.get('total_minor'))}"
+                if change.get("total_minor") is not None
+                else "the payable total is no longer available"
+            )
+            parts.append("; ".join([*fees, total]))
+        elif kind == "product_changed":
+            name = (change.get("native_item") or {}).get("name") or "An item"
+            parts.append(f"{name}: {', '.join(change.get('fields') or ['details'])} changed")
+        elif kind == "extra_items_changed":
+            parts.append("items added directly in Instamart changed")
+        elif kind in {"membership_changed", "provider_item_removed", "added"}:
+            parts.append("the items in the cart changed")
+    parts = list(dict.fromkeys(parts))
+    if not parts:
+        return f"{provider_label} changed the cart after you reviewed it. Check it and place the order again."
+    return f"{provider_label} changed the order after you reviewed it: {'; '.join(parts)}. Check the new total and place the order again."
 
 
 class GroceryCheckoutService:
@@ -462,24 +520,32 @@ class GroceryCheckoutService:
                     message="Select a provider-returned payment method before ordering.",
                     status_code=422,
                 )
-            validation = await self._revalidate_provider(
-                provider_id,
-                adapter,
-                review,
-                operation_id=operation_id,
-                source="ui_order_preflight",
-            )
-            self._raise_result_error(provider_id, "place_order_revalidation", validation)
-            refreshed, changed = save_revalidated_draft(row, validation)
-            if changed or refreshed.get("snapshot_hash") != payload.get("approved_snapshot_hash"):
-                raise ProviderOperationError(
-                    provider=provider_id,
-                    operation="place_order",
-                    code="provider_cart_changed",
-                    message="The provider cart changed during the final availability check.",
-                    status_code=409,
-                    draft=refreshed,
+            if _review_is_fresh(review):
+                refreshed = review
+            else:
+                validation = await self._revalidate_provider(
+                    provider_id,
+                    adapter,
+                    review,
+                    operation_id=operation_id,
+                    source="ui_order_preflight",
                 )
+                self._raise_result_error(provider_id, "place_order_revalidation", validation)
+                refreshed, changed = save_revalidated_draft(row, validation)
+                # Only material changes (items, quantities, a higher or missing
+                # total) need the person's eyes again; cosmetic drift does not.
+                if changed:
+                    raise ProviderOperationError(
+                        provider=provider_id,
+                        operation="place_order",
+                        code="provider_cart_changed",
+                        message=describe_material_changes(
+                            refreshed.get("changes") or [],
+                            descriptor.label,
+                        ),
+                        status_code=409,
+                        draft=refreshed,
+                    )
 
             checkout_attempt_id = str(uuid4())
             pending_row = save_provider_checkout_draft(
@@ -848,20 +914,49 @@ class GroceryCheckoutService:
                 })
         if len(previous) != len(current):
             changes.append({"type": "membership_changed"})
-        if (previous_review.get("cart_summary") or {}) != (refreshed.get("cart_summary") or {}):
-            changes.append({"type": "bill_changed"})
-        if (previous_review.get("payment_options") or []) != (refreshed.get("payment_options") or []):
-            changes.append({"type": "payment_methods_changed"})
-        previous_unavailable = sorted(
-            (str(item.get("name") or ""), str(item.get("reason") or ""))
-            for item in previous_review.get("unavailable_items") or []
-        )
-        current_unavailable = sorted(
-            (str(item.get("name") or ""), str(item.get("reason") or ""))
-            for item in refreshed.get("unavailable_items") or []
-        )
-        if previous_unavailable != current_unavailable:
-            changes.append({"type": "unavailable_items_changed"})
+
+        def extras(review: Dict[str, Any]) -> List[tuple]:
+            return sorted(
+                (str(item.get("candidate_id") or ""), item.get("quantity"))
+                for item in (review.get("checkout_context") or {}).get("extra_provider_items") or []
+                if isinstance(item, dict)
+            )
+
+        if extras(previous_review) != extras(refreshed):
+            changes.append({"type": "extra_items_changed"})
+        # The bill matters only when the person would pay more (or the total
+        # disappears). Relabelled fees, a lower total, a reordered payment list
+        # or reworded unavailable reasons never change what is bought.
+        previous_summary = previous_review.get("cart_summary") or {}
+        current_summary = refreshed.get("cart_summary") or {}
+        previous_total = previous_summary.get("total_minor")
+        current_total = current_summary.get("total_minor")
+        if current_total is None or (
+            previous_total is not None and current_total > previous_total
+        ):
+            previous_fees = {
+                str(fee.get("label")): fee.get("amount_minor")
+                for fee in previous_summary.get("fees") or []
+            }
+            current_fees = {
+                str(fee.get("label")): fee.get("amount_minor")
+                for fee in current_summary.get("fees") or []
+            }
+            changes.append({
+                "type": "bill_changed",
+                "previous_total_minor": previous_total,
+                "total_minor": current_total,
+                "added_fees": [
+                    {"label": label, "amount_minor": amount}
+                    for label, amount in current_fees.items()
+                    if label not in previous_fees
+                ],
+                "changed_fees": [
+                    {"label": label, "amount_minor": amount, "previous_minor": previous_fees[label]}
+                    for label, amount in current_fees.items()
+                    if label in previous_fees and previous_fees[label] != amount
+                ],
+            })
         refreshed["replacements"] = replacements
         refreshed["changes"] = changes
         refreshed["changed"] = bool(replacements or changes)

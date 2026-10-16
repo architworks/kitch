@@ -128,11 +128,17 @@ export function MemberDialog({ k, go }) {
   );
 }
 
-const TRANSFER_STEPS = (label) => [
-  ["preparing", "Preparing your list"],
-  ["transferring", `Matching ${label} products`],
-  ["finalizing", "Building the review"]
-];
+const TRANSFER_STEPS = (label, placing) => placing
+  ? [
+    ["preparing", `Checking the cart with ${label}`],
+    ["transferring", "Placing the order"],
+    ["finalizing", "Opening payment"]
+  ]
+  : [
+    ["preparing", "Preparing your list"],
+    ["transferring", `Matching ${label} products`],
+    ["finalizing", "Building the review"]
+  ];
 
 export function ProviderTransferDialog({ k }) {
   const { providerSyncDialogRef } = k;
@@ -143,16 +149,16 @@ export function ProviderTransferDialog({ k }) {
     : stage === "failed"
       ? k.isCheckingProviderPayment ? "Payment status could not be read" : "The transfer needs attention"
       : k.isCheckingProviderPayment ? `Checking your ${label} payment…`
-        : k.isPlacingProviderOrder ? `Checking ${label} availability before ordering…`
+        : k.isPlacingProviderOrder ? `Placing your ${label} order…`
           : k.providerCartReview ? `Refreshing your ${label} cart…` : `Sending your items to ${label}…`;
   const body = stage === "complete"
     ? "The reviewed products and anything unavailable are ready for you to check."
     : stage === "failed"
       ? "Kitch could not complete the handoff. Your shopping list was left unchanged."
       : k.isCheckingProviderPayment ? `Kitch is making one status check with ${label}; it will not resubmit the order.`
-        : k.isPlacingProviderOrder ? `Kitch is confirming every approved product and quantity with ${label} before placing the order.`
+        : k.isPlacingProviderOrder ? `Kitch is placing the order you approved. Nothing is added or changed in your ${label} cart.`
           : `Editing is paused while ${label} picks your store, matches products and builds the review.`;
-  const steps = TRANSFER_STEPS(label);
+  const steps = TRANSFER_STEPS(label, k.isPlacingProviderOrder);
   const current = steps.findIndex(([key]) => key === stage);
 
   return (

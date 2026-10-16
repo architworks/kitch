@@ -154,6 +154,7 @@ export function useKitch() {
   const [isPlacingProviderOrder, setIsPlacingProviderOrder] = useState(false);
   const [isCheckingProviderPayment, setIsCheckingProviderPayment] = useState(false);
   const [isProviderOrderComplete, setIsProviderOrderComplete] = useState(false);
+  const [providerPaymentCheckedAt, setProviderPaymentCheckedAt] = useState("");
   const [providerPaymentHandoff, setProviderPaymentHandoff] = useState(null);
   const [scanningOverlay, setScanningOverlay] = useState({
     active: false,
@@ -1352,6 +1353,22 @@ export function useKitch() {
       return;
     }
 
+    // UPI payments finish on Instamart's own page (a QR on a computer, the UPI
+    // app on a phone). Open the tab now, inside the click, so the browser does
+    // not block it, and point it at Swiggy's page once the order exists.
+    const chosenPayment = providerPaymentOptions.find(option => (
+      String(optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], "")) === String(effectiveProviderPaymentMethod)
+    ));
+    let paymentWindow = null;
+    if (["upi_qr", "upi_intent"].includes(chosenPayment?.flow)) {
+      paymentWindow = window.open("", "kitch-instamart-payment");
+      if (paymentWindow) {
+        paymentWindow.opener = null;
+        paymentWindow.document.title = "Opening Instamart payment…";
+        paymentWindow.document.body.innerHTML = '<p style="font:16px system-ui;margin:40vh auto;text-align:center;color:#474f42">Placing your order with Instamart…<br>The payment page opens here in a moment.</p>';
+      }
+    }
+
     providerSyncInFlightRef.current = true;
     setIsProviderSyncing(true);
     startProviderSyncProgress();
@@ -1383,6 +1400,11 @@ export function useKitch() {
         remaining_poll_ms: Number(handoff.max_poll_time_ms || 120000)
       } : null);
       setIsProviderOrderComplete(data.status === "success");
+      const paymentUrl = safeProviderPaymentUrl(handoff?.bridge_url || handoff?.upi_intent_url);
+      if (paymentWindow && !paymentWindow.closed) {
+        if (paymentUrl && /^https?:/.test(paymentUrl)) paymentWindow.location.replace(paymentUrl);
+        else paymentWindow.close();
+      }
       clearProviderSyncTimers();
       setProviderSyncStage("complete");
       triggerBannerAlert(data.status === "success"
@@ -1390,6 +1412,7 @@ export function useKitch() {
         : `${selectedProvider.label} order could not be placed.`);
     } catch (e) {
       console.error(`Failed to place ${selectedProvider.label} order`, e);
+      if (paymentWindow && !paymentWindow.closed) paymentWindow.close();
       const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
       if (changedDraft) {
         applyProviderDraft(changedDraft, { resetAcknowledgement: true });
@@ -1406,12 +1429,12 @@ export function useKitch() {
     }
   };
 
-  const checkProviderPaymentStatus = useCallback(async () => {
+  // Status checks run inline while the person is paying (often scanning a QR
+  // on another screen), so they never take over the page with a dialog.
+  const checkProviderPaymentStatus = useCallback(async ({ manual = false } = {}) => {
     if (!selectedProvider?.routes?.paymentStatus || providerSyncInFlightRef.current) return;
     providerSyncInFlightRef.current = true;
-    setIsProviderSyncing(true);
     setIsCheckingProviderPayment(true);
-    startProviderSyncProgress();
     try {
       const res = await apiFetch(apiUrl(selectedProvider.routes.paymentStatus), {
         method: "POST",
@@ -1421,30 +1444,26 @@ export function useKitch() {
       const data = await res.json();
       const review = data.review || data;
       applyProviderDraft(review);
+      setProviderPaymentCheckedAt(new Date().toISOString());
       setIsProviderOrderComplete(review.status === "ordered");
-      clearProviderSyncTimers();
-      setProviderSyncStage("complete");
-      triggerBannerAlert(
-        review.status === "ordered"
-          ? `${selectedProvider.label} confirmed the payment and order.`
-          : `The ${selectedProvider.label} payment is still ${review.payment_state?.status || "pending"}.`
-      );
+      if (review.status === "ordered") {
+        setProviderPaymentHandoff(null);
+        triggerBannerAlert(`${selectedProvider.label} confirmed the payment and order.`, "success");
+      } else if (review.status !== "payment_pending") {
+        setProviderPaymentHandoff(null);
+        triggerBannerAlert(`The ${selectedProvider.label} payment did not go through.`, "error");
+      } else if (manual) {
+        triggerBannerAlert(`The ${selectedProvider.label} payment is still ${review.payment_state?.status || "pending"}.`);
+      }
     } catch (e) {
-      clearProviderSyncTimers();
-      setProviderSyncStage("failed");
-      triggerBannerAlert(apiErrorMessage(e, `Could not check the ${selectedProvider.label} payment status.`));
+      if (manual) triggerBannerAlert(apiErrorMessage(e, `Could not check the ${selectedProvider.label} payment status.`));
     } finally {
-      clearProviderSyncTimers();
       providerSyncInFlightRef.current = false;
-      setIsProviderSyncing(false);
       setIsCheckingProviderPayment(false);
-      setProviderSyncStage("idle");
     }
   }, [
     applyProviderDraft,
-    clearProviderSyncTimers,
     selectedProvider,
-    startProviderSyncProgress,
     triggerBannerAlert
   ]);
 
@@ -2034,9 +2053,17 @@ export function useKitch() {
   const providerLiveCartItems = Array.isArray(providerLiveCart?.provider_cart?.items)
     ? providerLiveCart.provider_cart.items
     : [];
+  // Items added straight to Instamart are part of the order, so the review
+  // lists them beside the rows that came from the Kitch shopping list.
+  const providerExtraItems = providerLiveCart
+    ? []
+    : (providerCartReview?.checkout_context?.extra_provider_items || []);
   const providerDisplayedItems = providerLiveCart
     ? providerLiveCartItems.map(item => ({ matched_product: item, cart_item: item }))
-    : providerMatchedItems;
+    : [
+      ...providerMatchedItems,
+      ...providerExtraItems.map(item => ({ matched_product: item, cart_item: item, extra: true }))
+    ];
   const providerCartRows = providerDisplayedItems
     .map((match, index) => ({
       match,
@@ -2047,11 +2074,17 @@ export function useKitch() {
       (right.subtotalMinor ?? -1) - (left.subtotalMinor ?? -1)
       || left.index - right.index
     ));
-  const providerUnavailableItems = providerLiveCart
+  const rawProviderUnavailableItems = providerLiveCart
     ? []
     : Array.isArray(providerCartReview?.unavailable_items)
       ? providerCartReview.unavailable_items
       : Array.isArray(providerCartReview?.result?.unavailable_items) ? providerCartReview.result.unavailable_items : [];
+  // The agent's omission and the reconciliation failure can both report the
+  // same native item (KI-004); list each missing item once, first reason wins.
+  const providerUnavailableItems = rawProviderUnavailableItems.filter((item, index, all) => {
+    const key = String(item?.native_item_id || item?.name || index).toLowerCase();
+    return all.findIndex(other => String(other?.native_item_id || other?.name || "").toLowerCase() === key) === index;
+  });
   const providerCartChanges = providerLiveCart || !Array.isArray(providerCartReview?.changes) ? [] : providerCartReview.changes;
   const providerReplacements = providerLiveCart || !Array.isArray(providerCartReview?.replacements) ? [] : providerCartReview.replacements;
   const providerCartReadAt = providerLiveCart?.read_at || providerCartReview?.last_validated_at;
@@ -2255,6 +2288,7 @@ export function useKitch() {
   };
 
   return {
+    providerPaymentCheckedAt,
     startupState,
     startSession,
     notices,

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Icon from "./Icon.js";
 import Art from "./Art.js";
 import { SkeletonLine } from "./Skeleton.js";
@@ -22,6 +23,49 @@ const PROVIDER_LOGOS = {
   zepto: "/zepto-logo.jpg",
   blinkit: "/blinkit-logo.jpg"
 };
+
+const rupees = (minor) => formatMinorCurrency(minor, "INR") || "—";
+
+// One readable line per change Instamart made after the review.
+function describeChange(change) {
+  switch (change?.type) {
+    case "bill_changed": {
+      const fees = [
+        ...(change.added_fees || []).map(fee => `${fee.label} ${rupees(fee.amount_minor)} added`),
+        ...(change.changed_fees || []).map(fee => `${fee.label} ${rupees(fee.previous_minor)} → ${rupees(fee.amount_minor)}`)
+      ];
+      const total = change.total_minor == null
+        ? "the total is no longer available"
+        : change.previous_total_minor != null
+          ? `total ${rupees(change.previous_total_minor)} → ${rupees(change.total_minor)}`
+          : `total is now ${rupees(change.total_minor)}`;
+      return [...fees, total].join("; ");
+    }
+    case "product_changed":
+      return `${change.native_item?.name || "An item"}: ${(change.fields || ["details"]).map(field => field.replace(/_minor$/, "").replace(/_/g, " ")).join(", ")} changed`;
+    case "provider_item_removed":
+      return `${change.native_item?.name || "An item"} is no longer in the cart`;
+    case "membership_changed":
+    case "unexpected_provider_items":
+    case "added":
+      return "The items in the cart changed";
+    default:
+      return "The cart changed";
+  }
+}
+
+// Swiggy's brand guidelines require "Powered by Instamart" beside the cart,
+// the checkout summary and order status.
+function PoweredBy({ provider }) {
+  if (provider?.id !== "swiggy_instamart") return null;
+  return (
+    <span className="powered-by">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/instamart-logo.jpg" alt="" width="24" height="24" />
+      <span>Powered by Instamart</span>
+    </span>
+  );
+}
 
 function ProviderLogo({ provider, size = 36 }) {
   const src = PROVIDER_LOGOS[provider?.id];
@@ -480,6 +524,7 @@ function ProviderReview({ k }) {
 
   return (
     <div className="review">
+      <PoweredBy provider={k.selectedProvider} />
       <div className={`callout ${tone}`}>
         <Icon name={tone === "good" ? "checkCircle" : "alert"} />
         <div>{message}<span className="review-checked">Checked {k.providerLastChecked}</span></div>
@@ -492,7 +537,7 @@ function ProviderReview({ k }) {
         <div className="callout warn" role="status">
           <Icon name="swap" />
           <div>
-            <strong>{label} changed some products</strong>
+            <strong>{label} changed the order after you reviewed it</strong>
             <ul className="change-list">
               {k.providerReplacements.map((replacement, index) => (
                 <li key={`replacement-${index}`}>
@@ -500,7 +545,7 @@ function ProviderReview({ k }) {
                 </li>
               ))}
               {k.providerCartChanges.filter(change => change.type !== "replacement").map((change, index) => (
-                <li key={`change-${index}`}>{change.native_item?.name || "Cart item"}: price, pack size, quantity or details changed.</li>
+                <li key={`change-${index}`}>{describeChange(change)}</li>
               ))}
             </ul>
           </div>
@@ -531,7 +576,7 @@ function ProviderReview({ k }) {
                   </span>
                   <span>
                     <strong>{name}</strong>
-                    <small>{native.name ? `For “${native.name}”` : `In your ${label} cart`}</small>
+                    <small>{match.extra ? `Added directly in ${label}` : native.name ? `For “${native.name}”` : `In your ${label} cart`}</small>
                     {k.selectedProvider.id === "swiggy_instamart" && match.matching && (
                       <small className="match-notes">
                         Asked for {match.matching.requested_quantity ?? native.amount ?? "—"} {match.matching.requested_unit || native.unit || ""}
@@ -575,16 +620,14 @@ function Payment({ k }) {
   const status = k.providerPaymentState.status || "pending";
   return (
     <div className="payment">
-      {(k.providerPaymentPending || k.providerOrderAmbiguous || k.providerOrderCompleted) && (
+      {(k.providerOrderAmbiguous || k.providerOrderCompleted) && (
         <div className={`callout ${k.providerOrderCompleted ? "good" : "warn"}`} role="status">
           <Icon name={k.providerOrderCompleted ? "checkCircle" : "alert"} />
           <div>
-            <strong>{k.providerOrderCompleted ? "Order confirmed" : k.providerOrderAmbiguous ? "Check this order in the app" : "Payment pending"}</strong>
+            <strong>{k.providerOrderCompleted ? "Order placed" : "Check this order in the Swiggy app"}</strong>
             {k.providerOrderCompleted
               ? (k.providerOrderMessage || `${label} confirmed this order.`)
-              : k.providerOrderAmbiguous
-                ? `Kitch won’t resubmit this checkout. Confirm it in ${label} before doing anything else.`
-                : `Payment is ${status}. Don’t place the order again.`}
+              : `Kitch won’t resubmit this checkout. Confirm it in ${label} before doing anything else.`}
             {k.providerOrderResults.length > 0 && (
               <ul className="change-list">
                 {k.providerOrderResults.map((result, index) => (
@@ -594,16 +637,10 @@ function Payment({ k }) {
                 ))}
               </ul>
             )}
-            {k.providerPaymentPending && k.selectedProvider.capabilities?.payment_status && (
-              <div className="inline-actions">
-                {k.providerPaymentHandoffUrl && (
-                  <a className="btn primary sm" href={k.providerPaymentHandoffUrl} target="_blank" rel="noopener noreferrer">Continue payment in Swiggy <Icon name="external" size="sm" /></a>
-                )}
-                <button type="button" className="btn sm" onClick={k.checkProviderPaymentStatus} disabled={k.isCheckingProviderPayment || k.isPlacingProviderOrder}>
-                  {k.isCheckingProviderPayment ? "Checking…" : "Check payment status"}
-                </button>
-              </div>
+            {k.selectedProvider.id === "swiggy_instamart" && k.providerOrderCompleted && (
+              <p className="order-help">To change or cancel this order, call Swiggy customer care on <a href="tel:08067466729">080-67466729</a>.</p>
             )}
+            <PoweredBy provider={k.selectedProvider} />
           </div>
         </div>
       )}
@@ -624,23 +661,7 @@ function Payment({ k }) {
           {k.instamartSolePaymentOption ? (
             <p><strong>{k.instamartSolePaymentLabel}</strong><span>The only method Swiggy Instamart offered for this cart.</span></p>
           ) : k.providerPaymentOptions.length > 0 ? (
-            <select
-              className="select"
-              aria-label="Payment method"
-              value={k.selectedProviderPaymentMethod}
-              disabled={!k.providerAddressDetailsReady || k.isUpdatingProviderReview || k.isPlacingProviderOrder}
-              onChange={event => {
-                const value = event.target.value;
-                k.setSelectedProviderPaymentMethod(value);
-                k.updateProviderReview({ selected_payment_method_id: value || null });
-              }}
-            >
-              <option value="">Choose a payment method</option>
-              {k.providerPaymentOptions.map((option, index) => {
-                const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${index}`);
-                return <option key={`${value}-${index}`} value={value}>{formatProviderPaymentLabel(option, JSON.stringify(option).slice(0, 90))}</option>;
-              })}
-            </select>
+            <PaymentPicker k={k} />
           ) : (
             <p><span>{label} didn’t return a supported payment method, so ordering stays blocked.</span></p>
           )}
@@ -678,17 +699,117 @@ function Payment({ k }) {
         <span>I’ve checked the exact {label} cart, total, delivery address, payment and the items that won’t be ordered{k.providerMultiStore ? ", and that it ships from several stores" : ""}.</span>
       </label>
 
+      {k.providerPaymentPending ? <PaymentHandoff k={k} /> : (
       <div className="place-order">
         <button type="button" className="btn primary lg" onClick={k.placeProviderOrder} disabled={!k.canPlaceProviderOrder || k.isPlacingProviderOrder}>
           {k.isPlacingProviderOrder ? "Placing order…" : `Place order with ${label}${k.providerTotal ? ` · ${k.providerTotal}` : ""}`}
         </button>
         <p className="muted">This is the only button that can place a real order. Kitch’s chat never can.</p>
       </div>
+      )}
 
       <details className="raw">
         <summary>Technical details from {label}</summary>
         <pre>{JSON.stringify(k.providerCartDetails, null, 2)}</pre>
       </details>
+    </div>
+  );
+}
+
+// Swiggy's payment rules: offer only returned methods; scan-QR and UPI apps
+// both go through Instamart's own payment page (never our own QR); Swiggy
+// Money debits the balance inline; Cash is placed immediately.
+const PAYMENT_GROUPS = [
+  { key: "qr", title: "Scan a QR code", hint: "Instamart shows a QR to scan with any UPI app on your phone. Best on a computer.", match: option => option.flow === "upi_qr" },
+  { key: "intent", title: "Pay in a UPI app", hint: "Opens the app on this device. On a computer, scan a QR instead.", match: option => option.flow === "upi_intent" },
+  { key: "wallet", title: "Swiggy Money", hint: "Paid from your balance. If it doesn’t cover the total, nothing is charged and no order is placed.", match: option => option.kind === "swiggy_money" },
+  { key: "cash", title: "Cash on delivery", hint: "The order is placed right away; pay the delivery partner.", match: option => option.kind === "cod" }
+];
+
+function PaymentPicker({ k }) {
+  const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+  const order = touch ? ["intent", "qr", "wallet", "cash"] : ["qr", "wallet", "cash", "intent"];
+  const groups = order
+    .map(key => PAYMENT_GROUPS.find(group => group.key === key))
+    .map(group => ({ ...group, options: k.providerPaymentOptions.filter(group.match) }))
+    .filter(group => group.options.length > 0);
+  const disabled = !k.providerAddressDetailsReady || k.isUpdatingProviderReview || k.isPlacingProviderOrder;
+  const choose = (value) => {
+    k.setSelectedProviderPaymentMethod(value);
+    k.updateProviderReview({ selected_payment_method_id: value || null });
+  };
+  return (
+    <div className="pay-options" role="radiogroup" aria-label="Payment method">
+      {groups.map(group => (
+        <div key={group.key} className="pay-group">
+          <p className="pay-group-title">{group.title}<small>{group.hint}</small></p>
+          <div className={`pay-group-options ${group.key === "intent" ? "apps" : ""}`}>
+            {group.options.map((option, index) => {
+              const value = optionValue(option, ["id", "payment_method_id", "paymentMethodId", "method"], `payment-${index}`);
+              const selected = String(k.selectedProviderPaymentMethod) === String(value);
+              return (
+                <button
+                  key={`${value}-${index}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={disabled}
+                  className={`pay-option ${selected ? "selected" : ""}`}
+                  onClick={() => choose(value)}
+                >
+                  {formatProviderPaymentLabel(option, String(value))}
+                  {selected && <Icon name="check" size="sm" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PaymentHandoff({ k }) {
+  const label = k.selectedProvider.label;
+  const panelRef = useRef(null);
+  // Bring the payment step into view where the person is already looking.
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+  const handoff = k.providerPaymentHandoff;
+  const qr = Boolean(handoff?.is_qr_flow);
+  const url = k.providerPaymentHandoffUrl;
+  const checked = k.providerPaymentCheckedAt
+    ? new Date(k.providerPaymentCheckedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })
+    : "";
+  return (
+    <div className="handoff" role="status" ref={panelRef}>
+      <span className="tile turmeric handoff-tile" aria-hidden="true"><Icon name={qr ? "image" : "wallet"} size="lg" /></span>
+      <div className="handoff-body">
+        <strong>{qr ? "Scan the QR to pay" : "Finish paying in your UPI app"}</strong>
+        <p>
+          {url
+            ? qr
+              ? `${label}’s payment page opened in a new tab. Scan its QR code with any UPI app on your phone. If the tab didn’t open, use the button below.`
+              : `${label}’s payment page opened in a new tab; on a phone it hands over to your UPI app. If it didn’t open, use the button below.`
+            : `The payment link isn’t available on this screen any more. Finish or check the payment in the Swiggy app.`}
+        </p>
+        <div className="inline-actions">
+          {url && (
+            <a className="btn primary" href={url} target="_blank" rel="noopener noreferrer">
+              {qr ? "Show payment QR" : "Open payment page"} <Icon name="external" size="sm" />
+            </a>
+          )}
+          {k.selectedProvider.capabilities?.payment_status && (
+            <button type="button" className="btn" onClick={() => k.checkProviderPaymentStatus({ manual: true })} disabled={k.isCheckingProviderPayment}>
+              {k.isCheckingProviderPayment ? "Checking…" : "I’ve paid, check now"}
+            </button>
+          )}
+        </div>
+        <small className="handoff-note">
+          {k.isCheckingProviderPayment ? "Checking with Instamart…" : checked ? `Last checked ${checked}.` : "Kitch checks the payment automatically."} Don’t place the order again while this is pending.
+        </small>
+      </div>
     </div>
   );
 }
@@ -700,18 +821,49 @@ function OrderSummary({ k }) {
   const label = p.id ? p.label : "App";
   const shown = k.hasProviderCartDisplay;
   const emptyCart = shown && k.providerDisplayedItems.length === 0;
+  const summary = k.providerCartSummary || {};
+  const billLines = Array.isArray(summary.bill_lines) ? summary.bill_lines : [];
+  // Without Swiggy's itemised lines, never let the parts silently fall short
+  // of the total: whatever is not itemised is shown as "Other charges".
+  const knownParts = (Number(summary.subtotal_minor) || 0)
+    + (summary.fees || []).reduce((sum, fee) => sum + (Number(fee.amount_minor) || 0), 0)
+    - (Number(summary.discount_minor) || 0);
+  // Swiggy's itemised lines can add up to less than its total to pay; show
+  // the gap plainly rather than letting the bill look complete.
+  const unitemised = summary.total_minor != null && billLines.length > 0
+    ? Number(summary.total_minor) - billLines.reduce((sum, line) => sum + (Number(line.amount_minor) || 0), 0)
+    : 0;
+  const otherCharges = summary.total_minor != null && summary.subtotal_minor != null
+    ? Number(summary.total_minor) - knownParts
+    : 0;
   return (
     <section className="card card-pad summary" aria-labelledby="summary-title">
       <div className="summary-head">
         {p.id && <ProviderLogo provider={p} size={30} />}
         <h2 id="summary-title">Order summary</h2>
       </div>
+      <PoweredBy provider={p} />
       <dl className="totals">
         <div><dt>Items to buy</dt><dd>{k.eligibleBuyCount}</dd></div>
         <div><dt>Selected to order</dt><dd>{k.pendingBuyCount}</dd></div>
-        <div className="sep"><dt>Subtotal</dt><dd>{k.providerSubtotal || (emptyCart ? "—" : shown ? "Not returned" : "Not synced")}</dd></div>
-        {k.providerFees.map(fee => <div key={`${fee.label}-${fee.value}`}><dt>{fee.label}</dt><dd>{fee.value}</dd></div>)}
-        {k.providerDiscount && <div className="discount"><dt>Discount</dt><dd>−{k.providerDiscount}</dd></div>}
+        {billLines.length > 0 ? (
+          <>
+            {/* Swiggy's own bill, line by line, exactly as Swiggy labels it. */}
+            {billLines.map((line, index) => (
+              <div key={`${line.label}-${index}`} className={index === 0 ? "sep" : ""}><dt>{line.label}</dt><dd>{line.value}</dd></div>
+            ))}
+            {unitemised > 0 && (
+              <div className="unitemised"><dt>Not itemised by Instamart</dt><dd>{formatMinorCurrency(unitemised, k.providerCurrency)}</dd></div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="sep"><dt>Subtotal</dt><dd>{k.providerSubtotal || (emptyCart ? "—" : shown ? "Not returned" : "Not synced")}</dd></div>
+            {k.providerFees.map(fee => <div key={`${fee.label}-${fee.value}`}><dt>{fee.label}</dt><dd>{fee.value}</dd></div>)}
+            {k.providerDiscount && <div className="discount"><dt>Discount</dt><dd>−{k.providerDiscount}</dd></div>}
+            {otherCharges > 0 && <div className="unitemised"><dt>Not itemised by Instamart</dt><dd>{formatMinorCurrency(otherCharges, k.providerCurrency)}</dd></div>}
+          </>
+        )}
         <div className="grand"><dt>{label} total</dt><dd>{k.providerTotal || (emptyCart ? "Empty" : shown ? "Unavailable" : "Not synced")}</dd></div>
       </dl>
       <p className="summary-note">

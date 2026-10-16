@@ -198,6 +198,34 @@ class InstamartProviderTests(unittest.TestCase):
         adapter.enabled = True
         return adapter
 
+    def test_bill_lines_are_kept_exactly_as_swiggy_returns_them(self):
+        summary = self.adapter()._cart_summary({
+            "cartTotalAmount": 200,
+            "billBreakdown": {
+                "lineItems": [
+                    {"label": "Item Total", "value": "₹117"},
+                    {"label": "Handling Fee", "value": "₹12"},
+                    {"label": "Delivery Partner Fee", "value": "₹35.40"},
+                    {"label": "Rain Fee", "value": "₹35.40"},
+                    {"label": "GST", "value": "₹2.20"},
+                ],
+                "toPay": {"label": "To Pay", "value": "₹200"},
+            },
+        })
+        self.assertEqual(summary["total_minor"], 20000)
+        self.assertEqual(
+            [(line["label"], line["value"]) for line in summary["bill_lines"]],
+            [
+                ("Item Total", "₹117"),
+                ("Handling Fee", "₹12"),
+                ("Delivery Partner Fee", "₹35.40"),
+                ("Rain Fee", "₹35.40"),
+                ("GST", "₹2.20"),
+            ],
+        )
+        # The keyword-based fee list misses GST; the verbatim lines do not.
+        self.assertNotIn("GST", [fee["label"] for fee in summary["fees"]])
+
     def capture(self, *, include_eggs=True, unresolved=None):
         capture = CommerceRunCapture()
         cart_items = []

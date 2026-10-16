@@ -193,3 +193,28 @@
 
 .list-loading { display: grid; gap: 8px; margin-top: 8px; }
 .list-loading .skeleton { border-radius: 12px; }
+
+/* Payment picker */
+.pay-options { display: grid; gap: 12px; }
+.pay-group { display: grid; gap: 6px; }
+.pay-group-title { display: grid; font-weight: 650; font-size: 14px; }
+.pay-group-title small { font-weight: 400; color: var(--mute); font-size: 12.5px; }
+.pay-group-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.pay-option { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-weight: 600; font-size: 13.5px; transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+.pay-option:hover:not(:disabled) { border-color: var(--sage-2); }
+.pay-option.selected { border-color: var(--green-2); background: #f1f6ea; color: var(--green); box-shadow: 0 0 0 1px var(--green-2); }
+.pay-option:disabled { opacity: 0.5; }
+
+/* Payment hand-off */
+.handoff { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 14px; background: var(--turmeric-soft); border: 1px solid #f0d6aa; }
+.handoff-tile { width: 48px; height: 48px; background: #fff7e6; }
+.handoff-body { display: grid; gap: 6px; }
+.handoff-body strong { font-size: 16px; }
+.handoff-body p { color: var(--ink-2); font-size: 14px; max-width: 60ch; }
+.handoff-note { color: var(--turmeric-ink); font-size: 12.5px; }
+.order-help { margin-top: 6px; font-size: 13.5px; }
+
+/* Attribution required by Swiggy's brand guidelines */
+.powered-by { display: inline-flex; align-items: center; gap: 8px; margin: 2px 0 6px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.powered-by img { width: 24px; height: 24px; border-radius: 6px; }
+.totals .unitemised dt, .totals .unitemised dd { color: var(--turmeric-ink); }

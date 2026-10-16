@@ -497,15 +497,13 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 "cart_item": current_item,
             })
 
-        unexpected_items = [
+        # Items the household added straight to Instamart (for example through
+        # Kitch's Instamart chat) are part of the order the person reviews; they
+        # are shown, not treated as a reason to refuse checkout.
+        extra_items = [
             item for item in live_items
             if self._cart_line_key(item) not in reviewed_keys
         ]
-        if unexpected_items:
-            changes.append({
-                "type": "unexpected_provider_items",
-                "count": len(unexpected_items),
-            })
 
         payment_options = list(live.get("payment_options") or [])
         return {
@@ -528,7 +526,7 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
             "payment_options": payment_options,
             "checkout_context": {
                 "payment_methods": payment_options,
-                "provider_cart_mismatch": bool(unexpected_items),
+                "extra_provider_items": extra_items,
             },
             "message": "Instamart cart availability and totals were refreshed.",
         }
@@ -989,6 +987,29 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 else "Instamart did not return a final payable total."
             ),
         }
+        # Swiggy's own bill lines, exactly as labelled and formatted by Swiggy.
+        # Keyword-filtering them (above) can silently drop a charge such as GST
+        # or a platform fee; these lines let the review show every rupee.
+        bill_lines: List[Dict[str, Any]] = []
+        for breakdown in self._values_for_keys(payload, {"billBreakdown", "bill_breakdown"}):
+            if not isinstance(breakdown, dict):
+                continue
+            for line in breakdown.get("lineItems") or breakdown.get("line_items") or []:
+                if not isinstance(line, dict):
+                    continue
+                label = self._first(line, "label", "name", "title")
+                value = self._first(line, "value", "amount", "displayValue")
+                if not label or value is None:
+                    continue
+                bill_lines.append({
+                    "label": str(label),
+                    "value": str(value),
+                    "amount_minor": self._minor(value),
+                })
+            if bill_lines:
+                break
+        if bill_lines:
+            summary["bill_lines"] = bill_lines
         if subtotal is None and matches:
             values = []
             for match in matches:

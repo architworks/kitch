@@ -72,6 +72,15 @@ def checkout_snapshot_hash(review: Dict[str, Any]) -> str:
         "unavailable_items": review.get("unavailable_items", []),
         "replacements": review.get("replacements", []),
         "cart_summary": review.get("cart_summary"),
+        "extra_provider_items": sorted(
+            (
+                str(item.get("candidate_id") or ""),
+                item.get("quantity"),
+                item.get("price_minor"),
+            )
+            for item in (review.get("checkout_context") or {}).get("extra_provider_items") or []
+            if isinstance(item, dict)
+        ),
         "selected_address_id": review.get("selected_address_id"),
         "selected_payment_method_id": review.get("selected_payment_method_id"),
         "selected_payment_method": review.get("selected_payment_method"),
@@ -140,10 +149,6 @@ def _order_blockers(
         blockers.append(f"{provider_label} address options could not be read.")
     if checkout_context.get("payment_error"):
         blockers.append(f"{provider_label} payment options could not be read.")
-    if checkout_context.get("provider_cart_mismatch"):
-        blockers.append(
-            f"{provider_label} returned cart rows outside the reviewed Kitch selection."
-        )
     if (result.get("store_context") or {}).get("status") != "ready":
         blockers.append(f"{provider_label} store context is not ready for the selected address.")
     if (result.get("cart_summary") or {}).get("total_minor") is None:
@@ -302,6 +307,14 @@ def save_revalidated_draft(
         if changed
         else existing.get("changes") or []
     )
+    # Keep the person's payment choice while Instamart still offers it; a
+    # change elsewhere in the cart is no reason to make them pick it again.
+    existing_payment_id = existing.get("selected_payment_method_id")
+    payment_still_offered = bool(existing_payment_id) and any(
+        str(option.get("id")) == str(existing_payment_id)
+        for option in payment_options
+        if isinstance(option, dict)
+    )
     payload: Dict[str, Any] = {
         "selected_address_id": existing.get("selected_address_id") or "",
         "selected_native_item_ids": existing.get("selected_native_item_ids") or [],
@@ -320,14 +333,14 @@ def save_revalidated_draft(
         "selected_payment_method_id": (
             default_payment_id
             if default_payment_id
-            else None if changed
-            else existing.get("selected_payment_method_id")
+            else existing_payment_id if payment_still_offered
+            else None
         ),
         "selected_payment_method": (
             default_payment
             if default_payment
-            else None if changed
-            else existing.get("selected_payment_method")
+            else existing.get("selected_payment_method") if payment_still_offered
+            else None
         ),
         "payment_state": {} if changed else existing.get("payment_state") or {},
         "order_review_acknowledged": False if changed else bool(existing.get("order_review_acknowledged")),

@@ -12,7 +12,7 @@ from unittest.mock import ANY, AsyncMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.grocery_checkout import GroceryCheckoutService  # noqa: E402
+from app.grocery_checkout import describe_material_changes, GroceryCheckoutService  # noqa: E402
 from app.providers.base import ProviderOperationError  # noqa: E402
 
 
@@ -332,6 +332,64 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(caught.exception.code, "provider_cart_changed")
         adapter.place_order.assert_not_awaited()
+
+    async def test_freshly_validated_review_skips_the_preflight_reread(self):
+        from datetime import datetime, timezone
+        row = {**self.draft_row(), "last_validated_at": datetime.now(timezone.utc).isoformat()}
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            revalidate_cart=AsyncMock(),
+            place_order=AsyncMock(return_value={"status": "success", "provider_order_ids": ["order-1"]}),
+        )
+        service = self.service(adapter)
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
+            patch("app.grocery_checkout.save_provider_checkout_draft", return_value={**row, "status": "checkout_pending"}),
+            patch("app.grocery_checkout.save_order_outcome", return_value={**row, "status": "ordered"}),
+        ):
+            await service.place_order(
+                "zepto",
+                {
+                    "review_id": "draft-1",
+                    "confirmation_token": "token-1",
+                    "approved_snapshot_hash": row["snapshot_hash"],
+                    "order_review_acknowledged": True,
+                },
+            )
+        adapter.revalidate_cart.assert_not_awaited()
+        adapter.place_order.assert_awaited_once()
+
+    def test_only_a_higher_total_or_item_change_counts_as_material(self):
+        previous = {
+            "matched_items": [],
+            "cart_summary": {"total_minor": 16400, "fees": [{"label": "Handling Fee", "amount_minor": 1200}]},
+            "payment_options": [{"id": "COD"}],
+            "unavailable_items": [{"name": "Eggs", "reason": "Out of stock"}],
+        }
+        cosmetic = GroceryCheckoutService._annotate_revalidation_changes(previous, {
+            "items": [],
+            "cart_summary": {"total_minor": 15000, "fees": [{"label": "Packing", "amount_minor": 1200}]},
+            "payment_options": [{"id": "COD"}, {"id": "PayWithQR"}],
+            "unavailable_items": [{"name": "Eggs", "reason": "Not available near you"}],
+        })
+        self.assertFalse(cosmetic["changed"])
+
+        rain = GroceryCheckoutService._annotate_revalidation_changes(previous, {
+            "items": [],
+            "cart_summary": {"total_minor": 20000, "fees": [
+                {"label": "Handling Fee", "amount_minor": 1200},
+                {"label": "Rain Fee", "amount_minor": 3540},
+            ]},
+        })
+        self.assertTrue(rain["changed"])
+        bill = rain["changes"][0]
+        self.assertEqual(bill["type"], "bill_changed")
+        self.assertEqual(bill["added_fees"], [{"label": "Rain Fee", "amount_minor": 3540}])
+        message = describe_material_changes(rain["changes"], "Swiggy Instamart")
+        self.assertIn("Rain Fee ₹35.40 added", message)
+        self.assertIn("₹164 → ₹200", message)
 
     async def test_unchanged_review_persists_order_outcome(self):
         row = self.draft_row()

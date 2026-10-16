@@ -213,12 +213,12 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertEqual(review["unavailable_items"], result["unavailable_items"])
         self.assertEqual(review["order_blockers"], [])
 
-    def test_unreviewed_provider_rows_block_checkout(self):
+    def test_extra_provider_rows_are_shown_not_blocking(self):
         native_item = self.native_item()
         result = self.successful_result()
         result["checkout_context"] = {
             **result["checkout_context"],
-            "provider_cart_mismatch": True,
+            "extra_provider_items": [{"candidate_id": "chips:1", "name": "Chips", "quantity": 1}],
         }
         with patch(
             "app.checkout_drafts.save_provider_checkout_draft",
@@ -238,9 +238,11 @@ class CheckoutDraftTests(unittest.TestCase):
                 "Swiggy Instamart",
             )
 
-        self.assertFalse(review["can_place_order"])
-        self.assertEqual(review["status"], "blocked")
-        self.assertIn("outside the reviewed Kitch selection", review["order_blockers"][0])
+        # The review shows everything in the Instamart cart, so extra rows
+        # are part of what the person approves, not a reason to refuse.
+        self.assertTrue(review["can_place_order"])
+        self.assertEqual(review["status"], "ready")
+        self.assertEqual(review["order_blockers"], [])
 
     def test_material_revalidation_change_resets_payment_and_approval(self):
         native_item = self.native_item()
@@ -281,9 +283,35 @@ class CheckoutDraftTests(unittest.TestCase):
             review, changed = save_revalidated_draft(initial, changed_result)
 
         self.assertTrue(changed)
-        self.assertIsNone(review["selected_payment_method_id"])
+        # The person's payment choice survives while Instamart still offers it;
+        # only the approval has to be given again.
+        self.assertEqual(review["selected_payment_method_id"], "cod")
         self.assertFalse(review["order_review_acknowledged"])
         self.assertNotEqual(review["confirmation_token"], "old-token")
+
+    def test_revalidation_clears_payment_method_that_is_no_longer_offered(self):
+        native_item = self.native_item()
+        initial = persisted_row(
+            {
+                "selected_address_id": "address-1",
+                "native_items": [native_item],
+                "matched_items": self.successful_result()["items"],
+                "cart_summary": self.successful_result()["cart_summary"],
+                "payment_options": self.successful_result()["payment_options"],
+                "store_context": self.successful_result()["store_context"],
+                "selected_payment_method_id": "retired-method",
+                "order_review_acknowledged": True,
+                "confirmation_token": "old-token",
+                "status": "ready",
+            }
+        )
+        with patch(
+            "app.checkout_drafts.save_provider_checkout_draft",
+            side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+        ):
+            review, _ = save_revalidated_draft(initial, {**self.successful_result(), "changed": False})
+
+        self.assertIsNone(review["selected_payment_method_id"])
 
     def test_instamart_revalidation_keeps_its_sole_current_method_selected(self):
         native_item = self.native_item()
