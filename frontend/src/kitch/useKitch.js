@@ -1407,9 +1407,20 @@ export function useKitch() {
       }
       clearProviderSyncTimers();
       setProviderSyncStage("complete");
-      triggerBannerAlert(data.status === "success"
-        ? (data.result?.message || `${selectedProvider.label} order placement request completed.`)
-        : `${selectedProvider.label} order could not be placed.`);
+      // A UPI/QR order is created first and confirmed once paid, so
+      // "payment_pending" is the expected next step, not a failure.
+      if (data.status === "success") {
+        triggerBannerAlert(data.result?.message || `${selectedProvider.label} order placed.`, "info");
+      } else if (data.status === "payment_pending") {
+        triggerBannerAlert(
+          handoff?.is_qr_flow
+            ? `${selectedProvider.label} created your order. Scan the QR on the payment page to confirm it.`
+            : `${selectedProvider.label} created your order. Finish the payment to confirm it.`,
+          "info"
+        );
+      } else {
+        triggerBannerAlert(data.result?.message || `${selectedProvider.label} order could not be placed.`, "error");
+      }
     } catch (e) {
       console.error(`Failed to place ${selectedProvider.label} order`, e);
       if (paymentWindow && !paymentWindow.closed) paymentWindow.close();
