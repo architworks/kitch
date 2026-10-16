@@ -360,6 +360,9 @@ def save_recipe_grocery_plan_tool(
       plan: Structured recipe+grocery artifact. Include scope, request,
             recipeCards, ingredients, pantryConsiderations, householdSize, notes.
       cart_items: Structured native cart rows derived from the plan's ingredients.
+            Each row: name, category, amount and unit (the recipe ingredient's
+            full required quantity and unit), purchaseAmount and purchaseUnit
+            (still to buy after pantry coverage), pantryAllocation.
       update_cart: True only when the user asked for groceries/cart/buy/order.
       user_name: Ignored for now. Artifacts are shared household state.
   """
