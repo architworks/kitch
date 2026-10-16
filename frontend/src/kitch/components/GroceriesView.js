@@ -839,7 +839,8 @@ function OrderSummary({ k }) {
   return (
     <section className="card card-pad summary" aria-labelledby="summary-title">
       <div className="summary-head">
-        {p.id && <ProviderLogo provider={p} size={30} />}
+        {/* Instamart's logo already sits in the required "Powered by" badge. */}
+        {p.id && p.id !== "swiggy_instamart" && <ProviderLogo provider={p} size={30} />}
         <h2 id="summary-title">Order summary</h2>
       </div>
       <PoweredBy provider={p} />
