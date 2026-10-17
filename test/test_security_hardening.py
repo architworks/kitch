@@ -91,5 +91,29 @@ class DateRangeBoundTests(unittest.TestCase):
             database.rpc.assert_not_called()
 
 
+class ZeptoHouseholdScopeTests(unittest.TestCase):
+    """Finding #11: a global Zepto credential must never be shared by households."""
+
+    def test_zepto_cannot_be_enabled_on_hosted_multi_household_kitch(self):
+        from app.providers.zepto import ZeptoProviderAdapter
+
+        with patch.dict(os.environ, {
+            "KITCH_DATABASE_BACKEND": "supabase", "ZEPTO_MCP_ENABLED": "true",
+            "ZEPTO_MCP_ACCESS_TOKEN": "shared-token",
+        }):
+            adapter = ZeptoProviderAdapter()
+            self.assertFalse(adapter.enabled)
+            self.assertEqual(adapter.status()["state"], "disabled")
+
+    def test_zepto_still_works_for_a_single_local_household(self):
+        from app.providers.zepto import ZeptoProviderAdapter
+
+        with patch.dict(os.environ, {
+            "KITCH_DATABASE_BACKEND": "sqlite", "ZEPTO_MCP_ENABLED": "true",
+            "ZEPTO_MCP_ACCESS_TOKEN": "local-token",
+        }):
+            self.assertTrue(ZeptoProviderAdapter().enabled)
+
+
 if __name__ == "__main__":
     unittest.main()
