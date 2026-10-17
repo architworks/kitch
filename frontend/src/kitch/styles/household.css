@@ -51,8 +51,6 @@
 .day.today .dots i.on { background: var(--on-olive); box-shadow: none; }
 .day.today.selected { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--green-2); }
 
-.week-callout { margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-.week-callout > div { flex: 1; min-width: 200px; }
 
 .meals { list-style: none; display: grid; }
 .meal { display: grid; grid-template-columns: 42px 130px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 11px 4px; border-top: 1px solid var(--line-soft); }
@@ -138,3 +136,33 @@
 .week-loading .day-strip { margin-bottom: 4px; }
 .day-skeleton { border-radius: 14px; width: 100%; }
 @container workspace (max-width: 700px) { .week-loading .day-strip { display: grid; } }
+
+/* Planner empty states: one invitation per open day or open week */
+.plan-open { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 22px; align-items: center; margin-top: 4px; padding: 18px 22px 18px 14px; border-radius: var(--r-md); background: var(--paper); border: 1px solid var(--line-soft); animation: rise-in 220ms var(--ease-out); }
+.plan-open-art { width: 128px; height: 128px; object-fit: contain; }
+.plan-open-copy { display: grid; gap: 6px; min-width: 0; }
+.plan-open-copy h3 { font: 700 19px/1.2 var(--font-display-stack); letter-spacing: -0.02em; color: var(--ink); text-wrap: balance; }
+.plan-open-copy p { color: var(--ink-2); font-size: 14.5px; max-width: 58ch; }
+.plan-open-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 8px; }
+.week-open { padding-block: 22px; }
+.week-open .plan-open-art { width: 148px; height: 148px; }
+.week-open { grid-template-columns: 148px minmax(0, 1fr); }
+
+/* Single-meal picks keep the fixed slot colours */
+.slot-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.slot-pick { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px 0 10px; border-radius: 10px; font-size: 13.5px; font-weight: 650; border: 1px solid transparent; transition: border-color 160ms var(--ease-out), transform 120ms var(--ease-out); }
+.slot-pick:active { transform: scale(0.97); }
+.slot-pick.breakfast { background: var(--turmeric-soft); color: var(--turmeric-ink); }
+.slot-pick.lunch { background: var(--sage); color: var(--green); }
+.slot-pick.dinner { background: var(--plum-soft); color: var(--plum); }
+.slot-pick:hover { border-color: currentColor; }
+
+.plan-past { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 14px 4px; color: var(--mute); font-size: 14px; }
+
+@container workspace (max-width: 620px) {
+  .plan-open, .week-open { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 18px 16px; gap: 10px; }
+  .plan-open-art, .week-open .plan-open-art { width: 112px; height: 112px; }
+  .plan-open-copy { justify-items: center; }
+  .plan-open-actions { justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) { .plan-open { animation: none; } }

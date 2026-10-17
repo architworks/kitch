@@ -190,7 +190,10 @@ White fields with a 1px line and an 11px radius. Focus shows a green border plus
 The rail uses icon-plus-label links; the active link is a raised white pill in green. Counts (items to buy) are turmeric badges. The member switcher is a single popover at the bottom of the rail (in the top bar on mobile).
 
 ### Week timetable (signature)
-Seven equal day tiles, each showing the weekday, the date numeral in the display face, and three dots for breakfast, lunch and dinner (filled when planned, ringed when empty). Today is filled green and past days are dimmed. The selected day lists all three slots, including unplanned ones, each with a "Plan" action.
+Seven equal day tiles, each showing the weekday, the date numeral in the display face, and three dots for breakfast, lunch and dinner (filled when planned, ringed when empty). Today is filled green and past days are dimmed. A selected day with meals lists all three slots; its unplanned slots keep a small "Plan" action.
+
+### Planner empty states
+Empty never means three "Not planned" rows. When nothing is planned from today to the end of the visible week, one paper panel with the dining-table spot illustration invites planning the rest of the week (or the whole week, for a future week), with "Just today" as the quiet alternative; the header's "Plan next week" steps back. When a single upcoming day is empty, the panel uses the kadai illustration, offers "Plan <day>", and three single-meal picks in the fixed slot colours. A past empty day gets one muted line and no action. Every action drafts a request into the composer rather than sending it.
 
 ### Change receipt (signature)
 A sage-outlined strip under an agent reply, made of an icon, a sentence ("Shopping list updated") and one link ("Open list"). It is driven only by the backend's returned action, never by the reply's prose.

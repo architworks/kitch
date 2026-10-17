@@ -74,6 +74,68 @@ function Hero({ k, ask, go }) {
   );
 }
 
+const isEmptyDay = (day) => !MEAL_SLOTS.some(slot => hasMealTitle(day?.[slot]));
+const weekday = (iso) => formatPlanDate(iso, { weekday: "long" });
+
+// The rest of the visible week has nothing planned: one invitation to plan it,
+// instead of three "not planned" rows on every remaining day.
+function WeekOpen({ k, ask, days, today }) {
+  const remaining = days.filter(day => !today || day.plan_date >= today);
+  const first = remaining[0]?.plan_date;
+  const last = remaining[remaining.length - 1]?.plan_date;
+  const startsToday = first === today;
+  const span = first === last
+    ? longDate(first)
+    : `${formatPlanDate(first, { weekday: "short", day: "numeric", month: "short" })} – ${formatPlanDate(last, { weekday: "short", day: "numeric", month: "short" })}`;
+  const prompt = first === last
+    ? `Plan breakfast, lunch and dinner for ${longDate(first)}`
+    : `Plan breakfast, lunch and dinner from ${longDate(first)} through ${longDate(last)}`;
+  return (
+    <div className="plan-open week-open">
+      <Art className="plan-open-art" src="/art/spot-household.png" alt="" />
+      <div className="plan-open-copy">
+        <h3>{startsToday ? "The rest of this week is open" : "Nothing planned this week yet"}</h3>
+        <p>Kitch can plan breakfast, lunch and dinner for {span} in one go, around what everyone likes. It lands here, and you can swap any meal.</p>
+        <div className="plan-open-actions">
+          <button type="button" className="btn primary" onClick={() => ask(prompt)}><Icon name="calendar" size="sm" />{startsToday ? "Plan the rest of the week" : "Plan this week"}</button>
+          {startsToday && first !== last && (
+            <button type="button" className="btn quiet" onClick={() => ask(`Plan breakfast, lunch and dinner for ${longDate(today)}`)}>Just today</button>
+          )}
+          {k.nextPlannedOutsideVisibleWeek && (
+            <button type="button" className="btn quiet" onClick={() => k.loadMealPlanWeek(getWeekStartForDate(k.nextPlannedOutsideVisibleWeek), k.nextPlannedOutsideVisibleWeek)}>
+              Go to the plan for {formatPlanDate(k.nextPlannedOutsideVisibleWeek, { weekday: "short", day: "numeric", month: "short" })}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One upcoming day is empty while the rest of the week has plans.
+function DayOpen({ ask, day }) {
+  const date = longDate(day.plan_date);
+  return (
+    <div className="plan-open day-open">
+      <Art className="plan-open-art" src="/art/spot-recipe.png" alt="" />
+      <div className="plan-open-copy">
+        <h3>{weekday(day.plan_date)} is still open</h3>
+        <p>Plan the whole day, or just one meal.</p>
+        <div className="plan-open-actions">
+          <button type="button" className="btn primary" onClick={() => ask(`Plan breakfast, lunch and dinner for ${date}`)}><Icon name="calendar" size="sm" />Plan {weekday(day.plan_date)}</button>
+          <div className="slot-picks" role="group" aria-label="Plan one meal">
+            {MEAL_SLOTS.map(slot => (
+              <button key={slot} type="button" className={`slot-pick ${slot}`} onClick={() => ask(`Plan ${slot} for ${date}`)}>
+                <Icon name={slot} size="sm" />{MEAL_SLOT_LABELS[slot]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WeekPlan({ k, ask, go }) {
   const { mealPlan } = k;
   const days = k.planDays;
@@ -92,7 +154,16 @@ function WeekPlan({ k, ask, go }) {
   const planPrompt = containsToday || !mealPlan.week_start
     ? "Plan next week for the whole household"
     : `Plan meals for ${mealPlan.week_start} through ${mealPlan.week_end}`;
-  const weekIsEmpty = days.length > 0 && !k.hasVisibleWeekPlan;
+  const remaining = days.filter(day => !today || day.plan_date >= today);
+  const restIsOpen = remaining.length > 0 && remaining.every(isEmptyDay);
+  const activeIsPast = Boolean(today && activeDay && activeDay.plan_date < today);
+  const activeIsEmpty = Boolean(activeDay && isEmptyDay(activeDay));
+  // Which body the selected day gets: its meals, a quiet past note, the
+  // week-level invitation, or the day-level one.
+  const body = !activeDay ? null
+    : activeIsPast ? (activeIsEmpty ? "past" : "meals")
+      : restIsOpen ? "week"
+        : activeIsEmpty ? "day" : "meals";
 
   return (
     <section className="card card-pad week" aria-labelledby="week-title">
@@ -103,7 +174,9 @@ function WeekPlan({ k, ask, go }) {
           <button type="button" className="icon-btn" aria-label="Previous week" disabled={!mealPlan.week_start} onClick={() => k.loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, -7))}><Icon name="left" /></button>
           <button type="button" className="btn sm" disabled={!today || containsToday} onClick={() => k.loadMealPlanWeek(getWeekStartForDate(today), today)}>Today</button>
           <button type="button" className="icon-btn" aria-label="Next week" disabled={!mealPlan.week_start} onClick={() => k.loadMealPlanWeek(shiftIsoDate(mealPlan.week_start, 7))}><Icon name="right" /></button>
-          <button type="button" className="btn soft sm" disabled={days.length === 0} onClick={() => ask(planPrompt)}>{containsToday ? "Plan next week" : "Plan this week"}</button>
+          {!(restIsOpen && !containsToday) && (
+            <button type="button" className={`btn sm ${restIsOpen ? "quiet" : "soft"}`} disabled={days.length === 0} onClick={() => ask(planPrompt)}>{containsToday ? "Plan next week" : "Plan this week"}</button>
+          )}
         </div>
       </div>
 
@@ -139,22 +212,13 @@ function WeekPlan({ k, ask, go }) {
         </div>
       )}
 
-      {weekIsEmpty && (
-        <div className="callout week-callout">
-          <Icon name="calendar" />
-          <div>
-            <strong>Nothing planned for {range}</strong>
-            {k.hasAnyMealPlan ? "Plans for other dates are kept as they are." : "Ask Kitch for a plan, or plan a single day below."}
-          </div>
-          {k.nextPlannedOutsideVisibleWeek && (
-            <button type="button" className="btn sm" onClick={() => k.loadMealPlanWeek(getWeekStartForDate(k.nextPlannedOutsideVisibleWeek), k.nextPlannedOutsideVisibleWeek)}>
-              Go to {formatPlanDate(k.nextPlannedOutsideVisibleWeek, { weekday: "short", day: "numeric", month: "short" })}
-            </button>
-          )}
-        </div>
+      {body === "week" && <WeekOpen k={k} ask={ask} days={days} today={today} />}
+      {body === "day" && <DayOpen ask={ask} day={activeDay} />}
+      {body === "past" && (
+        <p className="plan-past"><Icon name="calendar" size="sm" />Nothing was planned for {longDate(activeDay.plan_date)}.</p>
       )}
 
-      {activeDay && (
+      {body === "meals" && (
         <ul className="meals" aria-label={`Meals for ${longDate(activeDay.plan_date)}`}>
           {MEAL_SLOTS.map(slot => {
             const title = getMealTitle(activeDay[slot], "");
