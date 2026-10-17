@@ -230,6 +230,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=lambda: call_order.append(("read", None)) or [native_item],
             ),
             patch("app.grocery_checkout.save_initial_draft", return_value=saved_review) as save_draft,
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=None),
         ):
             response = await service.sync(
                 "swiggy_instamart",
@@ -333,19 +334,23 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.code, "provider_cart_changed")
         adapter.place_order.assert_not_awaited()
 
-    async def test_freshly_validated_review_skips_the_preflight_reread(self):
+    async def test_order_always_rereads_the_live_cart_even_when_recently_validated(self):
+        """Security findings #6 and #19: a captured or recent read is never trusted."""
         from datetime import datetime, timezone
+        from app.checkout_drafts import draft_row_to_review
         row = {**self.draft_row(), "last_validated_at": datetime.now(timezone.utc).isoformat()}
         adapter = SimpleNamespace(
             descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
-            revalidate_cart=AsyncMock(),
+            revalidate_cart=AsyncMock(return_value={"status": "success", "items": []}),
             place_order=AsyncMock(return_value={"status": "success", "provider_order_ids": ["order-1"]}),
         )
         service = self.service(adapter)
+        unchanged = {**draft_row_to_review(row), "can_place_order": True}
         with (
             patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
+            patch("app.grocery_checkout.save_revalidated_draft", return_value=(unchanged, False)),
             patch("app.grocery_checkout.save_provider_checkout_draft", return_value={**row, "status": "checkout_pending"}),
             patch("app.grocery_checkout.save_order_outcome", return_value={**row, "status": "ordered"}),
         ):
@@ -358,8 +363,33 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
                     "order_review_acknowledged": True,
                 },
             )
-        adapter.revalidate_cart.assert_not_awaited()
+        adapter.revalidate_cart.assert_awaited_once()
         adapter.place_order.assert_awaited_once()
+
+    async def test_changed_live_cart_stops_the_order_even_within_a_minute(self):
+        from datetime import datetime, timezone
+        from app.checkout_drafts import draft_row_to_review
+        row = {**self.draft_row(), "last_validated_at": datetime.now(timezone.utc).isoformat()}
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            revalidate_cart=AsyncMock(return_value={"status": "success", "items": []}),
+            place_order=AsyncMock(),
+        )
+        service = self.service(adapter)
+        changed = {**draft_row_to_review(row), "changes": [{"type": "extra_items_changed"}]}
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=row),
+            patch("app.grocery_checkout.save_revalidated_draft", return_value=(changed, True)),
+        ):
+            with self.assertRaises(ProviderOperationError) as caught:
+                await service.place_order("zepto", {
+                    "review_id": "draft-1", "confirmation_token": "token-1",
+                    "approved_snapshot_hash": row["snapshot_hash"], "order_review_acknowledged": True,
+                })
+        self.assertEqual(caught.exception.code, "provider_cart_changed")
+        adapter.place_order.assert_not_awaited()
 
     def test_only_a_higher_total_or_item_change_counts_as_material(self):
         previous = {
@@ -480,6 +510,117 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         adapter.revalidate_cart.assert_awaited_once()
         agent.synchronize.assert_not_awaited()
         self.assertEqual(response["draft"]["last_validated_at"], saved["last_validated_at"])
+
+
+class CheckoutIntegritySecurityTests(unittest.IsolatedAsyncioTestCase):
+    """Security audit 2026-10-17: the owner buys exactly what they approved."""
+
+    draft_row = ProviderCheckoutServiceTests.draft_row
+    service = ProviderCheckoutServiceTests.service
+
+    def _adapter(self, **overrides):
+        return SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production", label="Instamart"),
+            **overrides,
+        )
+
+    async def test_approval_of_a_replaced_review_is_refused_with_the_new_review(self):
+        """#5: the owner saw draft A; a member replaced it with B before the click."""
+        replaced = {**self.draft_row(), "snapshot_hash": "hash-of-B", "order_review_acknowledged": False}
+        service = self.service(self._adapter())
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=replaced),
+            patch("app.grocery_checkout.update_draft_review_fields") as update_fields,
+        ):
+            with self.assertRaises(ProviderOperationError) as caught:
+                service.update_draft("swiggy_instamart", {
+                    "order_review_acknowledged": True, "seen_snapshot_hash": "hash-of-A",
+                })
+            self.assertEqual(caught.exception.code, "checkout_snapshot_changed")
+            self.assertEqual(caught.exception.draft["snapshot_hash"], "hash-of-B")
+            update_fields.assert_not_called()
+
+            # Acknowledging the review actually on screen still works.
+            update_fields.return_value = {"snapshot_hash": "hash-of-B-acknowledged"}
+            response = service.update_draft("swiggy_instamart", {
+                "order_review_acknowledged": True, "seen_snapshot_hash": "hash-of-B",
+            })
+            self.assertEqual(response["draft"]["snapshot_hash"], "hash-of-B-acknowledged")
+
+    async def test_review_edits_wait_for_the_order_lease(self):
+        """#12: payment or acknowledgement edits cannot slip in while an order runs."""
+        service = self.service(self._adapter())
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=False),
+            patch("app.grocery_checkout.update_draft_review_fields") as update_fields,
+        ):
+            with self.assertRaises(ProviderOperationError) as caught:
+                service.update_draft("swiggy_instamart", {"selected_payment_method_id": "cod"})
+        self.assertEqual(caught.exception.code, "provider_checkout_busy")
+        update_fields.assert_not_called()
+
+    async def test_instamart_chat_cannot_edit_the_cart_while_an_order_runs(self):
+        """#12: conversational cart edits take the same lease as ordering."""
+        agent = SimpleNamespace(converse=AsyncMock())
+        service = self.service(self._adapter(), instamart_agent=agent)
+        with patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=False):
+            with self.assertRaises(ProviderOperationError) as caught:
+                await service.converse_with_instamart("add two packs of milk")
+        self.assertEqual(caught.exception.code, "provider_checkout_busy")
+        agent.converse.assert_not_awaited()
+
+    async def test_in_flight_attempt_cannot_be_reopened_or_replaced(self):
+        """#16: revalidation or a fresh sync used to reopen pending orders."""
+        from datetime import datetime, timezone
+        pending = {**self.draft_row(), "status": "payment_pending",
+                   "updated_at": datetime.now(timezone.utc).isoformat()}
+        adapter = self._adapter(revalidate_cart=AsyncMock())
+        service = self.service(adapter)
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.get_provider_checkout_draft", return_value=pending),
+            patch("app.grocery_checkout.get_grocery_cart") as read_cart,
+        ):
+            for attempt in (
+                lambda: service.revalidate("swiggy_instamart"),
+                lambda: service.sync("swiggy_instamart", {"selected_address_id": "home-1"}),
+            ):
+                with self.assertRaises(ProviderOperationError) as caught:
+                    await attempt()
+                self.assertEqual(caught.exception.code, "checkout_already_started")
+            with self.assertRaises(ProviderOperationError):
+                service.update_draft("swiggy_instamart", {"selected_payment_method_id": "cod"})
+        adapter.revalidate_cart.assert_not_awaited()
+        read_cart.assert_not_called()
+
+    def test_an_unresolved_attempt_is_released_after_the_hold(self):
+        from datetime import datetime, timedelta, timezone
+        from app.grocery_checkout import _attempt_in_flight
+        now = datetime.now(timezone.utc)
+        recent = {"status": "unknown", "updated_at": (now - timedelta(minutes=5)).isoformat()}
+        stale = {"status": "unknown", "updated_at": (now - timedelta(hours=2)).isoformat()}
+        self.assertTrue(_attempt_in_flight(recent, now))
+        self.assertFalse(_attempt_in_flight(stale, now))
+        self.assertFalse(_attempt_in_flight({"status": "ordered", "updated_at": now.isoformat()}, now))
+
+    def test_preflight_never_swaps_the_approved_payment_method(self):
+        """#9: Instamart now offers only wallet; the owner approved UPI."""
+        from app.checkout_drafts import save_revalidated_draft
+        approved = {**self.draft_row(), "provider": "swiggy_instamart",
+                    "payment_options": [{"id": "upi"}, {"id": "wallet"}],
+                    "selected_payment_method_id": "upi", "selected_payment_method": {"id": "upi"}}
+        live = {"status": "success", "items": approved["matched_items"], "changed": False,
+                "cart_summary": {"total_minor": 9900}, "store_context": {"status": "ready"},
+                "payment_options": [{"id": "wallet"}], "checkout_context": {"payment_methods": [{"id": "wallet"}]}}
+        with patch("app.checkout_drafts.save_provider_checkout_draft", side_effect=lambda payload, **_: payload):
+            review, changed = save_revalidated_draft(approved, live)
+        self.assertTrue(changed)
+        self.assertFalse(review["order_review_acknowledged"])
+        self.assertEqual(review["changes"][-1]["type"], "payment_method_changed")
+        self.assertIn("payment method", describe_material_changes(review["changes"], "Instamart"))
 
 
 if __name__ == "__main__":

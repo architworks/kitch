@@ -72,7 +72,10 @@ async def _reconcile_with_agent(
 ) -> list[dict[str, Any]]:
     if not cart:
         return []
-    from app.agent.core import pantry_reconciliation_runner
+    from app.agent.core import (
+        pantry_reconciliation_runner,
+        pantry_reconciliation_session_service,
+    )
 
     session_id = f"pantry-reconciliation-{uuid4()}"
     prompt = (
@@ -86,12 +89,19 @@ async def _reconcile_with_agent(
         f"NATIVE CART:\n{json.dumps(cart, ensure_ascii=False)}"
     )
     text = ""
-    async for event in pantry_reconciliation_runner.run_async(
-        user_id=get_household_profile_id(), session_id=session_id,
-        new_message=Content(parts=[Part(text=prompt)], role="user"),
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text = event.content.parts[0].text or ""
+    user_id = get_household_profile_id()
+    try:
+        async for event in pantry_reconciliation_runner.run_async(
+            user_id=user_id, session_id=session_id,
+            new_message=Content(parts=[Part(text=prompt)], role="user"),
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                text = event.content.parts[0].text or ""
+    finally:
+        # One-shot session: drop the household's pantry and cart copy once read.
+        await pantry_reconciliation_session_service.delete_session(
+            app_name="kitch_pantry_reconciliation", user_id=user_id, session_id=session_id,
+        )
     try:
         result = PantryReconciliation.model_validate_json(text)
     except Exception as error:

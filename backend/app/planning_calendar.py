@@ -31,9 +31,21 @@ def monday_for(value: date) -> date:
     return value - timedelta(days=value.weekday())
 
 
-def dates_between(start: date, end: date) -> list[date]:
+# Every date range Kitch expands day by day (nutrition dashboards, meal-plan
+# replacement and removal) is bounded, so one small request cannot allocate
+# millions of days. The app itself asks for a week at a time.
+MAX_DATE_RANGE_DAYS = 366
+
+
+def check_date_range(start: date, end: date) -> None:
     if end < start:
         raise ValueError("end_date must be on or after start_date")
+    if (end - start).days + 1 > MAX_DATE_RANGE_DAYS:
+        raise ValueError(f"Date ranges are limited to {MAX_DATE_RANGE_DAYS} days.")
+
+
+def dates_between(start: date, end: date) -> list[date]:
+    check_date_range(start, end)
     return [start + timedelta(days=index) for index in range((end - start).days + 1)]
 
 

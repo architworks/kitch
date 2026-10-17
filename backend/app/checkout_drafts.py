@@ -315,6 +315,27 @@ def save_revalidated_draft(
         for option in payment_options
         if isinstance(option, dict)
     )
+    # Never swap the approved payment method silently: if the person chose
+    # one and Instamart now offers a different single method (or none of the
+    # chosen one), the review changed and needs their eyes again.
+    next_payment_id = (
+        default_payment_id
+        if default_payment_id
+        else existing_payment_id if payment_still_offered
+        else None
+    )
+    if existing_payment_id and str(next_payment_id or "") != str(existing_payment_id):
+        if not changed:
+            changes = []
+        changed = True
+        changes = [
+            *changes,
+            {
+                "type": "payment_method_changed",
+                "previous_payment_method_id": str(existing_payment_id),
+                "payment_method_id": next_payment_id,
+            },
+        ]
     payload: Dict[str, Any] = {
         "selected_address_id": existing.get("selected_address_id") or "",
         "selected_native_item_ids": existing.get("selected_native_item_ids") or [],
@@ -330,12 +351,7 @@ def save_revalidated_draft(
         "checkout_context": result.get("checkout_context") or {},
         "store_context": result.get("store_context") or {},
         "payment_options": payment_options,
-        "selected_payment_method_id": (
-            default_payment_id
-            if default_payment_id
-            else existing_payment_id if payment_still_offered
-            else None
-        ),
+        "selected_payment_method_id": next_payment_id,
         "selected_payment_method": (
             default_payment
             if default_payment

@@ -121,6 +121,8 @@ for module in (
             "email": "owner@example.com",
             "household_id": "household-a",
             "owner_profile_id": "owner-a",
+            "profile_id": "owner-a",
+            "role": "owner",
             "members": [{"id": "owner-a", "name": "Owner"}],
         }
         claims = {"sub": "google-user-1", "email": "owner@example.com", "name": "Owner"}
@@ -191,12 +193,20 @@ for module in (
                 return "purged"
 
         memory = FakeMemory()
+        stored = {"context": household}
+
+        def delete_and_forget(subject):
+            stored["context"] = None
+            return True
+
         with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", side_effect=lambda subject: stored["context"],
+        ), patch(
             "app.main.verify_google_credential", return_value=claims,
         ), patch(
             "app.main.ensure_google_household", return_value=household,
         ), patch("app.main.get_legal_consent", return_value={}), patch(
-            "app.main.delete_household_account", return_value=True,
+            "app.main.delete_household_account", side_effect=delete_and_forget,
         ) as delete_account, patch(
             "app.main._memory_runtime", return_value=memory,
         ), patch("app.main.provider_registry.get", return_value=object()):
@@ -219,7 +229,9 @@ for module in (
             "app.main.verify_google_credential", return_value=friend,
         ), patch("app.main.ensure_google_household") as ensure_household, patch(
             "app.main.join_household_with_invite", return_value=joined,
-        ) as join, patch("app.main.record_legal_consent", return_value={}):
+        ) as join, patch("app.main.record_legal_consent", return_value={}), patch(
+            "app.main.get_household_account_context", return_value=joined,
+        ):
             with TestClient(app) as client:
                 signed_in = client.post("/api/auth/google", json={
                     "credential": "c",
@@ -236,6 +248,106 @@ for module in (
                     "/api/grocery/providers/swiggy_instamart/checkout/place-order", json={},
                 ).status_code, 403)
                 self.assertEqual(client.post("/api/household/invite").status_code, 403)
+
+    def _member_session(self, environment, member):
+        """A browser cookie issued while the account was a household member."""
+        with patch.dict(os.environ, environment):
+            return issue_session(
+                {"sub": member["google_subject"], "email": member["email"], "name": "Friend"},
+                member, consent=main.LEGAL_TERMS_VERSION,
+            )
+
+    def _member_fixture(self, household):
+        return {**household, "google_subject": "google-user-2", "email": "friend@example.com",
+                "profile_id": "member-b", "role": "member",
+                "members": household["members"] + [{"id": "member-b", "name": "Friend"}]}
+
+    def test_renaming_a_member_cannot_grant_owner_powers(self):
+        """Security finding #1: rename + consent used to mint an owner cookie."""
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        cookie = self._member_session(environment, member)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=member,
+        ), patch(
+            "app.main.update_household_member",
+            return_value={"id": "member-b", "full_name": "Friend Renamed"},
+        ), patch("app.main.get_household_members", return_value=member["members"]), patch(
+            "app.main.record_legal_consent", return_value={},
+        ), patch("app.main.set_household_invite") as set_invite:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", cookie)
+                renamed = client.patch("/api/household/members/member-b", json={"name": "Friend Renamed"})
+                self.assertEqual(renamed.status_code, 200)
+                accepted = client.post("/api/legal/consent", json={
+                    "version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": True,
+                })
+                self.assertEqual(accepted.status_code, 200)
+                self.assertEqual(client.post("/api/household/invite").status_code, 403)
+                self.assertEqual(client.delete("/api/household/invite").status_code, 403)
+                set_invite.assert_not_called()
+
+    def test_role_comes_from_the_database_not_the_cookie(self):
+        """A cookie that claims owner is ignored when the account is a member."""
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        forged_owner_cookie = self._member_session(environment, {**member, "role": "owner"})
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=member,
+        ), patch("app.main.set_household_invite") as set_invite:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", forged_owner_cookie)
+                self.assertEqual(client.post("/api/household/invite").status_code, 403)
+                set_invite.assert_not_called()
+
+    def test_cookie_stops_working_after_the_member_leaves(self):
+        """Security finding #3: a saved cookie used to keep household access."""
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        cookie = self._member_session(environment, member)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=None,
+        ), patch("app.main.ensure_google_household") as ensure_household, patch(
+            "app.main.get_pantry_state",
+        ) as pantry:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", cookie)
+                replay = client.get("/api/pantry")
+                self.assertEqual(replay.status_code, 401)
+                self.assertEqual(replay.json()["detail"]["code"], "session_revoked")
+                consent = client.post("/api/legal/consent", json={
+                    "version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": True,
+                })
+                self.assertEqual(consent.status_code, 401)
+                pantry.assert_not_called()
+                ensure_household.assert_not_called()
+
+                # The app's own session check reports signed-out and clears
+                # the stale cookie, so the sign-in screen shows.
+                session = client.get("/api/auth/session")
+                self.assertEqual(session.status_code, 200)
+                self.assertFalse(session.json()["authenticated"])
+                self.assertIn('kitch_session=""', session.headers["set-cookie"])
+
+    def test_cookie_follows_the_account_to_its_current_household(self):
+        """An account that moved households cannot reach the old one."""
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        cookie = self._member_session(environment, member)
+        moved = {**member, "household_id": "household-c", "owner_profile_id": "owner-c",
+                 "profile_id": "owner-c", "role": "owner",
+                 "members": [{"id": "owner-c", "name": "Friend"}]}
+        seen = []
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=moved,
+        ), patch(
+            "app.main.get_pantry_state",
+            side_effect=lambda: seen.append(main.require_identity().household_id) or {"items": []},
+        ):
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", cookie)
+                self.assertEqual(client.get("/api/pantry").status_code, 200)
+        self.assertEqual(seen, ["household-c"])
 
     def test_stale_invite_link_explains_itself(self):
         _, claims, environment = self._consent_fixtures()
@@ -259,7 +371,9 @@ for module in (
             "app.main.verify_google_credential", return_value=claims,
         ), patch("app.main.ensure_google_household", return_value={**household, "setup_completed": False}), patch(
             "app.main.get_legal_consent", return_value={"terms_version": main.LEGAL_TERMS_VERSION},
-        ), patch("app.main.complete_household_setup", return_value=configured) as setup:
+        ), patch("app.main.complete_household_setup", return_value=configured) as setup, patch(
+            "app.main.get_household_account_context", return_value=household,
+        ):
             with TestClient(app) as client:
                 client.post("/api/auth/google", json={"credential": "c"})
                 saved = client.post("/api/household/setup", json={

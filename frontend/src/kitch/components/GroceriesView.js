@@ -121,7 +121,8 @@ function ShoppingList({ k, ask, go }) {
             const eligible = items.filter(item => cartPurchaseAmount(item) > 0);
             const selectedCount = eligible.filter(item => !k.excludedProviderItemIds.includes(cartItemKey(item))).length;
             const allSelected = eligible.length > 0 && selectedCount === eligible.length;
-            const collapsed = Boolean(k.collapsedGroceryCategories[category]);
+            const collapsed = Object.hasOwn(k.collapsedGroceryCategories, category)
+              && Boolean(k.collapsedGroceryCategories[category]);
             return (
               <section key={category} className="cart-group">
                 <header className="cart-group-head">
@@ -134,7 +135,7 @@ function ShoppingList({ k, ask, go }) {
                     <Icon name={collapsed ? "right" : "down"} size="sm" />
                     <strong>{category}</strong>
                     <span className="muted">{items.length}</span>
-                    <small className="muted">{GROCERY_CATEGORY_DESCRIPTIONS[category] || GROCERY_CATEGORY_DESCRIPTIONS.General}</small>
+                    <small className="muted">{Object.hasOwn(GROCERY_CATEGORY_DESCRIPTIONS, category) ? GROCERY_CATEGORY_DESCRIPTIONS[category] : GROCERY_CATEGORY_DESCRIPTIONS.General}</small>
                   </button>
                   <label className="cart-group-select">
                     <span>{selectedCount} selected</span>

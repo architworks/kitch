@@ -638,10 +638,10 @@ export function useKitch() {
       });
       await requireSuccessfulResponse(response);
       window.google?.accounts?.id?.disableAutoSelect?.();
-      setMemberEditorOpen(false);
-      setHouseholdBootstrap(null);
-      setHouseholdMembers([]);
-      setAuthState({ loading: false, required: true, authenticated: false, email: "", consentRequired: false });
+      try { window.sessionStorage.removeItem("kitch_join"); } catch { /* storage unavailable */ }
+      // A full reload clears every in-memory copy of this household (chat,
+      // invite link, staged photo, cart) before the next person signs in.
+      window.location.reload();
     } catch (error) {
       setMemberEditorError(apiErrorMessage(error, "Kitch could not sign out."));
     }
@@ -1590,10 +1590,24 @@ export function useKitch() {
     startProviderSyncProgress();
     setIsPlacingProviderOrder(true);
     try {
-      const latestReview = await updateProviderReview({
-        selected_payment_method_id: effectiveProviderPaymentMethod || null,
-        order_review_acknowledged: true
-      }) || providerCartReview;
+      // The approval names the exact review on screen. If another member or
+      // the app changed it meanwhile, the server refuses and returns the new
+      // review, which is shown below for a fresh look before ordering.
+      const ackRes = await apiFetch(apiUrl(selectedProvider.routes.checkoutDraft), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selected_payment_method_id: effectiveProviderPaymentMethod || null,
+          order_review_acknowledged: true,
+          seen_snapshot_hash: providerCartReview.snapshot_hash
+        })
+      });
+      await requireSuccessfulResponse(ackRes);
+      const latestReview = (await ackRes.json()).draft;
+      if (!latestReview?.confirmation_token) {
+        throw new Error(`${selectedProvider.label} did not confirm the reviewed cart. Review it again before ordering.`);
+      }
+      applyProviderDraft(latestReview);
       const res = await apiFetch(apiUrl(selectedProvider.routes.placeOrder), {
         method: "POST",
         timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS,
@@ -2273,12 +2287,14 @@ export function useKitch() {
     : [];
   const recipeNeededCartItems = recipeCartItems.filter(item => cartPurchaseAmount(item) > 0);
 
+  // A prototype-free map: a stored category such as "constructor" or
+  // "__proto__" is just a name here, never an inherited JavaScript property.
   const groupedGroceryCart = groceryList.reduce((groups, item) => {
-    const category = item.category || "General";
-    if (!groups[category]) groups[category] = [];
+    const category = String(item.category || "General");
+    if (!Object.hasOwn(groups, category)) groups[category] = [];
     groups[category].push(item);
     return groups;
-  }, {});
+  }, Object.create(null));
   const groceryCategoryCount = Object.keys(groupedGroceryCart).length;
   const stockedCount = groceryList.filter(item => cartPurchaseAmount(item) <= 0).length;
   const pendingBuyCount = checkoutItems.length;

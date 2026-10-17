@@ -37,7 +37,15 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
             or os.environ.get("ZEPTO_MCP_BEARER_TOKEN")
             or os.environ.get("ZEPTO_ACCESS_TOKEN")
         )
-        self.enabled = os.environ.get("ZEPTO_MCP_ENABLED", "false").lower() in {"1", "true", "yes"}
+        requested = os.environ.get("ZEPTO_MCP_ENABLED", "false").lower() in {"1", "true", "yes"}
+        # Every Zepto credential here (token, headers or the OAuth bridge) is one
+        # Zepto account for the whole server. Hosted Kitch serves many households,
+        # so Zepto stays a single-household local (SQLite) option until it gets
+        # per-household OAuth like Instamart.
+        self.multi_household = (
+            os.environ.get("KITCH_DATABASE_BACKEND", "supabase").strip().lower() == "supabase"
+        )
+        self.enabled = requested and not self.multi_household
         self.raw_headers = os.environ.get("ZEPTO_MCP_HEADERS")
         explicit_transport = os.environ.get("ZEPTO_MCP_TRANSPORT", "").strip().lower()
         self.transport = explicit_transport or ("http" if self.access_token or self.raw_headers else "stdio_remote")
@@ -95,7 +103,11 @@ class ZeptoProviderAdapter(GroceryProviderAdapter):
     def status(self) -> Dict[str, Any]:
         if not self.enabled:
             state = "disabled"
-            message = "Zepto MCP integration is disabled."
+            message = (
+                "Zepto is available only in single-household local mode."
+                if self.multi_household
+                else "Zepto MCP integration is disabled."
+            )
         elif self.transport in {"stdio", "stdio_remote", "mcp_remote"} and not self.access_token:
             state = "configured"
             message = "Zepto MCP is configured through the local browser OAuth bridge."

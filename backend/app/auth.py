@@ -32,7 +32,7 @@ class HouseholdIdentity:
     # The account's own member profile; owner_profile_id stays the household's
     # shared-data anchor for every account in the household.
     profile_id: str = ""
-    role: str = "owner"
+    role: str = "member"
 
     @property
     def is_owner(self) -> bool:
@@ -97,7 +97,8 @@ def _session_household_context(
         "household_id": str(household["household_id"]),
         "owner_profile_id": str(household["owner_profile_id"]),
         "profile_id": str(household.get("profile_id") or household["owner_profile_id"]),
-        "role": "member" if household.get("role") == "member" else "owner",
+        # Fail closed: a context without an explicit owner role is a member.
+        "role": "owner" if household.get("role") == "owner" else "member",
         "members": members,
     }
 

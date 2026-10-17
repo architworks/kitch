@@ -37,21 +37,25 @@ CHECKOUT_OPERATION_LEASE_SECONDS = 300
 # A review read from Instamart this recently is what the person just looked at;
 # re-reading it again at the moment they press Place order adds latency and
 # false alarms, not safety.
-PREFLIGHT_FRESH_SECONDS = 60
+# A checkout that has been submitted to the provider stays locked until its
+# outcome is known, so it can never be reopened and bought twice. An outcome
+# that stays unknown this long is released so the household is never stuck.
+IN_FLIGHT_STATUSES = {"checkout_pending", "payment_pending", "unknown"}
+IN_FLIGHT_HOLD_SECONDS = 30 * 60
 
 
-def _review_is_fresh(review: Dict[str, Any], now: datetime | None = None) -> bool:
-    raw = str(review.get("last_validated_at") or "")
-    if not raw:
+def _attempt_in_flight(review: Dict[str, Any] | None, now: datetime | None = None) -> bool:
+    if not review or str(review.get("status") or "") not in IN_FLIGHT_STATUSES:
         return False
+    raw = str(review.get("updated_at") or "")
     try:
-        validated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        updated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        return False
-    if validated.tzinfo is None:
-        validated = validated.replace(tzinfo=timezone.utc)
-    age = ((now or datetime.now(timezone.utc)) - validated).total_seconds()
-    return 0 <= age <= PREFLIGHT_FRESH_SECONDS
+        return True
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    age = ((now or datetime.now(timezone.utc)) - updated).total_seconds()
+    return age < IN_FLIGHT_HOLD_SECONDS
 
 
 def _rupees(minor: Any) -> str:
@@ -86,6 +90,8 @@ def describe_material_changes(changes: List[Dict[str, Any]], provider_label: str
             parts.append(f"{name}: {', '.join(change.get('fields') or ['details'])} changed")
         elif kind == "extra_items_changed":
             parts.append("items added directly in Instamart changed")
+        elif kind == "payment_method_changed":
+            parts.append("the payment method you chose is no longer offered")
         elif kind in {"membership_changed", "provider_item_removed", "added"}:
             parts.append("the items in the cart changed")
     parts = list(dict.fromkeys(parts))
@@ -264,6 +270,7 @@ class GroceryCheckoutService:
         self._claim(provider_id, descriptor.environment, operation_id)
         native_cart_changed = False
         try:
+            self._refuse_if_in_flight(provider_id, descriptor.environment, "sync_cart")
             native_cart_changes = payload.get("native_cart_changes") or []
             if native_cart_changes:
                 apply_native_grocery_cart_changes(native_cart_changes)
@@ -369,6 +376,21 @@ class GroceryCheckoutService:
     ) -> Dict[str, Any]:
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
+        # Review edits take the same lease as sync and ordering, so they cannot
+        # land between an order's final checks and its submission.
+        operation_id = str(uuid4())
+        self._claim(provider_id, environment, operation_id)
+        try:
+            return self._update_draft_locked(provider_id, environment, payload)
+        finally:
+            release_provider_checkout_operation(operation_id, provider_id, environment)
+
+    def _update_draft_locked(
+        self,
+        provider_id: str,
+        environment: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
         row = get_provider_checkout_draft(provider_id, environment)
         if not row or not row.get("native_items"):
             raise ProviderOperationError(
@@ -377,6 +399,21 @@ class GroceryCheckoutService:
                 code="checkout_draft_missing",
                 message="No provider checkout draft exists.",
                 status_code=404,
+            )
+        self._refuse_if_in_flight(provider_id, environment, "update_checkout", row)
+        if payload.get("order_review_acknowledged") and (
+            payload.get("seen_snapshot_hash") != row.get("snapshot_hash")
+        ):
+            # The person may only approve the exact review they were shown. If
+            # another member replaced the cart or the address meanwhile, send
+            # the new review back for them to look at first.
+            raise ProviderOperationError(
+                provider=provider_id,
+                operation="update_checkout",
+                code="checkout_snapshot_changed",
+                message="The order changed since you opened it. Review the updated cart before placing it.",
+                status_code=409,
+                draft=draft_row_to_review(row),
             )
         allowed: Dict[str, Any] = {}
         if "selected_payment_method_id" in payload:
@@ -427,6 +464,7 @@ class GroceryCheckoutService:
                     message="No provider checkout draft exists.",
                     status_code=404,
                 )
+            self._refuse_if_in_flight(provider_id, descriptor.environment, "revalidate_cart", row)
             current_review = draft_row_to_review(row) or {}
             result = await self._revalidate_provider(
                 provider_id,
@@ -520,32 +558,33 @@ class GroceryCheckoutService:
                     message="Select a provider-returned payment method before ordering.",
                     status_code=422,
                 )
-            if _review_is_fresh(review):
-                refreshed = review
-            else:
-                validation = await self._revalidate_provider(
-                    provider_id,
-                    adapter,
-                    review,
-                    operation_id=operation_id,
-                    source="ui_order_preflight",
+            # Always re-read the live provider cart inside the lease, right
+            # before submitting. A captured agent read, a recent refresh or a
+            # concurrent chat edit is never trusted for the purchase itself.
+            validation = await self._revalidate_provider(
+                provider_id,
+                adapter,
+                review,
+                operation_id=operation_id,
+                source="ui_order_preflight",
+            )
+            self._raise_result_error(provider_id, "place_order_revalidation", validation)
+            refreshed, changed = save_revalidated_draft(row, validation)
+            # Only material changes (items, quantities, extra lines, a higher or
+            # missing total, a different payment method) need the person's eyes
+            # again; cosmetic drift does not.
+            if changed or not refreshed.get("can_place_order"):
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="place_order",
+                    code="provider_cart_changed",
+                    message=describe_material_changes(
+                        refreshed.get("changes") or [],
+                        descriptor.label,
+                    ),
+                    status_code=409,
+                    draft=refreshed,
                 )
-                self._raise_result_error(provider_id, "place_order_revalidation", validation)
-                refreshed, changed = save_revalidated_draft(row, validation)
-                # Only material changes (items, quantities, a higher or missing
-                # total) need the person's eyes again; cosmetic drift does not.
-                if changed:
-                    raise ProviderOperationError(
-                        provider=provider_id,
-                        operation="place_order",
-                        code="provider_cart_changed",
-                        message=describe_material_changes(
-                            refreshed.get("changes") or [],
-                            descriptor.label,
-                        ),
-                        status_code=409,
-                        draft=refreshed,
-                    )
 
             checkout_attempt_id = str(uuid4())
             pending_row = save_provider_checkout_draft(
@@ -757,10 +796,17 @@ class GroceryCheckoutService:
         """Delegate provider-specific, non-checkout chat to the Instamart agent."""
         provider_id = "swiggy_instamart"
         adapter = self.registry.get(provider_id)
-        outcome = await self.instamart_agent.converse(
-            adapter=adapter,
-            user_request=user_request,
-        )
+        environment = adapter.descriptor().environment
+        operation_id = str(uuid4())
+        self._claim(provider_id, environment, operation_id)
+        try:
+            self._refuse_if_in_flight(provider_id, environment, "converse")
+            outcome = await self.instamart_agent.converse(
+                adapter=adapter,
+                user_request=user_request,
+            )
+        finally:
+            release_provider_checkout_operation(operation_id, provider_id, environment)
         mutation_tools = {"update_cart", "clear_cart", "apply_coupon"}
         mutated = bool(mutation_tools.intersection(outcome.capture.tool_results))
         review = None
@@ -961,6 +1007,27 @@ class GroceryCheckoutService:
         refreshed["changes"] = changes
         refreshed["changed"] = bool(replacements or changes)
         return refreshed
+
+    @staticmethod
+    def _refuse_if_in_flight(
+        provider: str,
+        environment: str,
+        operation: str,
+        row: Dict[str, Any] | None = None,
+    ) -> None:
+        current = row if row is not None else get_provider_checkout_draft(provider, environment)
+        if _attempt_in_flight(current):
+            raise ProviderOperationError(
+                provider=provider,
+                operation=operation,
+                code="checkout_already_started",
+                message=(
+                    "An order from this review is still being placed or paid. "
+                    "Check its payment status before changing or reordering the cart."
+                ),
+                status_code=409,
+                draft=draft_row_to_review(current),
+            )
 
     def _claim(self, provider: str, environment: str, operation_id: str) -> None:
         if not claim_provider_checkout_operation(

@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import secrets
+import sys
 import time
 import json
 from functools import lru_cache
@@ -13,7 +14,7 @@ from datetime import datetime, time as datetime_time, timedelta, timezone
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any
+from typing import Any, Dict, List
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
@@ -27,7 +28,7 @@ from app.providers.instamart import (
     instamart_cancellation_guidance,
 )
 from app.providers.registry import provider_registry
-from app.household_config import canonical_user_name
+from app.household_config import canonical_user_name, get_user_id
 from app.auth import (
     HouseholdIdentity,
     auth_required,
@@ -260,7 +261,8 @@ def _household_identity(value: Dict[str, Any]) -> HouseholdIdentity:
             for member in value.get("members") or []
         ),
         profile_id=str(value.get("profile_id") or value["owner_profile_id"]),
-        role="member" if value.get("role") == "member" else "owner",
+        # Fail closed: only an explicit owner role grants owner powers.
+        role="owner" if value.get("role") == "owner" else "member",
     )
 
 
@@ -335,20 +337,60 @@ async def delete_past_meal_plans_at_household_midnight() -> None:
             )
             await asyncio.sleep(300)
 
-# Helper: Ensure the ADK session exists and the user: and app: states are fully synchronized
+def _agent_scope(active_user: str) -> tuple[str, str]:
+    """ADK user and chat-session ids for one member of the caller's household.
+
+    Hosted ids are built from the household and member profile UUIDs, never
+    from display names, so two households with a same-named member can never
+    share a conversation or user-scoped state.
+    """
+    identity = current_identity()
+    if identity is None:
+        # Local single-household mode: names are unique within the one household.
+        user_id = active_user.replace(" ", "_")
+        return user_id, f"kitch_chat_session_{user_id}"
+    user_id = f"{identity.household_id}:{get_user_id(active_user)}"
+    return user_id, f"kitch_chat:{user_id}"
+
+
+async def _purge_agent_state(household_id: str, profile_ids: List[str]) -> int:
+    """Forget in-process chat history and user state for these members.
+
+    Called when a member leaves or a household is deleted. Other warm server
+    instances may still hold copies until they recycle, but those ids can no
+    longer be reached: they belong to profiles that no longer exist.
+    """
+    core = sys.modules.get("app.agent.core")
+    if core is None:
+        return 0
+    removed = 0
+    service = core.session_service
+    for profile_id in profile_ids:
+        user_id = f"{household_id}:{profile_id}"
+        listed = await service.list_sessions(app_name="kitch", user_id=user_id)
+        for session in listed.sessions:
+            await service.delete_session(app_name="kitch", user_id=user_id, session_id=session.id)
+            removed += 1
+        service.user_state.get("kitch", {}).pop(user_id, None)
+    return removed
+
+
+# Helper: Ensure the ADK session exists and its household context is synchronized
 async def get_or_create_session(
     user_name: str,
     session_id: str,
     household_size: int,
     planner_week_start: str = "",
     planner_selected_date: str = "",
+    user_id: str = "",
 ):
     """
-    Looks up the ADK session thread. Syncs user profile parameters 
-    into persistent user: and app: prefixed session states before executing.
+    Looks up the ADK session thread and syncs the household context into its
+    session state before executing. Household facts are session-scoped (not
+    ADK app: state, which is shared by every household on the server).
     """
     active_user = canonical_user_name(user_name)
-    user_id = active_user.replace(" ", "_")
+    user_id = user_id or _agent_scope(active_user)[0]
 
     planner_week_dates = ""
     if planner_week_start:
@@ -374,11 +416,11 @@ async def get_or_create_session(
     members = get_household_members()
     state_updates = {
         "user:profile_name": active_user,
-        "app:household_size": household_size,
-        "app:household_members": ", ".join(member["name"] for member in members),
-        "app:planner_week_start": planner_week_start,
-        "app:planner_week_dates": planner_week_dates,
-        "app:planner_selected_date": planner_selected_date,
+        "household_size": household_size,
+        "household_members": ", ".join(member["name"] for member in members),
+        "planner_week_start": planner_week_start,
+        "planner_week_dates": planner_week_dates,
+        "planner_selected_date": planner_selected_date,
     }
     
     from google.adk.events import Event, EventActions
@@ -509,7 +551,28 @@ async def persistence_postcondition(request: Request, call_next):
                 "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
             } or request.url.path.startswith("/api/invites/")
             if claims:
-                context = household_from_session(claims)
+                # Membership and role are read from the database on every
+                # request. The household copy inside the signed cookie is a
+                # hint only, so a rename, a role change, leaving or deletion
+                # takes effect immediately instead of when the cookie expires.
+                context = await asyncio.to_thread(
+                    get_household_account_context, str(claims["sub"]),
+                )
+                if context is None and household_from_session(claims) is not None:
+                    # The cookie names a household this account no longer
+                    # belongs to (it left, or the household was deleted).
+                    if not public_path:
+                        response = JSONResponse(status_code=401, content={"detail": {
+                            "code": "session_revoked",
+                            "message": "This sign-in is no longer valid. Sign in with Google again.",
+                        }})
+                        clear_session_cookie(response)
+                        return _security_headers(response)
+                    # Public pages (session check, sign-in, invites) carry on
+                    # signed out, and the stale cookie is cleared.
+                    response = await call_next(request)
+                    clear_session_cookie(response)
+                    return _security_headers(response)
                 if context is None:
                     context = await asyncio.to_thread(
                         ensure_google_household,
@@ -688,10 +751,9 @@ async def legal_consent_endpoint(request: Request, payload: Dict[str, Any]):
     identity = require_identity()
     claims = session_from_request(request) or {}
     await asyncio.to_thread(record_legal_consent, identity.google_subject, LEGAL_TERMS_VERSION)
+    household = await asyncio.to_thread(get_household_account_context, identity.google_subject)
     response = JSONResponse({"consent_required": False, "terms_version": LEGAL_TERMS_VERSION})
-    set_session_cookie(response, issue_session(
-        claims, household_from_session(claims), consent=LEGAL_TERMS_VERSION,
-    ))
+    set_session_cookie(response, issue_session(claims, household, consent=LEGAL_TERMS_VERSION))
     return response
 
 
@@ -769,8 +831,17 @@ async def delete_account_endpoint():
         raise HTTPException(status_code=404, detail="Account deletion applies to hosted Kitch only.")
     identity = require_identity()
     if not identity.is_owner:
+        member_name = next(
+            (member["name"] for member in identity.members if member["id"] == identity.profile_id), "",
+        )
         deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
-        response = JSONResponse({"deleted": deleted, "memory": "kept_for_household"})
+        # The leaving member's chat history, and the shared household
+        # memories that name them, go with their profile.
+        await _purge_agent_state(identity.household_id, [identity.profile_id])
+        memory = await _memory_runtime().forget_member_memories(
+            identity.owner_profile_id, member_name,
+        )
+        response = JSONResponse({"deleted": deleted, "memory": memory})
         clear_session_cookie(response)
         return response
     for provider_id in ("swiggy_instamart",):
@@ -782,6 +853,9 @@ async def delete_account_endpoint():
                 logger.exception("Provider disconnect failed during account deletion")
     memory = await _memory_runtime().purge_household_memory(identity.owner_profile_id)
     deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
+    await _purge_agent_state(
+        identity.household_id, [member["id"] for member in identity.members],
+    )
     response = JSONResponse({"deleted": deleted, "memory": memory})
     clear_session_cookie(response)
     return response
@@ -804,8 +878,7 @@ async def chat_endpoint(payload: ChatRequest):
         from google.genai.types import Content, Part
 
         active_user = canonical_user_name(payload.active_user)
-        user_id = active_user.replace(" ", "_")
-        session_id = f"kitch_chat_session_{user_id}"
+        user_id, session_id = _agent_scope(active_user)
         
         # Supabase is authoritative. Chat payload settings are UI context only;
         # changing household settings requires an explicit settings operation.
@@ -816,6 +889,7 @@ async def chat_endpoint(payload: ChatRequest):
             household_size=profile["household_size"],
             planner_week_start=payload.planner_context.visible_week_start,
             planner_selected_date=payload.planner_context.selected_date,
+            user_id=user_id,
         )
 
         cancellation_guidance = instamart_cancellation_guidance(payload.message)
@@ -968,8 +1042,7 @@ async def upload_photo_endpoint(
         if len(file_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="The image is too large to upload.")
         active_user = canonical_user_name(active_user)
-        user_id = active_user.replace(" ", "_")
-        session_id = f"kitch_chat_session_{user_id}"
+        user_id, session_id = _agent_scope(active_user)
         profile = get_household_profile()
         upload_received_at = datetime.now(
             household_zone(profile.get("timezone_name"))
@@ -978,6 +1051,7 @@ async def upload_photo_endpoint(
             user_name=active_user,
             session_id=session_id,
             household_size=profile["household_size"],
+            user_id=user_id,
         )
 
         override = classification_override.strip().lower()
@@ -990,14 +1064,21 @@ async def upload_photo_endpoint(
                if override else "If the purpose is unclear, classify it as ambiguous and do not guess.")
         )
         analysis_text = ""
-        async for event in vision_runner.run_async(
-            user_id=user_id, session_id=f"vision-{uuid4()}",
-            new_message=Content(parts=[Part(text=prompt), Part.from_bytes(
-                data=file_bytes, mime_type=file.content_type or "image/jpeg"
-            )], role="user"),
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                analysis_text = event.content.parts[0].text or ""
+        vision_session_id = f"vision-{uuid4()}"
+        try:
+            async for event in vision_runner.run_async(
+                user_id=user_id, session_id=vision_session_id,
+                new_message=Content(parts=[Part(text=prompt), Part.from_bytes(
+                    data=file_bytes, mime_type=file.content_type or "image/jpeg"
+                )], role="user"),
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    analysis_text = event.content.parts[0].text or ""
+        finally:
+            # The one-shot session holds the photo bytes; drop it once read.
+            await _agent_core().vision_session_service.delete_session(
+                app_name="kitch_vision", user_id=user_id, session_id=vision_session_id,
+            )
         analysis = PhotoAnalysis.model_validate_json(analysis_text)
         if override:
             analysis = analysis.model_copy(update={"classification": override})
@@ -1177,7 +1258,10 @@ async def delete_meal_plan_endpoint(payload: Dict[str, Any]):
         raise HTTPException(status_code=409, detail={
             "code": "confirmation_required", "message": "Confirm removing the requested meal-plan scope.",
         })
-    return {"status": "success", **remove_future_meal_plan_entries(operations)}
+    try:
+        return {"status": "success", **remove_future_meal_plan_entries(operations)}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 @app.get("/api/pantry")
 async def get_pantry_endpoint():
@@ -1300,22 +1384,14 @@ async def update_household_member_endpoint(
     try:
         member = update_household_member(member_id, str(payload.get("name") or ""))
         members = get_household_members()
-        result = {
+        # No cookie refresh here: identity and role are re-read from the
+        # database on the next request, so a rename cannot change who the
+        # caller is.
+        return {
             "status": "success",
             "member": {"id": str(member["id"]), "name": member["full_name"]},
             "members": members,
         }
-        identity = current_identity()
-        claims = session_from_request(request)
-        if identity is None or claims is None:
-            return result
-        response = JSONResponse(result)
-        set_session_cookie(response, issue_session(claims, {
-            "household_id": identity.household_id,
-            "owner_profile_id": identity.owner_profile_id,
-            "members": members,
-        }))
-        return response
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
