@@ -1590,10 +1590,24 @@ export function useKitch() {
     startProviderSyncProgress();
     setIsPlacingProviderOrder(true);
     try {
-      const latestReview = await updateProviderReview({
-        selected_payment_method_id: effectiveProviderPaymentMethod || null,
-        order_review_acknowledged: true
-      }) || providerCartReview;
+      // The approval names the exact review on screen. If another member or
+      // the app changed it meanwhile, the server refuses and returns the new
+      // review, which is shown below for a fresh look before ordering.
+      const ackRes = await apiFetch(apiUrl(selectedProvider.routes.checkoutDraft), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selected_payment_method_id: effectiveProviderPaymentMethod || null,
+          order_review_acknowledged: true,
+          seen_snapshot_hash: providerCartReview.snapshot_hash
+        })
+      });
+      await requireSuccessfulResponse(ackRes);
+      const latestReview = (await ackRes.json()).draft;
+      if (!latestReview?.confirmation_token) {
+        throw new Error(`${selectedProvider.label} did not confirm the reviewed cart. Review it again before ordering.`);
+      }
+      applyProviderDraft(latestReview);
       const res = await apiFetch(apiUrl(selectedProvider.routes.placeOrder), {
         method: "POST",
         timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS,
