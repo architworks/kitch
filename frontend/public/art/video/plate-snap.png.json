@@ -1,0 +1,12 @@
+{
+  "prompt": "Warm painterly storybook illustration matching the soft flat shading, brushwork, gentle light and palette of the first reference image (olive and forest green, warm wood, turmeric orange, steel grey, cream). The main character is the SAME young man as in the second reference image: an Indian man in his mid-twenties with short wavy dark hair, warm brown skin and a clean-shaven friendly face, drawn in the same simple storybook style. At home he wears a plain heather-grey crew-neck t-shirt. No text, no lettering, no logos, no brand marks, no readable screens. Wide landscape composition.\nThe right 40% of the frame is a calm, softly blurred warm wooden table surface and cream wall, nothing on it, reserved for a card. On the left: seen from slightly above, the young man's two hands and forearms, in the short grey t-shirt sleeves, hold a smartphone over a steel thali on a wooden table, taking a photo of lunch. The thali has katoris of yellow dal, green sabzi, curd and rice, and two rotis. A glass of water and a folded cloth napkin beside it. Bright midday light.\n",
+  "createdAt": "2026-10-17T07:59:55.160Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "opaque",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png",
+    "frontend/public/art/video/office-night.png"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "prompt": "Warm painterly storybook illustration matching the soft flat shading, brushwork, gentle light and palette of the first reference image (olive and forest green, warm wood, turmeric orange, steel grey, cream). The main character is the SAME young man as in the second reference image: an Indian man in his mid-twenties with short wavy dark hair, warm brown skin and a clean-shaven friendly face, drawn in the same simple storybook style. At home he wears a plain heather-grey crew-neck t-shirt. No text, no lettering, no logos, no brand marks, no readable screens. Wide landscape composition.\nThe left 42% of the frame is an empty, smooth deep olive-green wall (#3f4229), gently vignetted, nothing on it, reserved for text. On the right: in a cozy shared apartment, the young man and two of his flatmates, young Indian men in their mid-twenties in casual t-shirts, sit around a round wooden table sharing a home-cooked dinner, laughing as one passes a bowl. Steel plates with rotis, dal, paneer sabzi and rice, a pot of curry in the centre, a warm pendant lamp overhead, cozy amber evening light, a window with a dusky indigo sky.\n",
+  "createdAt": "2026-10-17T07:59:54.297Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "opaque",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png",
+    "frontend/public/art/video/office-night.png"
+  ]
+}

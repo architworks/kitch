@@ -1,0 +1,11 @@
+{
+  "prompt": "Warm painterly storybook illustration matching the soft flat shading, brushwork, gentle light and palette of the reference image (olive and forest green, warm wood, turmeric orange, steel grey, cream). People are drawn in the same simple storybook style with soft, friendly, lightly detailed faces. No text, no lettering, no logos, no brand marks, no readable screens. Wide landscape composition.\nThe left 40% of the frame is an empty, smooth deep olive-green wall (#3f4229), gently vignetted, nothing on it, reserved for text. On the right: a tired young Indian office worker in a shirt sits at a desk late at night, chin resting on one hand, lit by the cool glow of a laptop. On the desk: an empty coffee mug, a few sticky notes, a phone, and a greasy takeaway box with fries and a burger wrapper. Behind, a dark office window with blurred city lights. Mood: weary, a little lonely, warm lamp light contrasting the cool screen.\n",
+  "createdAt": "2026-10-17T07:48:03.440Z",
+  "tool": "impeccable generate-image",
+  "model": "gpt-image-2.5-flare",
+  "background": "opaque",
+  "outputFormat": "png",
+  "refs": [
+    "frontend/public/countertop.png"
+  ]
+}
