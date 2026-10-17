@@ -43,3 +43,6 @@ docs/test_artifacts/*.png
 # Generated media and personal application material (kept outside the repo)
 /assets/
 /docs/swiggy/
+
+# Local ADK session stores
+*.db
