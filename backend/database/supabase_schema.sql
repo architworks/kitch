@@ -1198,7 +1198,12 @@ BEGIN
         updates_cart = EXCLUDED.updates_cart,
         cart_item_count = EXCLUDED.cart_item_count,
         updated_at = EXCLUDED.updated_at
+    -- Only the owning household may update an existing plan id.
+    WHERE public.recipe_grocery_plans.profile_id = EXCLUDED.profile_id
     RETURNING * INTO saved_plan;
+    IF saved_plan.id IS NULL THEN
+        RAISE EXCEPTION 'recipe plan belongs to another household' USING ERRCODE = '42501';
+    END IF;
 
     IF p_updates_cart THEN
         IF NOT plan_preexisted THEN
@@ -1620,12 +1625,18 @@ BEGIN
     IF jsonb_typeof(p_operations) <> 'array' OR jsonb_array_length(p_operations) = 0 THEN
         RAISE EXCEPTION 'operations must be a non-empty array' USING ERRCODE = '22023';
     END IF;
+    IF jsonb_array_length(p_operations) > 31 THEN
+        RAISE EXCEPTION 'remove at most 31 meal-plan scopes at a time' USING ERRCODE = '22023';
+    END IF;
     FOR op IN SELECT * FROM jsonb_array_elements(p_operations) LOOP
         kind := lower(btrim(op->>'action'));
         start_date := (op->>'start_date')::date;
         end_date := COALESCE(NULLIF(op->>'end_date', '')::date, start_date);
         IF start_date < household_today OR end_date < start_date THEN
             RAISE EXCEPTION 'only valid non-past dates may be removed' USING ERRCODE = '22023';
+        END IF;
+        IF end_date - start_date >= 366 THEN
+            RAISE EXCEPTION 'date ranges are limited to 366 days' USING ERRCODE = '22023';
         END IF;
         affected := affected || to_jsonb(ARRAY(SELECT generate_series(start_date, end_date, interval '1 day')::date));
         IF kind = 'slot' THEN

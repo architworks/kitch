@@ -1258,7 +1258,10 @@ async def delete_meal_plan_endpoint(payload: Dict[str, Any]):
         raise HTTPException(status_code=409, detail={
             "code": "confirmation_required", "message": "Confirm removing the requested meal-plan scope.",
         })
-    return {"status": "success", **remove_future_meal_plan_entries(operations)}
+    try:
+        return {"status": "success", **remove_future_meal_plan_entries(operations)}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 @app.get("/api/pantry")
 async def get_pantry_endpoint():

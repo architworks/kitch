@@ -33,6 +33,7 @@ from app.persistence import (
 )
 from app.planning_calendar import (
     calendar_context,
+    check_date_range,
     dates_between,
     monday_for,
     parse_iso_date,
@@ -1149,7 +1150,25 @@ def apply_meal_plan_edits(edits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [_meal_row_to_day(row) for row in rows]
 
 
+MAX_MEAL_REMOVAL_OPERATIONS = 31
+
+
+def _check_meal_removal_operations(operations: List[Dict[str, Any]]) -> None:
+    """Bound removal requests before the database expands them day by day."""
+    if len(operations) > MAX_MEAL_REMOVAL_OPERATIONS:
+        raise ValueError(
+            f"Remove at most {MAX_MEAL_REMOVAL_OPERATIONS} meal-plan scopes at a time."
+        )
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise ValueError("Each meal-plan removal must be an object")
+        start = parse_iso_date(operation.get("start_date"))
+        end = parse_iso_date(operation.get("end_date") or operation.get("start_date"))
+        check_date_range(start, end)
+
+
 def remove_future_meal_plan_entries(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    _check_meal_removal_operations(operations)
     data = _execute(
         "remove_future_meal_plan_entries", "meal_plans",
         lambda: supabase.rpc("remove_future_meal_plan_entries", {
@@ -1869,6 +1888,10 @@ def save_recipe_grocery_plan(
     )
     if not normalized_plan:
         raise ValueError("A structured recipe grocery plan is required.")
+    if get_recipe_grocery_plan(normalized_plan["id"]) is None:
+        # A model-supplied id that this household does not own is saved as a
+        # new plan, so it can never overwrite another household's plan.
+        normalized_plan["id"] = str(uuid4())
     requirements = _recipe_ingredient_requirements(normalized_plan["ingredients"])
     normalized_cart = [
         _apply_recipe_requirement(item, requirements)
@@ -2112,8 +2135,7 @@ def get_nutrition_dashboard(
 ) -> Dict[str, Any]:
     start = parse_iso_date(start_date)
     end = parse_iso_date(end_date)
-    if end < start:
-        raise ValueError("end_date must not precede start_date")
+    check_date_range(start, end)
     entries = get_macro_diary(user_name, start, end)
     entries_by_day: Dict[str, List[Dict[str, Any]]] = {
         day.isoformat(): [] for day in dates_between(start, end)
