@@ -260,7 +260,8 @@ def _household_identity(value: Dict[str, Any]) -> HouseholdIdentity:
             for member in value.get("members") or []
         ),
         profile_id=str(value.get("profile_id") or value["owner_profile_id"]),
-        role="member" if value.get("role") == "member" else "owner",
+        # Fail closed: only an explicit owner role grants owner powers.
+        role="owner" if value.get("role") == "owner" else "member",
     )
 
 
@@ -509,7 +510,28 @@ async def persistence_postcondition(request: Request, call_next):
                 "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
             } or request.url.path.startswith("/api/invites/")
             if claims:
-                context = household_from_session(claims)
+                # Membership and role are read from the database on every
+                # request. The household copy inside the signed cookie is a
+                # hint only, so a rename, a role change, leaving or deletion
+                # takes effect immediately instead of when the cookie expires.
+                context = await asyncio.to_thread(
+                    get_household_account_context, str(claims["sub"]),
+                )
+                if context is None and household_from_session(claims) is not None:
+                    # The cookie names a household this account no longer
+                    # belongs to (it left, or the household was deleted).
+                    if not public_path:
+                        response = JSONResponse(status_code=401, content={"detail": {
+                            "code": "session_revoked",
+                            "message": "This sign-in is no longer valid. Sign in with Google again.",
+                        }})
+                        clear_session_cookie(response)
+                        return _security_headers(response)
+                    # Public pages (session check, sign-in, invites) carry on
+                    # signed out, and the stale cookie is cleared.
+                    response = await call_next(request)
+                    clear_session_cookie(response)
+                    return _security_headers(response)
                 if context is None:
                     context = await asyncio.to_thread(
                         ensure_google_household,
@@ -688,10 +710,9 @@ async def legal_consent_endpoint(request: Request, payload: Dict[str, Any]):
     identity = require_identity()
     claims = session_from_request(request) or {}
     await asyncio.to_thread(record_legal_consent, identity.google_subject, LEGAL_TERMS_VERSION)
+    household = await asyncio.to_thread(get_household_account_context, identity.google_subject)
     response = JSONResponse({"consent_required": False, "terms_version": LEGAL_TERMS_VERSION})
-    set_session_cookie(response, issue_session(
-        claims, household_from_session(claims), consent=LEGAL_TERMS_VERSION,
-    ))
+    set_session_cookie(response, issue_session(claims, household, consent=LEGAL_TERMS_VERSION))
     return response
 
 
@@ -1300,22 +1321,14 @@ async def update_household_member_endpoint(
     try:
         member = update_household_member(member_id, str(payload.get("name") or ""))
         members = get_household_members()
-        result = {
+        # No cookie refresh here: identity and role are re-read from the
+        # database on the next request, so a rename cannot change who the
+        # caller is.
+        return {
             "status": "success",
             "member": {"id": str(member["id"]), "name": member["full_name"]},
             "members": members,
         }
-        identity = current_identity()
-        claims = session_from_request(request)
-        if identity is None or claims is None:
-            return result
-        response = JSONResponse(result)
-        set_session_cookie(response, issue_session(claims, {
-            "household_id": identity.household_id,
-            "owner_profile_id": identity.owner_profile_id,
-            "members": members,
-        }))
-        return response
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
