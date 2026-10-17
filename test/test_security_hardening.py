@@ -115,5 +115,17 @@ class ZeptoHouseholdScopeTests(unittest.TestCase):
             self.assertTrue(ZeptoProviderAdapter().enabled)
 
 
+class InputValidationTests(unittest.TestCase):
+    def test_missing_pantry_revision_is_a_client_error_not_a_crash(self):
+        from fastapi import HTTPException
+        from app.main import _expected_pantry_revision
+
+        self.assertEqual(_expected_pantry_revision({"expected_revision": "3"}), 3)
+        for payload in ({}, {"expected_revision": "latest"}):
+            with self.assertRaises(HTTPException) as caught:
+                _expected_pantry_revision(payload)
+            self.assertEqual(caught.exception.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1269,12 +1269,19 @@ async def get_pantry_endpoint():
     return get_pantry_state()
 
 
+def _expected_pantry_revision(payload: Dict[str, Any]) -> int:
+    try:
+        return int(payload.get("expected_revision"))
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail="expected_revision must be the pantry revision number") from error
+
+
 @app.patch("/api/pantry")
 async def patch_pantry_endpoint(payload: Dict[str, Any]):
     """Apply an atomic add/set/adjust/remove pantry batch."""
     try:
         result = await mutate_pantry(
-            expected_revision=int(payload.get("expected_revision")),
+            expected_revision=_expected_pantry_revision(payload),
             mode="patch", items=list(payload.get("changes") or []),
         )
         return {"status": "success", **result}
@@ -1292,7 +1299,7 @@ async def replace_pantry_endpoint(payload: Dict[str, Any]):
         })
     try:
         result = await mutate_pantry(
-            expected_revision=int(payload.get("expected_revision")),
+            expected_revision=_expected_pantry_revision(payload),
             mode="replace", items=list(payload.get("items") or []),
         )
         return {"status": "success", **result}
@@ -1305,7 +1312,7 @@ async def reconcile_grocery_cart_with_pantry_endpoint(payload: Dict[str, Any]):
     """Explicitly recalculate native purchase quantities from current pantry state."""
     try:
         result = await reconcile_native_cart_with_pantry(
-            expected_revision=int(payload.get("expected_revision")),
+            expected_revision=_expected_pantry_revision(payload),
         )
         return {"status": "success", **result}
     except PantryReconciliationError as error:
