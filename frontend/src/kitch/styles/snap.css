@@ -1,0 +1,124 @@
+/* Photo capture: snap the fridge into the pantry, snap a plate into the diary */
+
+.snap-trigger { position: relative; cursor: pointer; user-select: none; }
+.snap-trigger:focus-within { outline: 2.5px solid var(--green-2); outline-offset: 2px; }
+.snap-trigger.is-busy { opacity: 0.5; cursor: progress; }
+
+/* Viewfinder card */
+.snap-card {
+  --snap-tint: var(--sage);
+  --snap-ink: var(--green);
+  display: grid; gap: 18px; align-items: center;
+  border-radius: var(--r-lg); border: 1px solid var(--line);
+  background: linear-gradient(150deg, var(--snap-tint) 0%, var(--card) 72%);
+  box-shadow: var(--shadow-raise);
+}
+.snap-card.snap-meal { --snap-tint: var(--turmeric-soft); --snap-ink: var(--turmeric-ink); }
+
+.snap-frame { position: relative; aspect-ratio: 1; display: grid; place-items: center; border-radius: 18px; background: rgb(255 253 248 / 0.7); overflow: hidden; }
+.snap-frame img { width: 86%; height: 86%; object-fit: contain; transition: transform 500ms var(--ease-out); }
+.snap-card:hover .snap-frame img { transform: scale(1.04); }
+.snap-frame .corner { position: absolute; width: 22%; height: 22%; border: 0 solid var(--snap-ink); opacity: 0.85; }
+.snap-frame .tl { top: 8px; left: 8px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 10px; }
+.snap-frame .tr { top: 8px; right: 8px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 10px; }
+.snap-frame .bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 10px; }
+.snap-frame .br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 10px; }
+.snap-frame .scan-line {
+  position: absolute; left: 12%; right: 12%; top: 14%; height: 2px; border-radius: 2px;
+  background: var(--snap-ink); opacity: 0; box-shadow: 0 0 12px 2px var(--snap-ink);
+}
+.snap-card:hover .scan-line, .snap-card:focus-within .scan-line { animation: snap-scan 1.6s var(--ease-out) infinite; }
+@keyframes snap-scan { 0% { top: 14%; opacity: 0; } 15% { opacity: 0.55; } 85% { opacity: 0.55; } 100% { top: 84%; opacity: 0; } }
+
+.snap-copy { display: grid; gap: 6px; align-content: center; min-width: 0; }
+.snap-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--snap-ink, var(--green)); }
+.snap-copy h3 { font: 700 21px/1.15 var(--font-display-stack); letter-spacing: -0.02em; color: var(--ink); }
+.snap-copy p { color: var(--ink-2); max-width: 52ch; }
+.snap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+/* Empty pantry: the card is the empty state */
+.snap-card.snap-hero { grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); padding: 22px; margin: 6px 0 16px; }
+.snap-card.snap-hero h3 { font-size: 24px; }
+
+/* Above a filled list: a slim reminder */
+.snap-card.snap-strip { grid-template-columns: 76px minmax(0, 1fr); gap: 14px; padding: 12px 14px; margin: 0 0 14px; box-shadow: none; }
+.snap-card.snap-strip .snap-frame { border-radius: 14px; }
+.snap-card.snap-strip .corner { border-width: 0; }
+.snap-card.snap-strip .tl, .snap-card.snap-strip .tr, .snap-card.snap-strip .bl, .snap-card.snap-strip .br { width: 26%; height: 26%; top: auto; left: auto; right: auto; bottom: auto; }
+.snap-card.snap-strip .tl { top: 5px; left: 5px; border-top-width: 2.5px; border-left-width: 2.5px; }
+.snap-card.snap-strip .tr { top: 5px; right: 5px; border-top-width: 2.5px; border-right-width: 2.5px; }
+.snap-card.snap-strip .bl { bottom: 5px; left: 5px; border-bottom-width: 2.5px; border-left-width: 2.5px; }
+.snap-card.snap-strip .br { bottom: 5px; right: 5px; border-bottom-width: 2.5px; border-right-width: 2.5px; }
+.snap-card.snap-strip .snap-copy { grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; align-items: center; }
+.snap-card.snap-strip .snap-eyebrow { display: none; }
+.snap-card.snap-strip h3 { font-size: 16.5px; grid-column: 1; }
+.snap-card.snap-strip p { font-size: 13.5px; grid-column: 1; }
+.snap-card.snap-strip .snap-actions { grid-column: 2; grid-row: 1 / span 2; margin: 0; flex-wrap: nowrap; }
+
+/* Side column */
+.snap-card.snap-stack { padding: 18px; }
+.snap-card.snap-stack .snap-frame { width: 100%; max-height: 190px; aspect-ratio: auto; height: 190px; }
+.snap-card.snap-stack .snap-frame img { width: auto; height: 156px; }
+.snap-card.snap-stack .snap-actions .btn.primary { flex: 1; }
+
+/* Side column, compact: small framed art beside the copy, button below */
+.snap-card.snap-compact { grid-template-columns: 72px minmax(0, 1fr); gap: 4px 14px; padding: 14px 16px; }
+.snap-card.snap-compact .snap-frame { border-radius: 12px; }
+.snap-card.snap-compact .corner { width: 26%; height: 26%; border-width: 0; }
+.snap-card.snap-compact .tl { top: 4px; left: 4px; border-top-width: 2px; border-left-width: 2px; }
+.snap-card.snap-compact .tr { top: 4px; right: 4px; border-top-width: 2px; border-right-width: 2px; }
+.snap-card.snap-compact .bl { bottom: 4px; left: 4px; border-bottom-width: 2px; border-left-width: 2px; }
+.snap-card.snap-compact .br { bottom: 4px; right: 4px; border-bottom-width: 2px; border-right-width: 2px; }
+.snap-card.snap-compact .snap-copy { display: contents; }
+.snap-card.snap-compact .snap-eyebrow { display: none; }
+.snap-card.snap-compact h3 { grid-column: 2; grid-row: 1; align-self: end; font-size: 17px; }
+.snap-card.snap-compact p { grid-column: 2; grid-row: 2; align-self: start; font-size: 13.5px; line-height: 1.4; }
+.snap-card.snap-compact .snap-frame { grid-row: 1 / span 2; }
+.snap-card.snap-compact .snap-actions { grid-column: 1 / -1; margin-top: 10px; }
+.snap-card.snap-compact .snap-actions .btn.primary { flex: 1; }
+
+/* Composer: the camera is the one tinted control next to Send */
+.composer .composer-camera { background: var(--sage); color: var(--green); border: 0; }
+.composer .composer-camera:hover { background: var(--sage-2); }
+
+/* Drawer: photo shortcuts above the text prompts */
+.drawer-snaps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.drawer-snap {
+  display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--card);
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+}
+.drawer-snap:hover { border-color: var(--sage-2); background: #fff; }
+.drawer-snap-text { display: grid; min-width: 0; text-align: left; }
+.drawer-snap strong { font-size: 14px; font-weight: 650; color: var(--ink); }
+.drawer-snap small { font-size: 12.5px; color: var(--mute); }
+
+/* About */
+.about-snap { display: grid; gap: 16px; }
+.about-snap-head h2 { font: 700 26px/1.15 var(--font-display-stack); letter-spacing: -0.02em; }
+.about-snap-head p { color: var(--ink-2); max-width: 64ch; margin-top: 4px; }
+.about-snap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.about-snap .snap-card { grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); padding: 20px; }
+
+@container workspace (max-width: 860px) {
+  .about-snap-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@container workspace (max-width: 620px) {
+  .snap-card.snap-hero { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; padding: 20px 16px; }
+  .snap-card.snap-hero .snap-frame { width: 160px; }
+  .snap-card.snap-hero .snap-copy { justify-items: center; }
+  .snap-card.snap-hero .snap-actions { justify-content: center; }
+  .snap-card.snap-strip .snap-copy { grid-template-columns: minmax(0, 1fr); }
+  .snap-card.snap-strip .snap-actions { grid-column: 1; grid-row: auto; margin-top: 6px; flex-wrap: wrap; }
+  .about-snap .snap-card { grid-template-columns: 96px minmax(0, 1fr); padding: 16px; gap: 14px; }
+  .drawer-snaps { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 420px) {
+  .drawer-snaps { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snap-card:hover .scan-line, .snap-card:focus-within .scan-line { animation: none; }
+  .snap-card:hover .snap-frame img { transform: none; }
+}
+.today-snap { margin-top: 14px; }

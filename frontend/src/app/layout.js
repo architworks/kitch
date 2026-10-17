@@ -7,6 +7,8 @@ import "../kitch/styles/recipes.css";
 import "../kitch/styles/groceries.css";
 import "../kitch/styles/nutrition.css";
 import "../kitch/styles/entry.css";
+import "../kitch/styles/snap.css";
+import "../kitch/styles/legal.css";
 
 const display = Bricolage_Grotesque({
   subsets: ["latin"],

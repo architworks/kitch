@@ -395,6 +395,30 @@ memory_runtime = MemoryRuntime.from_environment()
 memory_service = memory_runtime.service
 
 
+async def purge_household_memory(user_id: str) -> str:
+    """Delete every Memory Bank memory scoped to one household.
+
+    Used when an owner deletes their account. Returns ``purged``, ``skipped``
+    (no durable memory configured) or ``failed`` so the caller can report it.
+    """
+    if memory_runtime.backend != "vertex" or not memory_runtime.configured:
+        return "skipped"
+    service = memory_runtime.service
+    started = time.perf_counter()
+    try:
+        await service._get_api_client().agent_engines.memories.purge(
+            name="reasoningEngines/" + service._agent_engine_id,
+            filter=f'scope.app_name="{MEMORY_APP_NAME}" AND scope.user_id="{user_id}"',
+            force=True,
+        )
+    except Exception:
+        _log_operation("purge", memory_runtime.backend, "failed", started)
+        logger.exception("Memory Bank purge failed during account deletion")
+        return "failed"
+    _log_operation("purge", memory_runtime.backend, "success", started)
+    return "purged"
+
+
 def _log_operation(operation: str, backend: str, outcome: str, started: float) -> None:
     logger.info(
         "memory_operation operation=%s backend=%s outcome=%s latency_ms=%d",

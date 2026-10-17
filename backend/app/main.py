@@ -35,14 +35,19 @@ from app.auth import (
     current_identity,
     end_identity_scope,
     household_from_session,
+    require_identity,
     issue_session,
     session_from_request,
     set_session_cookie,
     verify_google_credential,
 )
+from app.legal import CONSENT_EXEMPT_PATHS, LEGAL_TERMS_VERSION, valid_consent
 # Import backend-neutral structured-state operations.
 from app.storage import (
     DATABASE_BACKEND,
+    delete_household_account,
+    get_legal_consent,
+    record_legal_consent,
     get_pantry_stock,
     get_macro_diary,
     get_nutrition_dashboard,
@@ -434,7 +439,7 @@ async def persistence_postcondition(request: Request, call_next):
     token = begin_persistence_scope()
     confirmation_token = begin_confirmation_scope()
     memory_auth_token = None
-    if request.url.path in {"/api/chat", "/api/upload-photo", "/api/health/ready"}:
+    if request.url.path in {"/api/chat", "/api/upload-photo", "/api/health/ready", "/api/account"}:
         memory_auth_token = _memory_runtime().begin_memory_auth_scope(
             request.headers.get("x-vercel-oidc-token")
         )
@@ -480,6 +485,15 @@ async def persistence_postcondition(request: Request, call_next):
                     )
                     upgraded_session_context = context
                 identity_token = begin_identity_scope(_household_identity(context))
+                if (
+                    claims.get("consent") != LEGAL_TERMS_VERSION
+                    and not public_path
+                    and request.url.path not in CONSENT_EXEMPT_PATHS
+                ):
+                    return _security_headers(JSONResponse(status_code=403, content={"detail": {
+                        "code": "consent_required",
+                        "message": "Review and accept the Privacy Policy and Terms of Use to continue.",
+                    }}))
             elif not public_path:
                 return _security_headers(JSONResponse(status_code=401, content={"detail": {
                     "code": "authentication_required",
@@ -502,7 +516,7 @@ async def persistence_postcondition(request: Request, call_next):
         if claims and upgraded_session_context is not None:
             set_session_cookie(
                 response,
-                issue_session(claims, upgraded_session_context),
+                issue_session(claims, upgraded_session_context, consent=claims.get("consent")),
             )
         return _security_headers(response)
     except PersistenceError as error:
@@ -559,32 +573,94 @@ async def google_sign_in_endpoint(payload: Dict[str, Any]):
         str(claims.get("name") or "Kitch household"),
         timezone_name,
     )
+    consent = await _resolve_consent(str(claims["sub"]), payload.get("consent"))
     response = JSONResponse({
         "authenticated": True,
         "email": str(claims["email"]),
         "household": context,
+        "consent_required": consent is None,
+        "terms_version": LEGAL_TERMS_VERSION,
     })
-    set_session_cookie(response, issue_session(claims, context))
+    set_session_cookie(response, issue_session(claims, context, consent=consent))
     return response
 
 
+async def _resolve_consent(google_subject: str, submitted: Any) -> str | None:
+    """Record a fresh acceptance, or reuse one already stored for this owner."""
+    if valid_consent(submitted):
+        await asyncio.to_thread(record_legal_consent, google_subject, LEGAL_TERMS_VERSION)
+        return LEGAL_TERMS_VERSION
+    stored = await asyncio.to_thread(get_legal_consent, google_subject)
+    return LEGAL_TERMS_VERSION if stored.get("terms_version") == LEGAL_TERMS_VERSION else None
+
+
 @app.get("/api/auth/session")
-async def auth_session_endpoint():
+async def auth_session_endpoint(request: Request):
     if not auth_required():
-        return {"auth_required": False, "authenticated": True}
+        return {"auth_required": False, "authenticated": True, "consent_required": False}
     identity = current_identity()
-    if identity is None:
+    claims = session_from_request(request)
+    if identity is None or claims is None:
         return {"auth_required": True, "authenticated": False}
-    return {
+    consent = claims.get("consent")
+    if consent != LEGAL_TERMS_VERSION:
+        consent = await _resolve_consent(identity.google_subject, None)
+    body = {
         "auth_required": True,
         "authenticated": True,
         "email": identity.email,
+        "consent_required": consent is None,
+        "terms_version": LEGAL_TERMS_VERSION,
         "household": {
             "household_id": identity.household_id,
             "owner_profile_id": identity.owner_profile_id,
             "members": list(identity.members),
         },
     }
+    response = JSONResponse(body)
+    if consent and claims.get("consent") != consent:
+        set_session_cookie(response, issue_session(claims, household_from_session(claims), consent=consent))
+    return response
+
+
+@app.post("/api/legal/consent")
+async def legal_consent_endpoint(request: Request, payload: Dict[str, Any]):
+    """Record the owner's acceptance of the current notice and 18+ confirmation."""
+    if not valid_consent(payload):
+        raise HTTPException(status_code=422, detail={
+            "code": "consent_incomplete",
+            "message": "Confirm you are 18 or older and accept the Privacy Policy and Terms of Use.",
+        })
+    if not auth_required():
+        return {"consent_required": False, "terms_version": LEGAL_TERMS_VERSION}
+    identity = require_identity()
+    claims = session_from_request(request) or {}
+    await asyncio.to_thread(record_legal_consent, identity.google_subject, LEGAL_TERMS_VERSION)
+    response = JSONResponse({"consent_required": False, "terms_version": LEGAL_TERMS_VERSION})
+    set_session_cookie(response, issue_session(
+        claims, household_from_session(claims), consent=LEGAL_TERMS_VERSION,
+    ))
+    return response
+
+
+@app.delete("/api/account")
+async def delete_account_endpoint():
+    """Delete the signed-in owner's account, household data and agent memory."""
+    if not auth_required():
+        raise HTTPException(status_code=404, detail="Account deletion applies to hosted Kitch only.")
+    identity = require_identity()
+    for provider_id in ("swiggy_instamart",):
+        adapter = provider_registry.get(provider_id)
+        if isinstance(adapter, InstamartProviderAdapter):
+            try:
+                await adapter.oauth.disconnect()
+            except Exception:
+                logger.exception("Provider disconnect failed during account deletion")
+    memory = await _memory_runtime().purge_household_memory(identity.owner_profile_id)
+    deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
+    response = JSONResponse({"deleted": deleted, "memory": memory})
+    clear_session_cookie(response)
+    return response
 
 
 @app.post("/api/auth/logout")

@@ -95,6 +95,7 @@ def _session_household_context(
 def issue_session(
     claims: dict[str, Any],
     household: dict[str, Any] | None = None,
+    consent: str | None = None,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -107,6 +108,10 @@ def issue_session(
     }
     if household is not None:
         payload["household"] = _session_household_context(claims, household)
+    if consent:
+        # The accepted legal-notice version rides in the signed session so the
+        # consent gate needs no database read per request.
+        payload["consent"] = str(consent)
     encoded = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = _b64encode(hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).digest())
     return f"{encoded}.{signature}"

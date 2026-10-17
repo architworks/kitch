@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS public.household_accounts (
     last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+ALTER TABLE public.household_accounts
+    ADD COLUMN IF NOT EXISTS terms_version TEXT,
+    ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS age_confirmed_at TIMESTAMPTZ;
+
 -- Nutrition goals are user-specific operational state, not household-profile
 -- preferences.
 CREATE TABLE IF NOT EXISTS public.nutrition_targets (
@@ -381,6 +386,33 @@ REVOKE ALL ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BO
     FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BOOLEAN)
     TO service_role;
+
+-- Deleting the account row first lets the household cascade remove every
+-- profile and its plans, pantry, carts, diary, provider tokens and drafts
+-- (household_accounts.owner_profile_id is ON DELETE RESTRICT).
+CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_household_id UUID;
+BEGIN
+    DELETE FROM public.household_accounts
+    WHERE google_subject = p_google_subject
+    RETURNING household_id INTO v_household_id;
+    IF v_household_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    DELETE FROM public.households WHERE id = v_household_id;
+    RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.delete_household_account(TEXT)
+    FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_household_account(TEXT) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.claim_pending_agent_action(
     p_profile_id uuid, p_action_id uuid

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon.js";
+import { SnapButton, useCameraDevice } from "./PhotoCapture.js";
 import { renderMarkdownContent } from "../lib/helpers.js";
 import { formatPlanDate, getWeekStartForDate } from "../../app/householdConfig.js";
 
@@ -55,6 +56,7 @@ function ChangeReceipt({ action, k, go }) {
 
 export function Composer({ k, inputRef, floating = false }) {
   const [focused, setFocused] = useState(false);
+  const onCamera = useCameraDevice();
   const showPrompts = floating && focused && !k.hasStartedConversation && !k.chatInput.trim() && !k.pendingPhoto;
 
   useEffect(() => {
@@ -82,7 +84,7 @@ export function Composer({ k, inputRef, floating = false }) {
       {k.pendingPhoto && (
         <div className="attachment">
           <Icon name={k.pendingPhoto.source === "camera" ? "camera" : "image"} size="sm" />
-          <span><strong>{k.pendingPhoto.file.name}</strong> Kitch will check whether it’s a meal or pantry photo.</span>
+          <span><strong>{k.pendingPhoto.source === "camera" ? "Photo ready" : k.pendingPhoto.file.name}</strong> Kitch will check whether it’s a meal or pantry photo.</span>
           <button type="button" className="icon-btn bare sm" aria-label="Remove photo" onClick={k.clearPendingPhoto}><Icon name="close" size="sm" /></button>
         </div>
       )}
@@ -110,16 +112,16 @@ export function Composer({ k, inputRef, floating = false }) {
             }
           }}
         />
-        <label className="icon-btn bare" title="Attach a photo">
-          <Icon name="image" />
-          <span className="visually-hidden">Attach a photo from your gallery</span>
-          <input type="file" accept="image/*" className="visually-hidden" onChange={event => { k.stagePhotoForInput(event.target.files[0], "gallery"); event.target.value = ""; }} />
-        </label>
-        <label className="icon-btn bare" title="Take a photo">
+        {onCamera && (
+          <SnapButton k={k} camera={false} className="icon-btn bare" title="Choose a photo">
+            <Icon name="image" />
+            <span className="visually-hidden">Choose a photo from your gallery</span>
+          </SnapButton>
+        )}
+        <SnapButton k={k} camera={onCamera} className="icon-btn composer-camera" title={onCamera ? "Take a photo of your fridge or plate" : "Add a photo of your fridge or plate"}>
           <Icon name="camera" />
-          <span className="visually-hidden">Take a photo with the camera</span>
-          <input type="file" accept="image/*" capture="environment" className="visually-hidden" onChange={event => { k.stagePhotoForInput(event.target.files[0], "camera"); event.target.value = ""; }} />
-        </label>
+          <span className="visually-hidden">{onCamera ? "Take a photo with the camera" : "Add a photo"}</span>
+        </SnapButton>
         <button type="submit" className="send" aria-label="Send" disabled={k.isChatTyping || (!k.chatInput.trim() && !k.pendingPhoto)}>
           <Icon name="send" />
         </button>
@@ -131,6 +133,7 @@ export function Composer({ k, inputRef, floating = false }) {
 export function ChatDrawer({ k, go, inputRef }) {
   const messagesRef = useRef(null);
   const open = k.smartDockExpanded;
+  const onCamera = useCameraDevice();
 
   useEffect(() => {
     if (!open) return undefined;
@@ -172,6 +175,16 @@ export function ChatDrawer({ k, go, inputRef }) {
           {k.chatHistory.length === 0 && (
             <div className="drawer-empty">
               <p>Ask in your own words. Kitch can plan dated meals, write a recipe from what you have, update the pantry from a fridge photo, build the shopping list, or log what you ate.</p>
+              <div className="drawer-snaps" aria-label="Photo shortcuts">
+                <SnapButton k={k} kind="pantry" className="drawer-snap">
+                  <span className="tile sage"><Icon name="camera" /></span>
+                  <span className="drawer-snap-text"><strong>{onCamera ? "Snap your fridge" : "Add a fridge photo"}</strong><small>Fills the pantry</small></span>
+                </SnapButton>
+                <SnapButton k={k} kind="meal" className="drawer-snap">
+                  <span className="tile turmeric"><Icon name="camera" /></span>
+                  <span className="drawer-snap-text"><strong>{onCamera ? "Snap your plate" : "Add a plate photo"}</strong><small>Logs the meal</small></span>
+                </SnapButton>
+              </div>
               <div className="drawer-prompts">
                 {k.quickPrompts.map(prompt => (
                   <button key={prompt} type="button" onClick={() => { k.setChatInput(prompt); inputRef.current?.focus(); }}>{prompt}</button>

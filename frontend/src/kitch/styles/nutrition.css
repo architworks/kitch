@@ -4,11 +4,15 @@
 .date-nav strong { min-width: 112px; text-align: center; font-weight: 650; }
 
 .nutrition-top { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 20px; }
-.day-summary { display: grid; grid-template-columns: auto 1fr; gap: 26px; align-items: center; background: linear-gradient(160deg, #fff7ea 0%, var(--card) 60%); }
-.day-summary .ring-label b { font-size: 30px; }
+.day-summary { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; padding: 18px 22px; background: linear-gradient(160deg, #fff7ea 0%, var(--card) 60%); }
+.day-summary .ring-label b { font-size: 26px; }
+.day-summary .goals-edit { position: absolute; top: 8px; right: 10px; height: 28px; padding: 0 8px; font-size: 12.5px; color: var(--mute); }
+.day-summary .macros { padding-top: 14px; }
 
-.trend .section-head { margin-bottom: 14px; }
-.trend-plot { position: relative; height: 132px; margin-top: 6px; }
+.trend { padding: 16px 22px; }
+.trend .section-head { margin-bottom: 6px; }
+.trend .section-head h2 { font-size: 19px; }
+.trend-plot { position: relative; height: 84px; margin-top: 4px; }
 .trend-chart { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
 .goal-line { position: absolute; z-index: 1; left: 0; right: 0; height: 0; border-top: 1.5px dashed var(--green-2); opacity: 0.55; pointer-events: none; }
 .goal-line em { position: absolute; left: 0; bottom: 3px; font-style: normal; font-size: 12px; font-weight: 600; color: var(--green-2); }
@@ -44,14 +48,8 @@
 .entry-editor .wide { grid-column: span 2; }
 .entry-editor-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
 
-.nutrition-side { display: grid; gap: 20px; }
-.goals .section-head { margin-bottom: 10px; }
-.goal-list { display: grid; gap: 2px; }
-.goal-list div { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 14.5px; }
-.goal-list div:last-child { border-bottom: 0; }
-.goal-list dt { color: var(--ink-2); }
-.goal-list dd { font-weight: 650; }
-.goal-editor { display: grid; gap: 8px; }
+.nutrition-side { display: grid; gap: 16px; }
+.goal-editor { display: grid; gap: 6px; }
 .goal-field { display: grid; grid-template-columns: 1fr 96px 34px; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); }
 .goal-field em { font-style: normal; color: var(--mute); font-size: 13px; }
 .goal-editor .entry-editor-actions { margin-top: 6px; }

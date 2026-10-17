@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import Icon from "./Icon.js";
 import Art from "./Art.js";
+import { SnapCard } from "./PhotoCapture.js";
 import { SkeletonLine } from "./Skeleton.js";
 import {
   GROCERY_CATEGORY_DESCRIPTIONS,
@@ -284,12 +285,21 @@ function PantryPanel({ k }) {
       {k.pantryStock.length === 0 && k.liveStateUser !== k.activeUser ? (
         <ListLoading label="Loading the pantry" />
       ) : k.pantryStock.length === 0 ? (
-        <div className="empty">
-          <Art className="spot" src="/art/spot-pantry.png" alt="" />
-          <h3>The pantry is empty</h3>
-          <p>Add what you have below, or send Kitch a photo of your fridge or shelves and it will fill this in.</p>
-        </div>
-      ) : (
+        <SnapCard
+          k={k}
+          kind="pantry"
+          layout="hero"
+          title="The pantry is empty"
+          body="Snap your fridge or shelves and Kitch fills this in, so the shopping list only has what you’re missing. You can also add items one by one below."
+        />
+      ) : (<>
+        <SnapCard
+          k={k}
+          kind="pantry"
+          layout="strip"
+          title="Restocked? Snap the fridge again"
+          body="Kitch adds what it sees, and the shopping list skips what you already have."
+        />
         <div className="pantry-table" role="table" aria-label="Pantry items">
           <div className="pantry-row head" role="row">
             <span role="columnheader">Item</span>
@@ -336,7 +346,7 @@ function PantryPanel({ k }) {
             );
           })}
         </div>
-      )}
+      </>)}
 
       <form
         className="add-row pantry-add"

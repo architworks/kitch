@@ -3,6 +3,7 @@
 import Icon from "./Icon.js";
 import Art from "./Art.js";
 import { LoadingCard } from "./Skeleton.js";
+import { SnapButton, SnapCard } from "./PhotoCapture.js";
 import { CalorieRing, MacroBars } from "./NutritionBits.js";
 import { formatPlanDate, shiftIsoDate } from "../../app/householdConfig.js";
 import { NUTRITION_MEALS, formatNutritionNumber, currentNutritionMealType } from "../lib/helpers.js";
@@ -94,6 +95,7 @@ export default function NutritionView({ k, ask }) {
         <div>
           <h1 className="page-title">{k.activeUser}’s nutrition</h1>
           <p className="page-sub">Personal to {k.activeUser}. Switching members changes whose diary you see; shared meal plans stay the same.</p>
+          <p className="page-note"><Icon name="info" size="sm" />Calories and macros are estimates, not medical advice.</p>
         </div>
         <div className="date-nav" role="group" aria-label="Diary date">
           <button type="button" className="icon-btn" aria-label="Previous day" disabled={!day} onClick={() => k.navigateNutritionDate(shiftIsoDate(day, -1))}><Icon name="left" /></button>
@@ -112,8 +114,25 @@ export default function NutritionView({ k, ask }) {
       <div className="nutrition-top">
         <section className="card card-pad day-summary" aria-labelledby="day-summary-title">
           <h2 id="day-summary-title" className="visually-hidden">Day summary</h2>
-          <CalorieRing value={totals.calories} target={k.targetCalories} size={148} stroke={12} />
-          <MacroBars rows={k.nutritionMacroRows.map(row => ({ key: row.key, label: row.label, value: row.value, target: row.target }))} />
+          <CalorieRing value={totals.calories} target={k.targetCalories} size={112} stroke={10} />
+          {k.nutritionGoalEditor ? (
+            <form className="goal-editor" aria-label="Daily goals" onSubmit={event => { event.preventDefault(); k.saveNutritionGoals(); }}>
+              {GOALS.map(([key, label, unit]) => (
+                <label key={key} className="goal-field">
+                  <span>{label}</span>
+                  <input className="input sm" type="number" min="1" value={k.nutritionGoalEditor[key]} onChange={event => k.setNutritionGoalEditor(current => ({ ...current, [key]: event.target.value }))} />
+                  <em>{unit}</em>
+                </label>
+              ))}
+              <div className="entry-editor-actions">
+                <button type="button" className="btn quiet sm" onClick={() => k.setNutritionGoalEditor(null)}>Cancel</button>
+                <button type="submit" className="btn primary sm" disabled={k.isNutritionSaving}>Save goals</button>
+              </div>
+            </form>
+          ) : (<>
+            <MacroBars rows={k.nutritionMacroRows.map(row => ({ key: row.key, label: row.label, value: row.value, target: row.target }))} />
+            <button type="button" className="btn quiet sm goals-edit" onClick={() => k.setNutritionGoalEditor({ ...k.nutritionTargets })}><Icon name="edit" size="sm" />Edit goals</button>
+          </>)}
         </section>
         <Trend k={k} />
       </div>
@@ -124,6 +143,7 @@ export default function NutritionView({ k, ask }) {
             <h2 id="diary-title">Food log</h2>
             <span className="muted">{formatPlanDate(day, { weekday: "long", day: "numeric", month: "long" })}</span>
             <div className="push">
+              {isToday && <SnapButton k={k} kind="meal" className="btn primary sm" title="Take a photo of your plate to log it"><Icon name="camera" size="sm" />Snap plate</SnapButton>}
               <button type="button" className="btn soft sm" onClick={() => k.openNutritionEntryEditor(currentNutritionMealType(k.nutritionDashboard.timezone))}><Icon name="plus" size="sm" />Add food</button>
               <button type="button" className="btn quiet sm" onClick={() => ask(`I ate `)}>Tell Kitch</button>
             </div>
@@ -194,35 +214,14 @@ export default function NutritionView({ k, ask }) {
         </section>
 
         <aside className="nutrition-side">
-          <section className="card card-pad goals" aria-labelledby="goals-title">
-            <div className="section-head">
-              <h2 id="goals-title">Daily goals</h2>
-              {!k.nutritionGoalEditor && <div className="push"><button type="button" className="btn quiet sm" onClick={() => k.setNutritionGoalEditor({ ...k.nutritionTargets })}><Icon name="edit" size="sm" />Edit</button></div>}
-            </div>
-            {k.nutritionGoalEditor ? (
-              <form className="goal-editor" onSubmit={event => { event.preventDefault(); k.saveNutritionGoals(); }}>
-                {GOALS.map(([key, label, unit]) => (
-                  <label key={key} className="goal-field">
-                    <span>{label}</span>
-                    <input className="input sm" type="number" min="1" value={k.nutritionGoalEditor[key]} onChange={event => k.setNutritionGoalEditor(current => ({ ...current, [key]: event.target.value }))} />
-                    <em>{unit}</em>
-                  </label>
-                ))}
-                <div className="entry-editor-actions">
-                  <button type="button" className="btn quiet sm" onClick={() => k.setNutritionGoalEditor(null)}>Cancel</button>
-                  <button type="submit" className="btn primary sm" disabled={k.isNutritionSaving}>Save goals</button>
-                </div>
-              </form>
-            ) : (
-              <dl className="goal-list">
-                {GOALS.map(([key, label, unit]) => (
-                  <div key={key}><dt>{label}</dt><dd>{k.nutritionTargets[key] ?? "—"} {unit}</dd></div>
-                ))}
-              </dl>
-            )}
-          </section>
+          <SnapCard
+            k={k}
+            kind="meal"
+            layout="compact"
+            body={`Kitch estimates the calories and macros and logs it to ${k.activeUser}’s diary for today.`}
+          />
           <section className="card tip">
-            <Art className="tip-art" src="/art/spot-nutrition.png" alt="" />
+            <Art className="tip-art" src="/art/spot-household.png" alt="" />
             <div>
               <h2>Today’s note</h2>
               <p>{k.nutritionTip}</p>

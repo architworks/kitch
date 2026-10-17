@@ -96,7 +96,9 @@ for module in (
             "app.main.verify_google_credential", return_value=claims,
         ), patch(
             "app.main.ensure_google_household", return_value=household,
-        ) as ensure_household:
+        ) as ensure_household, patch(
+            "app.main.get_legal_consent", return_value={"terms_version": main.LEGAL_TERMS_VERSION},
+        ):
             with TestClient(app) as client:
                 signed_in = client.post("/api/auth/google", json={
                     "credential": "credential",
@@ -104,6 +106,7 @@ for module in (
                 })
                 self.assertEqual(signed_in.status_code, 200)
                 self.assertEqual(signed_in.json()["household"], household)
+                self.assertFalse(signed_in.json()["consent_required"])
                 self.assertIn("kitch_session=", signed_in.headers["set-cookie"])
 
                 session = client.get("/api/auth/session")
@@ -111,6 +114,100 @@ for module in (
                 self.assertTrue(session.json()["authenticated"])
                 self.assertEqual(session.json()["household"]["members"], household["members"])
                 ensure_household.assert_called_once()
+
+    def _consent_fixtures(self):
+        household = {
+            "google_subject": "google-user-1",
+            "email": "owner@example.com",
+            "household_id": "household-a",
+            "owner_profile_id": "owner-a",
+            "members": [{"id": "owner-a", "name": "Owner"}],
+        }
+        claims = {"sub": "google-user-1", "email": "owner@example.com", "name": "Owner"}
+        environment = {
+            "KITCH_DATABASE_BACKEND": "supabase",
+            "KITCH_AUTH_SESSION_SECRET": "s" * 40,
+        }
+        return household, claims, environment
+
+    def test_owner_without_consent_is_gated_until_accepting_the_current_notice(self):
+        household, claims, environment = self._consent_fixtures()
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch(
+            "app.main.ensure_google_household", return_value=household,
+        ), patch("app.main.get_legal_consent", return_value={}), patch(
+            "app.main.record_legal_consent", return_value={},
+        ) as record:
+            with TestClient(app) as client:
+                signed_in = client.post("/api/auth/google", json={"credential": "c"})
+                self.assertTrue(signed_in.json()["consent_required"])
+                record.assert_not_called()
+
+                blocked = client.get("/api/pantry")
+                self.assertEqual(blocked.status_code, 403)
+                self.assertEqual(blocked.json()["detail"]["code"], "consent_required")
+                self.assertTrue(client.get("/api/auth/session").json()["consent_required"])
+
+                incomplete = client.post("/api/legal/consent", json={
+                    "version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": False,
+                })
+                self.assertEqual(incomplete.status_code, 422)
+
+                accepted = client.post("/api/legal/consent", json={
+                    "version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": True,
+                })
+                self.assertEqual(accepted.status_code, 200)
+                record.assert_called_once_with("google-user-1", main.LEGAL_TERMS_VERSION)
+                self.assertNotEqual(client.get("/api/pantry").status_code, 403)
+
+    def test_consent_given_at_sign_in_is_recorded_without_a_second_prompt(self):
+        household, claims, environment = self._consent_fixtures()
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch(
+            "app.main.ensure_google_household", return_value=household,
+        ), patch("app.main.record_legal_consent", return_value={}) as record:
+            with TestClient(app) as client:
+                signed_in = client.post("/api/auth/google", json={
+                    "credential": "c",
+                    "consent": {"version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": True},
+                })
+                self.assertFalse(signed_in.json()["consent_required"])
+                record.assert_called_once()
+
+    def test_account_deletion_removes_household_memory_and_signs_out(self):
+        household, claims, environment = self._consent_fixtures()
+
+        class FakeMemory:
+            def begin_memory_auth_scope(self, token):
+                return None
+
+            def end_memory_auth_scope(self, token):
+                pass
+
+            async def purge_household_memory(self, user_id):
+                self.user_id = user_id
+                return "purged"
+
+        memory = FakeMemory()
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch(
+            "app.main.ensure_google_household", return_value=household,
+        ), patch("app.main.get_legal_consent", return_value={}), patch(
+            "app.main.delete_household_account", return_value=True,
+        ) as delete_account, patch(
+            "app.main._memory_runtime", return_value=memory,
+        ), patch("app.main.provider_registry.get", return_value=object()):
+            with TestClient(app) as client:
+                client.post("/api/auth/google", json={"credential": "c"})
+                deleted = client.delete("/api/account")
+                self.assertEqual(deleted.status_code, 200)
+                self.assertEqual(deleted.json(), {"deleted": True, "memory": "purged"})
+                delete_account.assert_called_once_with("google-user-1")
+                self.assertEqual(memory.user_id, "owner-a")
+                self.assertFalse(client.get("/api/auth/session").json()["authenticated"])
 
     def test_signed_session_rejects_tampering_and_expiry(self):
         with patch.dict(os.environ, {"KITCH_AUTH_SESSION_SECRET": "s" * 40}):

@@ -76,6 +76,27 @@ must complete Swiggy production onboarding before advertising production
 availability. Do not assume a data-processing region that Swiggy has not
 contractually documented.
 
+## Legal notice, consent and account deletion
+
+- The public Privacy Policy (`/privacy`) and Terms of Use (`/terms`) are
+  versioned by `LEGAL_TERMS_VERSION`, kept identical in `backend/app/legal.py`
+  and `frontend/src/kitch/legal.js`. Bump both when either document changes
+  materially; every owner is then asked to accept again.
+- Hosted owners confirm they are 18+ and accept the notice, including
+  health-related nutrition logs, before Google sign-in or on a one-time
+  consent screen. The accepted version and timestamps are stored on
+  `household_accounts`, and the version rides in the signed session cookie.
+- Until the current version is accepted, the API answers `403
+  consent_required` for everything except session, consent, sign-out, account
+  deletion and health checks.
+- `DELETE /api/account` disconnects Swiggy (best-effort provider logout),
+  purges the household's Vertex Memory Bank memories, deletes the account and
+  household rows (cascading to every profile record), and clears the session.
+- Local SQLite mode has no sign-in, so it shows the legal links but no consent
+  gate or account deletion.
+- The privacy contact shown on the legal pages and footers defaults to
+  architmishrapro@gmail.com; `NEXT_PUBLIC_KITCH_CONTACT_EMAIL` overrides it.
+
 ## Telemetry
 
 Custom memory/provider telemetry excludes tokens, addresses, raw provider

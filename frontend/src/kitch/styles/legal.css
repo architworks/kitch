@@ -1,0 +1,57 @@
+/* Consent, legal links, account deletion and the public legal pages */
+
+.legal-links { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; font-weight: 600; }
+.legal-links a { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.legal-links a:hover { color: var(--green); text-decoration-color: currentColor; }
+.legal-links.on-dark a { color: var(--on-olive-2); text-decoration-color: rgb(216 212 193 / 0.4); }
+.legal-links.on-dark a:hover { color: var(--on-olive); }
+
+/* Consent notice */
+.consent { display: grid; gap: 12px; width: 100%; }
+.consent-list { display: grid; gap: 8px; padding: 14px 16px 14px 32px; border-radius: var(--r-md); background: var(--paper); color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.consent-list strong { color: var(--ink); font-weight: 650; }
+.consent-check { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; font-size: 14px; line-height: 1.45; color: var(--ink); cursor: pointer; }
+.consent-check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--green); cursor: pointer; }
+.consent-check a { color: var(--green); font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
+.consent.compact .consent-check { font-size: 13.5px; }
+.consent-card { width: min(600px, 100%); }
+.consent-card h1 { font: 700 30px/1.1 var(--font-display-stack); letter-spacing: -0.03em; }
+.consent-card > p { color: var(--ink-2); }
+.consent-out { justify-self: center; }
+.consent-card .legal-links { justify-content: center; }
+
+/* Google button stays visible but unusable until both boxes are ticked */
+.google-gate { position: relative; transition: opacity 160ms var(--ease-out); }
+.google-gate:not(.open) { opacity: 0.45; }
+.google-gate-cover { position: absolute; inset: 0; cursor: not-allowed; }
+.google-gate-hint { font-size: 13px; color: var(--mute); }
+
+/* Household settings: your data */
+.settings-data { display: grid; gap: 10px; justify-items: start; }
+.settings-data > p { color: var(--ink-2); font-size: 14px; }
+.delete-account { display: grid; gap: 8px; width: 100%; padding: 14px; border-radius: var(--r-md); background: var(--tomato-soft); border: 1px solid #efc4b8; }
+.delete-account p { font-size: 13.5px; color: var(--ink); line-height: 1.5; }
+.delete-account label { font-size: 13.5px; font-weight: 650; color: var(--tomato); }
+.delete-account > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.delete-account .input { flex: 1 1 160px; min-width: 0; }
+
+/* About footer and nutrition note */
+.about-legal { display: grid; gap: 8px; padding: 18px 4px 6px; border-top: 1px solid var(--line); color: var(--mute); font-size: 13.5px; }
+.page-note { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--mute); font-size: 13.5px; }
+
+/* Public legal pages */
+.legal-page { min-height: 100dvh; background: var(--paper); padding: 0 16px 64px; }
+.legal-head { max-width: 760px; margin: 0 auto; padding: 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.legal-head .brand { text-decoration: none; }
+.legal-head nav { display: flex; gap: 18px; font-size: 14px; font-weight: 650; }
+.legal-head nav a { color: var(--ink-2); }
+.legal-head nav a:hover { color: var(--green); }
+.legal-body { max-width: 760px; margin: 0 auto; padding: clamp(24px, 5vw, 44px); border-radius: var(--r-xl); background: var(--card); border: 1px solid var(--line); color: var(--ink-2); font-size: 15.5px; line-height: 1.65; }
+.legal-body h1 { font: 700 clamp(30px, 6vw, 42px)/1.05 var(--font-display-stack); letter-spacing: -0.035em; color: var(--ink); }
+.legal-meta { margin-top: 8px; color: var(--mute); font-size: 14px; }
+.legal-intro { margin-top: 18px; font-size: 16.5px; color: var(--ink); }
+.legal-body h2 { margin-top: 32px; font: 700 21px/1.2 var(--font-display-stack); letter-spacing: -0.02em; color: var(--ink); }
+.legal-body p { margin-top: 10px; }
+.legal-body ul { margin-top: 10px; padding-left: 22px; display: grid; gap: 8px; }
+.legal-body strong { color: var(--ink); font-weight: 650; }
+.legal-body a { color: var(--green); font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }

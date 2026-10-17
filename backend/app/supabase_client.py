@@ -635,6 +635,43 @@ def ensure_google_household(
     return data
 
 
+def get_legal_consent(google_subject: str) -> Dict[str, Any]:
+    """Return the legal-notice version a hosted owner last accepted, if any."""
+    rows = _read_rows(
+        "get_legal_consent", "household_accounts",
+        lambda: supabase.table("household_accounts")
+        .select("terms_version,terms_accepted_at,age_confirmed_at")
+        .eq("google_subject", google_subject).limit(1).execute(),
+    )
+    return rows[0] if rows else {}
+
+
+def record_legal_consent(google_subject: str, version: str) -> Dict[str, Any]:
+    """Store an owner's explicit acceptance of the notice and 18+ confirmation."""
+    now = _now_iso()
+    return _confirmed_row(
+        "record_legal_consent", "household_accounts",
+        lambda: supabase.table("household_accounts").update({
+            "terms_version": version,
+            "terms_accepted_at": now,
+            "age_confirmed_at": now,
+        }).eq("google_subject", google_subject).execute(),
+    )
+
+
+def delete_household_account(google_subject: str) -> bool:
+    """Delete a hosted owner's account and every row of their household."""
+    if DATABASE_BACKEND != "supabase":
+        raise PersistenceConfigurationError("Account deletion is hosted-only.")
+    data = _execute(
+        "delete_household_account", "households,household_accounts",
+        lambda: supabase.rpc("delete_household_account", {
+            "p_google_subject": google_subject,
+        }).execute(),
+    )
+    return bool(data)
+
+
 def get_profile(user_name: str) -> Dict[str, Any]:
     profile_id = get_user_id(user_name)
     rows = _read_rows(

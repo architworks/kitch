@@ -2,6 +2,8 @@
 
 import Icon from "./Icon.js";
 import Art, { HERO_FALLBACK } from "./Art.js";
+import { SnapCard } from "./PhotoCapture.js";
+import { LegalLinks } from "./EntryScreens.js";
 
 const FLOW = [
   { icon: "calendar", title: "Plan", body: "Dated breakfasts, lunches and dinners for everyone at home." },
@@ -25,7 +27,7 @@ export default function AboutView({ k, ask, go }) {
         <Art className="about-hero-art" src="/art/hero-afternoon.png" fallback={HERO_FALLBACK} alt="" />
         <div className="about-hero-copy">
           <h1>A kitchen companion for the whole household</h1>
-          <p>Kitch plans what you’ll eat, remembers what’s in the kitchen, turns recipes into a shopping list, and keeps each person’s nutrition on their own page.</p>
+          <p>Kitch plans what you’ll eat, learns what’s in the kitchen from a photo of your fridge, turns recipes into a shopping list, and logs each person’s meals from a photo of their plate.</p>
           <div className="hero-actions">
             <button type="button" className="btn hero-primary" onClick={() => go("planner")}>Open the household plan</button>
             <button type="button" className="btn hero-ghost" onClick={() => ask("Plan next week for the whole household")}>Ask Kitch to plan</button>
@@ -60,6 +62,17 @@ export default function AboutView({ k, ask, go }) {
         </ol>
       </section>
 
+      <section className="about-snap" aria-labelledby="snap-title">
+        <div className="about-snap-head">
+          <h2 id="snap-title">Point your camera at it</h2>
+          <p>No typing out a fridge full of groceries, no guessing calories. One photo is enough, and nothing is saved until Kitch is sure what it shows.</p>
+        </div>
+        <div className="about-snap-grid">
+          <SnapCard k={k} kind="pantry" as="article" body="Photograph the fridge or a shelf. Kitch adds what it spots to the shared pantry, and future grocery orders skip what you already have." />
+          <SnapCard k={k} kind="meal" as="article" body="Photograph what you’re about to eat. Kitch estimates calories, protein, carbs and fats and logs it to your own diary." />
+        </div>
+      </section>
+
       <section className="about-split">
         <article className="card card-pad about-asks">
           <h2>Just ask</h2>
@@ -80,6 +93,11 @@ export default function AboutView({ k, ask, go }) {
           </ul>
         </article>
       </section>
+
+      <footer className="about-legal">
+        <p>Kitch is an independent personal project, not affiliated with Google, Swiggy, Zepto or Blinkit. Nutrition figures are estimates, not medical advice.</p>
+        <LegalLinks />
+      </footer>
     </div>
   );
 }

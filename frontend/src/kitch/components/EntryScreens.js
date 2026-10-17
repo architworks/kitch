@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Script from "next/script";
 import Icon from "./Icon.js";
 import Art, { HERO_FALLBACK } from "./Art.js";
+import { LEGAL_CONTACT_EMAIL } from "../legal.js";
 
 function Mark({ size = 40 }) {
   // eslint-disable-next-line @next/next/no-img-element
@@ -60,6 +61,66 @@ export function SplashScreen({ startup, onRetry }) {
   );
 }
 
+// Footer links to the public legal pages and the privacy contact.
+export function LegalLinks({ className = "" }) {
+  return (
+    <nav className={`legal-links ${className}`} aria-label="Legal">
+      <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>
+      <a href="/terms" target="_blank" rel="noopener">Terms of Use</a>
+      {LEGAL_CONTACT_EMAIL && <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>Contact</a>}
+    </nav>
+  );
+}
+
+// The standalone notice: what Kitch collects, why, who processes it, and the
+// person's rights, followed by two explicit, unticked confirmations.
+function ConsentNotice({ k, compact = false }) {
+  const { legalConsent, setLegalConsent } = k;
+  return (
+    <div className={`consent ${compact ? "compact" : ""}`}>
+      {!compact && (
+        <ul className="consent-list">
+          <li><strong>What Kitch keeps:</strong> your Google name and email, household member names, meal plans, recipes, pantry and shopping lists, and the messages you send.</li>
+          <li><strong>Health-related data:</strong> each member’s nutrition logs and meal or fridge photos.</li>
+          <li><strong>Grocery orders:</strong> carts and delivery addresses, only if you connect Swiggy Instamart. Kitch never sees payment details.</li>
+          <li><strong>Why:</strong> only to plan, cook, shop and log for your household. No ads, no selling data.</li>
+          <li><strong>Who processes it:</strong> Google (Sign-In and Gemini AI), Supabase and Vercel, and Swiggy for orders you approve.</li>
+          <li><strong>Your control:</strong> delete everything any time from Household settings, or write in to see or correct your data.</li>
+        </ul>
+      )}
+      <label className="consent-check">
+        <input type="checkbox" checked={legalConsent.ageConfirmed} onChange={event => setLegalConsent({ ageConfirmed: event.target.checked })} />
+        <span>I am 18 or older.</span>
+      </label>
+      <label className="consent-check">
+        <input type="checkbox" checked={legalConsent.accepted} onChange={event => setLegalConsent({ accepted: event.target.checked })} />
+        <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Use</a> and consent to Kitch processing my household’s data, including health-related nutrition logs, as described in the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+      </label>
+    </div>
+  );
+}
+
+// Shown once to a signed-in owner who has not accepted the current notice.
+export function ConsentScreen({ k }) {
+  const ready = k.legalConsent.ageConfirmed && k.legalConsent.accepted;
+  return (
+    <main className="onboarding">
+      <form className="onboarding-card consent-card" onSubmit={event => { event.preventDefault(); k.acceptLegalConsent(); }}>
+        <div className="brand"><Mark size={30} /><span>Kitch</span></div>
+        <h1>Before you continue</h1>
+        <p>Here is what Kitch does with your household’s data. Please read it and confirm.</p>
+        <ConsentNotice k={k} />
+        {k.consentError && <p className="form-error" role="alert">{k.consentError}</p>}
+        <button type="submit" className="btn primary lg block" disabled={!ready || k.isConsentSaving}>
+          {k.isConsentSaving ? "Saving…" : "Agree and continue"}
+        </button>
+        <button type="button" className="btn quiet sm consent-out" onClick={k.signOut}>Not now, sign out</button>
+        <LegalLinks />
+      </form>
+    </main>
+  );
+}
+
 const SIGN_IN_POINTS = [
   { icon: "calendar", text: "One dated meal plan the whole household shares" },
   { icon: "basket", text: "Pantry-aware groceries, sent to Instamart or Zepto for review" },
@@ -69,6 +130,7 @@ const SIGN_IN_POINTS = [
 export function SignInScreen({ k }) {
   const { googleButtonRef, renderGoogleButton, authError } = k;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID;
+  const ready = k.legalConsent.ageConfirmed && k.legalConsent.accepted;
   return (
     <main className="signin">
       <Art className="signin-art" src="/art/signin.png" fallback={HERO_FALLBACK} alt="" />
@@ -84,12 +146,18 @@ export function SignInScreen({ k }) {
         <div className="signin-card">
           <h2>Open your household</h2>
           <p>Sign in with the Google account that owns this household.</p>
+          <ConsentNotice k={k} compact />
           <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={renderGoogleButton} />
-          <div ref={googleButtonRef} className="google-button" />
+          <div className={`google-gate ${ready ? "open" : ""}`}>
+            <div ref={googleButtonRef} className="google-button" aria-hidden={!ready} />
+            {!ready && <span className="google-gate-cover" aria-hidden="true" />}
+          </div>
+          {!ready && <p className="google-gate-hint">Tick both boxes to sign in.</p>}
           {!clientId && <p className="form-error">Google Sign-In is not configured for this deployment.</p>}
           {authError && <p className="form-error" role="alert">{authError}</p>}
           <p className="signin-owner"><Icon name="household" size="sm" />One Google account owns the household. Everyone else is a member you switch to inside Kitch, so they don’t need to sign in.</p>
         </div>
+        <LegalLinks className="on-dark" />
       </section>
     </main>
   );

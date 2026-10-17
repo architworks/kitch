@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon.js";
 import { apiErrorMessage } from "../lib/helpers.js";
+import { LegalLinks } from "./EntryScreens.js";
 
 function useDialogFocus(ref, onEscape) {
   useEffect(() => {
@@ -70,6 +71,33 @@ export function ConfirmDialog({ k }) {
   );
 }
 
+// Permanent deletion asks for the word DELETE, so it is never one stray click.
+function DeleteAccount({ k }) {
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  if (!confirming) {
+    return (
+      <button type="button" className="btn danger sm" onClick={() => { k.setDeleteAccountError(""); setConfirming(true); }}>
+        <Icon name="trash" size="sm" />Delete account and data
+      </button>
+    );
+  }
+  return (
+    <div className="delete-account">
+      <p>This permanently deletes your household: every member, meal plan, recipe, pantry item, shopping list, nutrition log and remembered preference, and disconnects Swiggy. It cannot be undone. Orders already placed stay in the Swiggy app.</p>
+      <label htmlFor="delete-confirm">Type DELETE to confirm</label>
+      <div>
+        <input id="delete-confirm" className="input" autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} />
+        <button type="button" className="btn danger-solid sm" disabled={typed.trim() !== "DELETE" || k.isDeletingAccount} onClick={k.deleteAccount}>
+          {k.isDeletingAccount ? "Deleting…" : "Delete forever"}
+        </button>
+        <button type="button" className="btn quiet sm" disabled={k.isDeletingAccount} onClick={() => { setConfirming(false); setTyped(""); }}>Cancel</button>
+      </div>
+      {k.deleteAccountError && <p className="form-error" role="alert">{k.deleteAccountError}</p>}
+    </div>
+  );
+}
+
 export function MemberDialog({ k, go }) {
   const ref = useRef(null);
   const close = () => k.setMemberEditorOpen(false);
@@ -113,6 +141,13 @@ export function MemberDialog({ k, go }) {
             <output aria-live="polite">{k.householdSize}</output>
             <button type="button" className="icon-btn sm" aria-label="More people" disabled={k.householdSize >= 12} onClick={() => k.updateHouseholdSize(k.householdSize + 1)}><Icon name="plus" size="sm" /></button>
           </div>
+        </div>
+
+        <h3 className="settings-sub">Your data</h3>
+        <div className="settings-data">
+          <p>Read how Kitch handles your household’s data{k.authState.required ? ", or delete all of it" : ""}.</p>
+          <LegalLinks />
+          {k.authState.required && <DeleteAccount k={k} />}
         </div>
 
         {k.memberEditorError && <p className="form-error" role="alert">{k.memberEditorError}</p>}
@@ -188,18 +223,25 @@ export function ProviderTransferDialog({ k }) {
   );
 }
 
-const SCAN_STEPS = ["Uploading your photo", "Checking whether it’s a meal or pantry", "Saving what Kitch found"];
+const SCAN_STEPS = {
+  pantry: ["Uploading your photo", "Spotting what’s in your fridge", "Adding it to the pantry"],
+  meal: ["Uploading your photo", "Estimating what’s on your plate", "Logging it to your diary"],
+  "": ["Uploading your photo", "Checking whether it’s a meal or pantry", "Saving what Kitch found"]
+};
+const SCAN_TITLE = { pantry: "Reading your fridge", meal: "Reading your plate", "": "Reading your photo" };
 
 export function PhotoScanDialog({ k }) {
-  const progress = Math.min(SCAN_STEPS.length - 1, Math.max(0, k.scanningOverlay.steps.length - 2));
+  const kind = SCAN_STEPS[k.scanningOverlay.kind] ? k.scanningOverlay.kind : "";
+  const steps = SCAN_STEPS[kind];
+  const progress = Math.min(steps.length - 1, Math.max(0, k.scanningOverlay.steps.length - 2));
   return (
     <div className="scrim" role="presentation">
       <section className="dialog scan" role="dialog" aria-modal="true" aria-labelledby="scan-title" aria-busy="true">
         <span className="tile sage scan-tile" aria-hidden="true"><Icon name="camera" size="lg" /></span>
-        <h2 id="scan-title">Reading your photo</h2>
+        <h2 id="scan-title">{SCAN_TITLE[kind]}</h2>
         <p className="muted">{k.scanningOverlay.fileName}</p>
         <ol className="transfer-steps">
-          {SCAN_STEPS.map((text, index) => (
+          {steps.map((text, index) => (
             <li key={text} className={`${progress > index ? "done" : ""} ${progress === index ? "active" : ""}`}>
               <span>{progress > index ? <Icon name="check" size="sm" /> : index + 1}</span>{text}
             </li>

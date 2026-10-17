@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { LEGAL_TERMS_VERSION } from "./legal.js";
 import {
   DEFAULT_ACTIVE_USER,
   DEFAULT_HOUSEHOLD_SIZE,
@@ -89,8 +90,26 @@ export function useKitch() {
   const [onboardingMembers, setOnboardingMembers] = useState([""]);
   const [isOnboardingSaving, setIsOnboardingSaving] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
-  const [authState, setAuthState] = useState({ loading: true, required: false, authenticated: false, email: "" });
+  const [authState, setAuthState] = useState({ loading: true, required: false, authenticated: false, email: "", consentRequired: false });
   const [authError, setAuthError] = useState("");
+  // Explicit consent ticked on the sign-in screen travels with the Google
+  // credential; the ref lets the Google callback read the latest ticks.
+  const [legalConsent, setLegalConsentState] = useState({ ageConfirmed: false, accepted: false });
+  const legalConsentRef = useRef(legalConsent);
+  const setLegalConsent = useCallback((patch) => {
+    setLegalConsentState(current => {
+      const next = { ...current, ...patch };
+      legalConsentRef.current = next;
+      return next;
+    });
+  }, []);
+  // A signed-in owner who has not accepted the current notice sees the consent
+  // screen first; their household loads only after they accept.
+  const pendingHouseholdRef = useRef(null);
+  const [isConsentSaving, setIsConsentSaving] = useState(false);
+  const [consentError, setConsentError] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState("");
   const [startupState, setStartupState] = useState({ attempts: 0, retrying: false, failed: false, message: "" });
   const startupRunRef = useRef(0);
   const [timeGreeting, setTimeGreeting] = useState("Welcome");
@@ -452,13 +471,13 @@ export function useKitch() {
       loading: false,
       required: Boolean(session.auth_required),
       authenticated: Boolean(session.authenticated),
-      email: session.email || ""
+      email: session.email || "",
+      consentRequired: Boolean(session.consent_required)
     });
     if (session.authenticated && session.household) {
-      applyBootstrappedHousehold({
-        initialized: true,
-        ...session.household
-      });
+      const household = { initialized: true, ...session.household };
+      if (session.consent_required) pendingHouseholdRef.current = household;
+      else applyBootstrappedHousehold(household);
     }
     return session;
   }, [applyBootstrappedHousehold]);
@@ -517,7 +536,10 @@ export function useKitch() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           credential,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          ...(legalConsentRef.current.ageConfirmed && legalConsentRef.current.accepted ? {
+            consent: { version: LEGAL_TERMS_VERSION, accepted: true, age_confirmed: true }
+          } : {})
         })
       });
       await requireSuccessfulResponse(response);
@@ -526,12 +548,12 @@ export function useKitch() {
         loading: false,
         required: true,
         authenticated: true,
-        email: result.email || ""
+        email: result.email || "",
+        consentRequired: Boolean(result.consent_required)
       });
-      applyBootstrappedHousehold({
-        initialized: true,
-        ...(result.household || {})
-      });
+      const household = { initialized: true, ...(result.household || {}) };
+      if (result.consent_required) pendingHouseholdRef.current = household;
+      else applyBootstrappedHousehold(household);
     } catch (error) {
       setAuthError(apiErrorMessage(error, "Google sign-in could not be completed."));
     }
@@ -548,9 +570,54 @@ export function useKitch() {
       setMemberEditorOpen(false);
       setHouseholdBootstrap(null);
       setHouseholdMembers([]);
-      setAuthState({ loading: false, required: true, authenticated: false, email: "" });
+      setAuthState({ loading: false, required: true, authenticated: false, email: "", consentRequired: false });
     } catch (error) {
       setMemberEditorError(apiErrorMessage(error, "Kitch could not sign out."));
+    }
+  }, []);
+
+  const acceptLegalConsent = useCallback(async () => {
+    if (!legalConsentRef.current.ageConfirmed || !legalConsentRef.current.accepted) {
+      setConsentError("Tick both boxes to continue.");
+      return;
+    }
+    setIsConsentSaving(true);
+    setConsentError("");
+    try {
+      const response = await apiFetch(apiUrl("/api/legal/consent"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: LEGAL_TERMS_VERSION, accepted: true, age_confirmed: true })
+      });
+      await requireSuccessfulResponse(response);
+      setAuthState(current => ({ ...current, consentRequired: false }));
+      if (pendingHouseholdRef.current) {
+        applyBootstrappedHousehold(pendingHouseholdRef.current);
+        pendingHouseholdRef.current = null;
+      }
+    } catch (error) {
+      setConsentError(apiErrorMessage(error, "Kitch could not save your choice. Try again."));
+    } finally {
+      setIsConsentSaving(false);
+    }
+  }, [applyBootstrappedHousehold]);
+
+  const deleteAccount = useCallback(async () => {
+    setIsDeletingAccount(true);
+    setDeleteAccountError("");
+    try {
+      const response = await apiFetch(apiUrl("/api/account"), {
+        method: "DELETE",
+        credentials: "include"
+      });
+      await requireSuccessfulResponse(response);
+      window.google?.accounts?.id?.disableAutoSelect?.();
+      // A full reload clears every in-memory copy of the deleted household.
+      window.location.reload();
+    } catch (error) {
+      setDeleteAccountError(apiErrorMessage(error, "Kitch could not delete your account. Nothing was removed; try again."));
+      setIsDeletingAccount(false);
     }
   }, []);
 
@@ -593,7 +660,7 @@ export function useKitch() {
   };
 
   useEffect(() => {
-    if (authState.loading || (authState.required && !authState.authenticated)) return undefined;
+    if (authState.loading || (authState.required && !authState.authenticated) || authState.consentRequired) return undefined;
     if (householdBootstrap?.initialized) return undefined;
     let ignore = false;
     apiFetch(apiUrl("/api/household/bootstrap"), { credentials: "include" })
@@ -612,6 +679,7 @@ export function useKitch() {
   }, [
     applyBootstrappedHousehold,
     authState.authenticated,
+    authState.consentRequired,
     authState.loading,
     authState.required,
     householdBootstrap?.initialized
@@ -1694,6 +1762,13 @@ export function useKitch() {
     setSmartDockExpanded(true);
   };
 
+  // Camera buttons on the pantry and nutrition screens already know what the
+  // photo shows, so they skip the meal-or-pantry guess and upload at once.
+  const scanPhotoAs = (file, kind) => {
+    if (!file || !["pantry", "meal"].includes(kind)) return;
+    handleRealPhotoUpload(file, "", kind, true);
+  };
+
   const clearPendingPhoto = () => {
     setPendingPhoto(null);
   };
@@ -1826,15 +1901,17 @@ export function useKitch() {
   };
 
   // 5. Real Vision Camera scanning & upload workflow
-  const handleRealPhotoUpload = async (file, accompanyingText = "", classificationOverride = "") => {
+  // `announce` is false only when re-sending a photo the person already sent
+  // and then classified in the clarification dialog.
+  const handleRealPhotoUpload = async (file, accompanyingText = "", classificationOverride = "", announce = !classificationOverride) => {
     if (!file) return;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const trimmedText = accompanyingText.trim();
-    const scanLabel = "image";
+    const scanLabel = classificationOverride === "pantry" ? "fridge photo" : classificationOverride === "meal" ? "plate photo" : "image";
 
     setSmartDockExpanded(true);
-    if (!classificationOverride) {
+    if (announce) {
       setChatHistory(prev => [
         ...prev,
         {
@@ -1855,7 +1932,8 @@ export function useKitch() {
         "🔍 Establishing connection to Kitch backend...",
         `⚡ Uploading image bytes: ${file.name}...`
       ],
-      fileName: file.name
+      fileName: file.name,
+      kind: classificationOverride
     });
 
     setIsChatTyping(true);
@@ -2493,6 +2571,15 @@ export function useKitch() {
     applyBootstrappedHousehold,
     loadAuthSession,
     handleGoogleCredential,
+    legalConsent,
+    setLegalConsent,
+    acceptLegalConsent,
+    isConsentSaving,
+    consentError,
+    deleteAccount,
+    isDeletingAccount,
+    deleteAccountError,
+    setDeleteAccountError,
     signOut,
     renderGoogleButton,
     submitHouseholdOnboarding,
@@ -2539,6 +2626,7 @@ export function useKitch() {
     savePantryRow,
     markPantryEmpty,
     stagePhotoForInput,
+    scanPhotoAs,
     clearPendingPhoto,
     sendChatMessage,
     handleChatSubmit,

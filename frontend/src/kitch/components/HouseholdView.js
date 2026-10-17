@@ -4,6 +4,7 @@ import Icon from "./Icon.js";
 import Art, { heroArtFor, HERO_FALLBACK } from "./Art.js";
 import { MacroBars, CalorieRing } from "./NutritionBits.js";
 import { SkeletonLine } from "./Skeleton.js";
+import { SnapButton } from "./PhotoCapture.js";
 import { formatPlanDate, getWeekStartForDate, shiftIsoDate, MEAL_SLOTS } from "../../app/householdConfig.js";
 import { getMealTitle, hasMealTitle, formatRelativeCheckedTime, MEAL_SLOT_LABELS } from "../lib/helpers.js";
 
@@ -207,7 +208,10 @@ function TodayNutrition({ k, go }) {
           { key: "fat", label: "Fats", value: k.loggedFat, target: k.targetFat }
         ]} />
       </div>
-      {k.loggedCal <= 0 && <p className="muted small-note">Nothing logged yet. Tell Kitch what you ate, or send a photo of your plate.</p>}
+      {k.loggedCal <= 0 && <p className="muted small-note">Nothing logged yet today.</p>}
+      <SnapButton k={k} kind="meal" className="btn soft block today-snap" title="Take a photo of your plate to log it">
+        <Icon name="camera" size="sm" />Snap your plate to log it
+      </SnapButton>
     </section>
   );
 }
@@ -225,7 +229,7 @@ function KitchenStatus({ k, go }) {
         <span className="tile sage"><Icon name="pantry" /></span>
         <span className="kitchen-text">
           <strong>Pantry · {pantryCount} {pantryCount === 1 ? "item" : "items"}</strong>
-          <small>{pantryCount === 0 ? "Empty. Add items or send a fridge photo." : k.pantryReviewedAt ? `Reviewed ${formatRelativeCheckedTime(k.pantryReviewedAt)}` : "Not reviewed yet"}</small>
+          <small>{pantryCount === 0 ? "Empty. Snap your fridge to fill it in." : k.pantryReviewedAt ? `Reviewed ${formatRelativeCheckedTime(k.pantryReviewedAt)}` : "Not reviewed yet"}</small>
         </span>
         <Icon name="right" className="kitchen-chev" />
       </button>
