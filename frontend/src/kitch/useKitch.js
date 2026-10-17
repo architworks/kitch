@@ -638,10 +638,10 @@ export function useKitch() {
       });
       await requireSuccessfulResponse(response);
       window.google?.accounts?.id?.disableAutoSelect?.();
-      setMemberEditorOpen(false);
-      setHouseholdBootstrap(null);
-      setHouseholdMembers([]);
-      setAuthState({ loading: false, required: true, authenticated: false, email: "", consentRequired: false });
+      try { window.sessionStorage.removeItem("kitch_join"); } catch { /* storage unavailable */ }
+      // A full reload clears every in-memory copy of this household (chat,
+      // invite link, staged photo, cart) before the next person signs in.
+      window.location.reload();
     } catch (error) {
       setMemberEditorError(apiErrorMessage(error, "Kitch could not sign out."));
     }
@@ -2273,12 +2273,14 @@ export function useKitch() {
     : [];
   const recipeNeededCartItems = recipeCartItems.filter(item => cartPurchaseAmount(item) > 0);
 
+  // A prototype-free map: a stored category such as "constructor" or
+  // "__proto__" is just a name here, never an inherited JavaScript property.
   const groupedGroceryCart = groceryList.reduce((groups, item) => {
-    const category = item.category || "General";
-    if (!groups[category]) groups[category] = [];
+    const category = String(item.category || "General");
+    if (!Object.hasOwn(groups, category)) groups[category] = [];
     groups[category].push(item);
     return groups;
-  }, {});
+  }, Object.create(null));
   const groceryCategoryCount = Object.keys(groupedGroceryCart).length;
   const stockedCount = groceryList.filter(item => cartPurchaseAmount(item) <= 0).length;
   const pendingBuyCount = checkoutItems.length;
