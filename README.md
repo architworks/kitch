@@ -54,9 +54,10 @@ The browser never calls Gemini, ADK, elevated Supabase APIs, or provider MCP
 servers directly.
 
 Hosted Kitch uses one Google account as the owner of one household. Other
-household members are editable profiles—not separate login accounts—so their
-stable IDs and personal nutrition history survive renames. Local SQLite mode
-remains login-free.
+household members are editable profiles, so their stable IDs and personal
+nutrition history survive renames. The owner can also share an invite link so
+members sign in with their own Google account; only the owner connects grocery
+apps and places orders. Local SQLite mode remains login-free.
 
 Detailed component flows are in `docs/system_architecture.md`. Agent names,
 routing, tools, memory access, commerce authority, and rejected topology

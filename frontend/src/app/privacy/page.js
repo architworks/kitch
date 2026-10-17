@@ -26,7 +26,7 @@ export default function PrivacyPage() {
 
       <h2>Your consent</h2>
       <p>Kitch asks for your explicit consent before you start, including for health-related nutrition logs. You can withdraw consent at any time by deleting your account (below). Withdrawing consent stops Kitch from processing your data from that point on.</p>
-      <p>The account owner adds other household members by name. If you add someone, make sure they are happy for Kitch to keep their meals and nutrition logs.</p>
+      <p>The household owner can add members by name, and can invite people to join with their own Google account. Everyone in a household can see and edit its shared meal plans, pantry and lists, and can open each member’s nutrition log. If you add someone by name, make sure they are happy for Kitch to keep their meals and nutrition logs. Only the owner can connect a grocery app and place orders.</p>
 
       <h2>Who processes data for Kitch</h2>
       <ul>
@@ -46,7 +46,7 @@ export default function PrivacyPage() {
       </ul>
 
       <h2>Deleting your data and your other rights</h2>
-      <p>The account owner can delete everything at any time from <strong>Household settings → Delete account and data</strong>. This removes the household, every member’s plans, pantry, lists and nutrition logs, remembered preferences, and any connected grocery app tokens, and signs you out. Data held by Swiggy or another grocery app about your orders is managed in that app.</p>
+      <p>The household owner can delete everything at any time from <strong>Household settings → Delete account and data</strong>. This removes the household for everyone in it: every member’s plans, pantry, lists and nutrition logs, remembered preferences, and any connected grocery app tokens. A member who joined with their own account can instead <strong>leave the household</strong>, which deletes their sign-in and their own nutrition log. Data held by Swiggy or another grocery app about your orders is managed in that app.</p>
       <p>You can also ask to see a summary of your data, correct it, or delete it, and raise a grievance, by writing to <ContactLine />. Kitch aims to respond within 30 days. If you are not satisfied with the response, you may complain to the Data Protection Board of India.</p>
 
       <h2>Security</h2>

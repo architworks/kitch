@@ -109,6 +109,23 @@ export function useKitch() {
   const [isConsentSaving, setIsConsentSaving] = useState(false);
   const [consentError, setConsentError] = useState("");
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isSetupSaving, setIsSetupSaving] = useState(false);
+  const [pendingHouseholdName, setPendingHouseholdName] = useState("");
+  const [setupError, setSetupError] = useState("");
+  const [inviteLink, setInviteLink] = useState({ active: false, expiresAt: null, url: "", busy: false, error: "", copied: false });
+  // An invite link (?join=…) survives the Google sign-in round trip in
+  // sessionStorage; the ref lets the Google callback read the latest choice.
+  const [joinInvite, setJoinInvite] = useState(null);
+  const joinRef = useRef({ token: "", profileId: "" });
+  const setJoinProfileId = useCallback((profileId) => {
+    joinRef.current = { ...joinRef.current, profileId };
+    setJoinInvite(current => current ? { ...current, profileId } : current);
+  }, []);
+  const clearJoinInvite = useCallback(() => {
+    joinRef.current = { token: "", profileId: "" };
+    try { window.sessionStorage.removeItem("kitch_join"); } catch { /* storage unavailable */ }
+    setJoinInvite(null);
+  }, []);
   const [deleteAccountError, setDeleteAccountError] = useState("");
   const [startupState, setStartupState] = useState({ attempts: 0, retrying: false, failed: false, message: "" });
   const startupRunRef = useRef(0);
@@ -447,9 +464,11 @@ export function useKitch() {
       label: member.name
     }));
     if (members.length > 0) {
+      // Each signed-in person starts on their own profile; the owner's is first.
+      const self = members.find(member => member.id === data?.profile_id) || members[0];
       setHouseholdMembers(members);
       setHouseholdSize(members.length);
-      setActiveUser(members[0].value);
+      setActiveUser(self.value);
       setUserProfiles(members.reduce((profiles, member) => ({
         ...profiles,
         [member.value]: { name: member.value, loggedMeals: [] }
@@ -457,6 +476,16 @@ export function useKitch() {
     }
     setHouseholdBootstrap(data);
   }, []);
+
+  // A household loads only once its owner has accepted the current notice and,
+  // for a brand-new household, finished first-time setup.
+  const routeHousehold = useCallback((household, consentRequired) => {
+    const needsSetup = household.role !== "member" && household.setup_completed === false;
+    if (needsSetup) setPendingHouseholdName(household.members?.[0]?.name || "");
+    if (consentRequired || needsSetup) pendingHouseholdRef.current = household;
+    else applyBootstrappedHousehold(household);
+    return needsSetup;
+  }, [applyBootstrappedHousehold]);
 
   const loadAuthSession = useCallback(async () => {
     // A hosted backend that has been idle cold-starts on this request, which
@@ -467,20 +496,19 @@ export function useKitch() {
     });
     await requireSuccessfulResponse(response);
     const session = await response.json();
+    const setupRequired = session.authenticated && session.household
+      ? routeHousehold({ initialized: true, ...session.household }, Boolean(session.consent_required))
+      : false;
     setAuthState({
       loading: false,
       required: Boolean(session.auth_required),
       authenticated: Boolean(session.authenticated),
       email: session.email || "",
-      consentRequired: Boolean(session.consent_required)
+      consentRequired: Boolean(session.consent_required),
+      setupRequired
     });
-    if (session.authenticated && session.household) {
-      const household = { initialized: true, ...session.household };
-      if (session.consent_required) pendingHouseholdRef.current = household;
-      else applyBootstrappedHousehold(household);
-    }
     return session;
-  }, [applyBootstrappedHousehold]);
+  }, [routeHousehold]);
 
   // Keep retrying while the backend wakes: network failures, timeouts and 5xx
   // responses are transient during a cold start. Only after the wake window
@@ -527,6 +555,43 @@ export function useKitch() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  // An invite opened while already signed in does nothing; drop it so a later
+  // sign-in does not try to move this account into another household.
+  useEffect(() => {
+    if (!authState.authenticated || !joinInvite?.token) return undefined;
+    const timer = window.setTimeout(clearJoinInvite, 0);
+    return () => window.clearTimeout(timer);
+  }, [authState.authenticated, joinInvite?.token, clearJoinInvite]);
+
+  // Pick up an invite link, keep it through sign-in, and show who invited.
+  useEffect(() => {
+    let token = "";
+    try {
+      const url = new URL(window.location.href);
+      token = url.searchParams.get("join") || "";
+      if (token) {
+        window.sessionStorage.setItem("kitch_join", token);
+        url.searchParams.delete("join");
+        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      } else {
+        token = window.sessionStorage.getItem("kitch_join") || "";
+      }
+    } catch { /* storage unavailable */ }
+    if (!token) return undefined;
+    joinRef.current = { token, profileId: "" };
+    let ignore = false;
+    apiFetch(apiUrl(`/api/invites/${encodeURIComponent(token)}`))
+      .then(requireSuccessfulResponse)
+      .then(response => response.json())
+      .then(preview => { if (!ignore) setJoinInvite({ token, preview, profileId: "", error: "" }); })
+      .catch(error => {
+        if (!ignore) setJoinInvite({ token: "", preview: null, profileId: "", error: apiErrorMessage(error, "This invite link no longer works.") });
+        joinRef.current = { token: "", profileId: "" };
+        try { window.sessionStorage.removeItem("kitch_join"); } catch { /* storage unavailable */ }
+      });
+    return () => { ignore = true; };
+  }, []);
+
   const handleGoogleCredential = useCallback(async ({ credential }) => {
     setAuthError("");
     try {
@@ -539,25 +604,31 @@ export function useKitch() {
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           ...(legalConsentRef.current.ageConfirmed && legalConsentRef.current.accepted ? {
             consent: { version: LEGAL_TERMS_VERSION, accepted: true, age_confirmed: true }
+          } : {}),
+          ...(joinRef.current.token ? {
+            join: { token: joinRef.current.token, profile_id: joinRef.current.profileId || null }
           } : {})
         })
       });
       await requireSuccessfulResponse(response);
       const result = await response.json();
+      if (joinRef.current.token) clearJoinInvite();
+      const setupRequired = routeHousehold(
+        { initialized: true, ...(result.household || {}) },
+        Boolean(result.consent_required)
+      );
       setAuthState({
         loading: false,
         required: true,
         authenticated: true,
         email: result.email || "",
-        consentRequired: Boolean(result.consent_required)
+        consentRequired: Boolean(result.consent_required),
+        setupRequired
       });
-      const household = { initialized: true, ...(result.household || {}) };
-      if (result.consent_required) pendingHouseholdRef.current = household;
-      else applyBootstrappedHousehold(household);
     } catch (error) {
       setAuthError(apiErrorMessage(error, "Google sign-in could not be completed."));
     }
-  }, [applyBootstrappedHousehold]);
+  }, [routeHousehold, clearJoinInvite]);
 
   const signOut = useCallback(async () => {
     try {
@@ -591,9 +662,11 @@ export function useKitch() {
         body: JSON.stringify({ version: LEGAL_TERMS_VERSION, accepted: true, age_confirmed: true })
       });
       await requireSuccessfulResponse(response);
-      setAuthState(current => ({ ...current, consentRequired: false }));
-      if (pendingHouseholdRef.current) {
-        applyBootstrappedHousehold(pendingHouseholdRef.current);
+      const pending = pendingHouseholdRef.current;
+      const setupRequired = Boolean(pending && pending.role !== "member" && pending.setup_completed === false);
+      setAuthState(current => ({ ...current, consentRequired: false, setupRequired }));
+      if (pending && !setupRequired) {
+        applyBootstrappedHousehold(pending);
         pendingHouseholdRef.current = null;
       }
     } catch (error) {
@@ -602,6 +675,80 @@ export function useKitch() {
       setIsConsentSaving(false);
     }
   }, [applyBootstrappedHousehold]);
+
+  const submitHouseholdSetup = useCallback(async ({ ownerName, members, householdSize }) => {
+    setIsSetupSaving(true);
+    setSetupError("");
+    try {
+      const response = await apiFetch(apiUrl("/api/household/setup"), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner_name: ownerName, members, household_size: householdSize })
+      });
+      await requireSuccessfulResponse(response);
+      const result = await response.json();
+      pendingHouseholdRef.current = { initialized: true, ...result.household };
+      return true;
+    } catch (error) {
+      setSetupError(apiErrorMessage(error, "Kitch could not save your household. Try again."));
+      return false;
+    } finally {
+      setIsSetupSaving(false);
+    }
+  }, []);
+
+  const finishHouseholdSetup = useCallback(() => {
+    if (pendingHouseholdRef.current) {
+      applyBootstrappedHousehold(pendingHouseholdRef.current);
+      pendingHouseholdRef.current = null;
+    }
+    setAuthState(current => ({ ...current, setupRequired: false }));
+  }, [applyBootstrappedHousehold]);
+
+  const loadInviteStatus = useCallback(async () => {
+    try {
+      const response = await apiFetch(apiUrl("/api/household/invite"), { credentials: "include" });
+      await requireSuccessfulResponse(response);
+      const status = await response.json();
+      setInviteLink(current => ({ ...current, active: status.active, expiresAt: status.expires_at, error: "" }));
+    } catch (error) {
+      setInviteLink(current => ({ ...current, error: apiErrorMessage(error, "Kitch could not check the invite link.") }));
+    }
+  }, []);
+
+  const createInviteLink = useCallback(async () => {
+    setInviteLink(current => ({ ...current, busy: true, error: "", copied: false }));
+    try {
+      const response = await apiFetch(apiUrl("/api/household/invite"), { method: "POST", credentials: "include" });
+      await requireSuccessfulResponse(response);
+      const result = await response.json();
+      const url = `${window.location.origin}/?join=${encodeURIComponent(result.token)}`;
+      setInviteLink({ active: true, expiresAt: result.expires_at, url, busy: false, error: "", copied: false });
+    } catch (error) {
+      setInviteLink(current => ({ ...current, busy: false, error: apiErrorMessage(error, "Kitch could not create an invite link.") }));
+    }
+  }, []);
+
+  const revokeInviteLink = useCallback(async () => {
+    setInviteLink(current => ({ ...current, busy: true, error: "" }));
+    try {
+      const response = await apiFetch(apiUrl("/api/household/invite"), { method: "DELETE", credentials: "include" });
+      await requireSuccessfulResponse(response);
+      setInviteLink({ active: false, expiresAt: null, url: "", busy: false, error: "", copied: false });
+    } catch (error) {
+      setInviteLink(current => ({ ...current, busy: false, error: apiErrorMessage(error, "Kitch could not turn the link off.") }));
+    }
+  }, []);
+
+  const copyInviteLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink.url);
+      setInviteLink(current => ({ ...current, copied: true }));
+    } catch {
+      setInviteLink(current => ({ ...current, error: "Copy failed. Select the link and copy it yourself." }));
+    }
+  }, [inviteLink.url]);
 
   const deleteAccount = useCallback(async () => {
     setIsDeletingAccount(true);
@@ -660,7 +807,7 @@ export function useKitch() {
   };
 
   useEffect(() => {
-    if (authState.loading || (authState.required && !authState.authenticated) || authState.consentRequired) return undefined;
+    if (authState.loading || (authState.required && !authState.authenticated) || authState.consentRequired || authState.setupRequired) return undefined;
     if (householdBootstrap?.initialized) return undefined;
     let ignore = false;
     apiFetch(apiUrl("/api/household/bootstrap"), { credentials: "include" })
@@ -681,6 +828,7 @@ export function useKitch() {
     authState.authenticated,
     authState.consentRequired,
     authState.loading,
+    authState.setupRequired,
     authState.required,
     householdBootstrap?.initialized
   ]);
@@ -2578,6 +2726,20 @@ export function useKitch() {
     consentError,
     deleteAccount,
     isDeletingAccount,
+    isHouseholdOwner: householdBootstrap?.role !== "member",
+    submitHouseholdSetup,
+    finishHouseholdSetup,
+    pendingHouseholdName,
+    isSetupSaving,
+    setupError,
+    inviteLink,
+    loadInviteStatus,
+    createInviteLink,
+    revokeInviteLink,
+    copyInviteLink,
+    joinInvite,
+    setJoinProfileId,
+    clearJoinInvite,
     deleteAccountError,
     setDeleteAccountError,
     signOut,

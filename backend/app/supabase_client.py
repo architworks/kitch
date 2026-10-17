@@ -635,6 +635,140 @@ def ensure_google_household(
     return data
 
 
+class HouseholdJoinError(ValueError):
+    """A join request the person can fix: a stale link, a taken profile, or an
+    account that already belongs to another household."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+_JOIN_ERROR_CODES = ("invite_invalid", "already_in_household", "profile_unavailable")
+
+
+def get_household_account_context(google_subject: str) -> Dict[str, Any] | None:
+    """Return the account's household, role, own profile and setup state."""
+    data = _execute(
+        "household_account_context", "households,household_accounts,profiles",
+        lambda: supabase.rpc("household_account_context", {
+            "p_google_subject": google_subject,
+        }).execute(),
+    )
+    return data if isinstance(data, dict) else None
+
+
+def join_household_with_invite(
+    google_subject: str,
+    email: str,
+    display_name: str,
+    invite_token_hash: str,
+    profile_id: str | None,
+) -> Dict[str, Any]:
+    try:
+        response = supabase.rpc("join_household_with_invite", {
+            "p_google_subject": google_subject,
+            "p_email": email,
+            "p_display_name": display_name,
+            "p_invite_token_hash": invite_token_hash,
+            "p_profile_id": profile_id,
+        }).execute()
+    except Exception as error:
+        message = str(getattr(error, "message", "") or error)
+        for code in _JOIN_ERROR_CODES:
+            if code in message:
+                raise HouseholdJoinError(code) from error
+        raise persistence_error_from_exception(
+            "join_household_with_invite", "households,household_accounts,profiles", error,
+        ) from error
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict) or not isinstance(data.get("members"), list):
+        raise malformed_persistence_response(
+            "join_household_with_invite", "households,household_accounts,profiles"
+        )
+    return data
+
+
+def complete_household_setup(
+    google_subject: str,
+    owner_name: str,
+    member_names: List[str],
+    household_size: int,
+) -> Dict[str, Any]:
+    data = _execute(
+        "complete_household_setup", "households,profiles",
+        lambda: supabase.rpc("complete_household_setup", {
+            "p_google_subject": google_subject,
+            "p_owner_name": owner_name,
+            "p_member_names": member_names,
+            "p_household_size": household_size,
+        }).execute(),
+    )
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("complete_household_setup", "households,profiles")
+    return data
+
+
+def set_household_invite(household_id: str, token_hash: str | None, expires_at: str | None) -> None:
+    _execute(
+        "set_household_invite", "households",
+        lambda: supabase.table("households").update({
+            "invite_token_hash": token_hash,
+            "invite_expires_at": expires_at,
+            "updated_at": _now_iso(),
+        }).eq("id", household_id).execute(),
+    )
+
+
+def get_household_invite(household_id: str) -> Dict[str, Any]:
+    rows = _read_rows(
+        "get_household_invite", "households",
+        lambda: supabase.table("households").select("invite_token_hash,invite_expires_at")
+        .eq("id", household_id).limit(1).execute(),
+    )
+    row = rows[0] if rows else {}
+    expires_at = row.get("invite_expires_at")
+    active = bool(row.get("invite_token_hash")) and bool(expires_at) and (
+        datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    )
+    return {"active": active, "expires_at": expires_at if active else None}
+
+
+def get_invite_preview(token_hash: str) -> Dict[str, Any] | None:
+    """Public view of a valid invite: who owns it and which members are unclaimed."""
+    rows = _read_rows(
+        "get_invite_preview", "households",
+        lambda: supabase.table("households").select("id,invite_expires_at")
+        .eq("invite_token_hash", token_hash).gt("invite_expires_at", _now_iso())
+        .limit(1).execute(),
+    )
+    if not rows:
+        return None
+    household_id = rows[0]["id"]
+    profiles = _read_rows(
+        "get_invite_preview", "profiles",
+        lambda: supabase.table("profiles").select("id,full_name,member_order,created_at")
+        .eq("household_id", household_id).execute(),
+    )
+    accounts = _read_rows(
+        "get_invite_preview", "household_accounts",
+        lambda: supabase.table("household_accounts").select("profile_id,role")
+        .eq("household_id", household_id).execute(),
+    )
+    claimed = {str(account["profile_id"]) for account in accounts}
+    owner_profile = next((str(a["profile_id"]) for a in accounts if a.get("role") == "owner"), "")
+    ordered = sorted(profiles, key=lambda p: (p.get("member_order") or 0, str(p.get("created_at") or "")))
+    owner_name = next((p["full_name"] for p in ordered if str(p["id"]) == owner_profile), "")
+    return {
+        "owner_name": owner_name,
+        "expires_at": rows[0]["invite_expires_at"],
+        "members": [
+            {"id": str(p["id"]), "name": p["full_name"]}
+            for p in ordered if str(p["id"]) not in claimed
+        ],
+    }
+
+
 def get_legal_consent(google_subject: str) -> Dict[str, Any]:
     """Return the legal-notice version a hosted owner last accepted, if any."""
     rows = _read_rows(

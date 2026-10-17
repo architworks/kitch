@@ -98,7 +98,7 @@ for module in (
             "app.main.ensure_google_household", return_value=household,
         ) as ensure_household, patch(
             "app.main.get_legal_consent", return_value={"terms_version": main.LEGAL_TERMS_VERSION},
-        ):
+        ), patch("app.main.get_household_account_context", return_value=household):
             with TestClient(app) as client:
                 signed_in = client.post("/api/auth/google", json={
                     "credential": "credential",
@@ -138,7 +138,7 @@ for module in (
             "app.main.ensure_google_household", return_value=household,
         ), patch("app.main.get_legal_consent", return_value={}), patch(
             "app.main.record_legal_consent", return_value={},
-        ) as record:
+        ) as record, patch("app.main.get_household_account_context", return_value=household):
             with TestClient(app) as client:
                 signed_in = client.post("/api/auth/google", json={"credential": "c"})
                 self.assertTrue(signed_in.json()["consent_required"])
@@ -208,6 +208,67 @@ for module in (
                 delete_account.assert_called_once_with("google-user-1")
                 self.assertEqual(memory.user_id, "owner-a")
                 self.assertFalse(client.get("/api/auth/session").json()["authenticated"])
+
+    def test_invite_link_joins_an_existing_household_as_a_member(self):
+        household, claims, environment = self._consent_fixtures()
+        joined = {**household, "google_subject": "google-user-2", "email": "friend@example.com",
+                  "profile_id": "member-b", "role": "member",
+                  "members": household["members"] + [{"id": "member-b", "name": "Friend"}]}
+        friend = {"sub": "google-user-2", "email": "friend@example.com", "name": "Friend"}
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=friend,
+        ), patch("app.main.ensure_google_household") as ensure_household, patch(
+            "app.main.join_household_with_invite", return_value=joined,
+        ) as join, patch("app.main.record_legal_consent", return_value={}):
+            with TestClient(app) as client:
+                signed_in = client.post("/api/auth/google", json={
+                    "credential": "c",
+                    "join": {"token": "invite-token", "profile_id": None},
+                    "consent": {"version": main.LEGAL_TERMS_VERSION, "accepted": True, "age_confirmed": True},
+                })
+                self.assertEqual(signed_in.status_code, 200)
+                self.assertEqual(signed_in.json()["household"]["role"], "member")
+                ensure_household.assert_not_called()
+                self.assertEqual(join.call_args.args[3], main._invite_hash("invite-token"))
+
+                # Members cannot place orders, connect Swiggy or manage invites.
+                self.assertEqual(client.post(
+                    "/api/grocery/providers/swiggy_instamart/checkout/place-order", json={},
+                ).status_code, 403)
+                self.assertEqual(client.post("/api/household/invite").status_code, 403)
+
+    def test_stale_invite_link_explains_itself(self):
+        _, claims, environment = self._consent_fixtures()
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch(
+            "app.main.join_household_with_invite",
+            side_effect=main.HouseholdJoinError("invite_invalid"),
+        ), patch("app.main.get_invite_preview", return_value=None):
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/api/invites/old-token").status_code, 410)
+                failed = client.post("/api/auth/google", json={"credential": "c", "join": {"token": "old"}})
+                self.assertEqual(failed.status_code, 410)
+                self.assertEqual(failed.json()["detail"]["code"], "invite_invalid")
+
+    def test_owner_setup_saves_members_and_headcount(self):
+        household, claims, environment = self._consent_fixtures()
+        configured = {**household, "setup_completed": True,
+                      "members": household["members"] + [{"id": "m2", "name": "Rohan"}]}
+        with patch.dict(os.environ, environment), patch(
+            "app.main.verify_google_credential", return_value=claims,
+        ), patch("app.main.ensure_google_household", return_value={**household, "setup_completed": False}), patch(
+            "app.main.get_legal_consent", return_value={"terms_version": main.LEGAL_TERMS_VERSION},
+        ), patch("app.main.complete_household_setup", return_value=configured) as setup:
+            with TestClient(app) as client:
+                client.post("/api/auth/google", json={"credential": "c"})
+                saved = client.post("/api/household/setup", json={
+                    "owner_name": "Owner", "members": ["Rohan", " "], "household_size": 1,
+                })
+                self.assertEqual(saved.status_code, 200)
+                # Headcount never drops below the people named.
+                setup.assert_called_once_with("google-user-1", "Owner", ["Rohan"], 2)
+                self.assertTrue(saved.json()["household"]["setup_completed"])
 
     def test_signed_session_rejects_tampering_and_expiry(self):
         with patch.dict(os.environ, {"KITCH_AUTH_SESSION_SECRET": "s" * 40}):

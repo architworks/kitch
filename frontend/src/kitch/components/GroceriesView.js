@@ -444,7 +444,7 @@ function Checkout({ k }) {
                   <button type="button" className="btn quiet sm" disabled={busy} onClick={() => k.disconnectProvider(p)}>Disconnect</button>
                 </>
               ) : (
-                <button type="button" className="btn primary sm" disabled={busy || p.production_gated} onClick={() => k.startProviderConnection(p)}>
+                <button type="button" className="btn primary sm" disabled={busy || p.production_gated || !k.isHouseholdOwner} title={k.isHouseholdOwner ? undefined : "Only the household owner can connect a grocery app"} onClick={() => k.startProviderConnection(p)}>
                   {k.providerConnectionState === "reconnect_required" ? `Reconnect ${label}` : `Connect ${label}`}
                 </button>
               )}
@@ -711,10 +711,12 @@ function Payment({ k }) {
 
       {k.providerPaymentPending ? <PaymentHandoff k={k} /> : (
       <div className="place-order">
-        <button type="button" className="btn primary lg" onClick={k.placeProviderOrder} disabled={!k.canPlaceProviderOrder || k.isPlacingProviderOrder}>
+        <button type="button" className="btn primary lg" onClick={k.placeProviderOrder} disabled={!k.canPlaceProviderOrder || k.isPlacingProviderOrder || !k.isHouseholdOwner}>
           {k.isPlacingProviderOrder ? "Placing order…" : `Place order with ${label}${k.providerTotal ? ` · ${k.providerTotal}` : ""}`}
         </button>
-        <p className="muted">This is the only button that can place a real order. Kitch’s chat never can.</p>
+        <p className="muted">{k.isHouseholdOwner
+          ? "This is the only button that can place a real order. Kitch’s chat never can."
+          : `Only the household owner can place orders with ${label}, because it uses their account and address.`}</p>
       </div>
       )}
 

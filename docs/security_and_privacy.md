@@ -14,8 +14,17 @@ retention. Provider workflow behavior remains in `system_architecture.md`.
 - Every protected request establishes a server-owned household context. Storage
   functions derive owner/member IDs from that context rather than accepting a
   household ID from the browser.
-- Household members are internal profiles. Renaming a profile preserves its ID,
+- Household members are profiles. A new owner names them, or just sets a
+  headcount, on a one-time setup screen. The owner can also share an invite
+  link (7-day expiry, only its SHA-256 hash stored, a new link replaces the old)
+  so others join with their own Google account, either claiming an unclaimed
+  member profile or as someone new. Renaming a profile preserves its ID,
   nutrition records, and linked history.
+- `household_accounts.owner_profile_id` is the household's shared-data anchor
+  for every account; `profile_id` is the account's own member profile and
+  `role` is `owner` or `member`. Only the owner manages invites, connects or
+  disconnects grocery apps, places orders, and deletes the household; a member
+  can only leave, which deletes their own login and profile.
 - The browser never receives a Supabase secret/service-role key.
 
 SQLite local mode intentionally bypasses hosted authentication and supports one

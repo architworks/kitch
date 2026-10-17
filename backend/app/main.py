@@ -4,11 +4,12 @@ import asyncio
 import hashlib
 import logging
 import os
+import secrets
 import time
 import json
 from functools import lru_cache
 from uuid import uuid4
-from datetime import datetime, time as datetime_time, timedelta
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,7 +46,14 @@ from app.legal import CONSENT_EXEMPT_PATHS, LEGAL_TERMS_VERSION, valid_consent
 # Import backend-neutral structured-state operations.
 from app.storage import (
     DATABASE_BACKEND,
+    HouseholdJoinError,
+    complete_household_setup,
     delete_household_account,
+    get_household_account_context,
+    get_household_invite,
+    get_invite_preview,
+    join_household_with_invite,
+    set_household_invite,
     get_legal_consent,
     record_legal_consent,
     get_pantry_stock,
@@ -178,7 +186,7 @@ def is_explicit_recipe_detail_prompt(message: str) -> bool:
 
 
 def _rate_limit_for(path: str) -> tuple[int, int] | None:
-    if path == "/api/auth/google":
+    if path == "/api/auth/google" or path.startswith("/api/invites/"):
         return (20, 600)
     if path in {"/api/chat", "/api/upload-photo"}:
         return (30 if path == "/api/chat" else 10, 60)
@@ -251,7 +259,34 @@ def _household_identity(value: Dict[str, Any]) -> HouseholdIdentity:
             {"id": str(member["id"]), "name": str(member["name"])}
             for member in value.get("members") or []
         ),
+        profile_id=str(value.get("profile_id") or value["owner_profile_id"]),
+        role="member" if value.get("role") == "member" else "owner",
     )
+
+
+def _require_owner(action: str) -> HouseholdIdentity | None:
+    """Only the household owner may manage invites, Swiggy and orders."""
+    if not auth_required():
+        return None
+    identity = require_identity()
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail={
+            "code": "owner_required",
+            "message": f"Only the household owner can {action}.",
+        })
+    return identity
+
+
+def _invite_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+INVITE_TTL = timedelta(days=7)
+JOIN_ERROR_MESSAGES = {
+    "invite_invalid": (410, "This invite link has expired or been turned off. Ask the household owner for a new one."),
+    "already_in_household": (409, "This Google account already belongs to another Kitch household. Delete that household first, or sign in with a different account."),
+    "profile_unavailable": (409, "Someone has already claimed that member. Pick another, or join as someone new."),
+}
 
 grocery_checkout_service = _LazyGroceryCheckoutService()
 
@@ -472,7 +507,7 @@ async def persistence_postcondition(request: Request, call_next):
             claims = session_from_request(request)
             public_path = request.url.path in {
                 "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
-            }
+            } or request.url.path.startswith("/api/invites/")
             if claims:
                 context = household_from_session(claims)
                 if context is None:
@@ -566,13 +601,28 @@ async def google_sign_in_endpoint(payload: Dict[str, Any]):
     credential = str(payload.get("credential") or "")
     timezone_name = str(payload.get("timezone") or "UTC")
     claims = await asyncio.to_thread(verify_google_credential, credential)
-    context = await asyncio.to_thread(
-        ensure_google_household,
-        str(claims["sub"]),
-        str(claims["email"]),
-        str(claims.get("name") or "Kitch household"),
-        timezone_name,
-    )
+    join = payload.get("join") if isinstance(payload.get("join"), dict) else None
+    if join and join.get("token"):
+        try:
+            context = await asyncio.to_thread(
+                join_household_with_invite,
+                str(claims["sub"]),
+                str(claims["email"]),
+                str(claims.get("name") or ""),
+                _invite_hash(str(join["token"])),
+                str(join["profile_id"]) if join.get("profile_id") else None,
+            )
+        except HouseholdJoinError as error:
+            status, message = JOIN_ERROR_MESSAGES[error.code]
+            raise HTTPException(status_code=status, detail={"code": error.code, "message": message}) from error
+    else:
+        context = await asyncio.to_thread(
+            ensure_google_household,
+            str(claims["sub"]),
+            str(claims["email"]),
+            str(claims.get("name") or "Kitch household"),
+            timezone_name,
+        )
     consent = await _resolve_consent(str(claims["sub"]), payload.get("consent"))
     response = JSONResponse({
         "authenticated": True,
@@ -605,21 +655,23 @@ async def auth_session_endpoint(request: Request):
     consent = claims.get("consent")
     if consent != LEGAL_TERMS_VERSION:
         consent = await _resolve_consent(identity.google_subject, None)
+    # Re-read the household so members who joined or were renamed elsewhere,
+    # and the setup state, are current; the refreshed cookie carries them.
+    household = await asyncio.to_thread(get_household_account_context, identity.google_subject)
+    if household is None:
+        response = JSONResponse({"auth_required": True, "authenticated": False})
+        clear_session_cookie(response)
+        return response
     body = {
         "auth_required": True,
         "authenticated": True,
         "email": identity.email,
         "consent_required": consent is None,
         "terms_version": LEGAL_TERMS_VERSION,
-        "household": {
-            "household_id": identity.household_id,
-            "owner_profile_id": identity.owner_profile_id,
-            "members": list(identity.members),
-        },
+        "household": household,
     }
     response = JSONResponse(body)
-    if consent and claims.get("consent") != consent:
-        set_session_cookie(response, issue_session(claims, household_from_session(claims), consent=consent))
+    set_session_cookie(response, issue_session(claims, household, consent=consent))
     return response
 
 
@@ -643,12 +695,84 @@ async def legal_consent_endpoint(request: Request, payload: Dict[str, Any]):
     return response
 
 
+@app.post("/api/household/setup")
+async def household_setup_endpoint(request: Request, payload: Dict[str, Any]):
+    """First-time setup for a new owner: names, members and headcount."""
+    identity = _require_owner("set up the household")
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Hosted setup is not used locally.")
+    owner_name = str(payload.get("owner_name") or "").strip()
+    members = payload.get("members") or []
+    if not isinstance(members, list) or len(members) > 12:
+        raise HTTPException(status_code=422, detail="members must be a list of up to 12 names")
+    names = [str(name).strip()[:80] for name in members if str(name or "").strip()]
+    if len(owner_name) > 80:
+        raise HTTPException(status_code=422, detail="Your name must be 80 characters or fewer.")
+    try:
+        household_size = max(1 + len(names), min(12, int(payload.get("household_size") or 1)))
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail="household_size must be a number") from error
+    household = await asyncio.to_thread(
+        complete_household_setup, identity.google_subject, owner_name, names, household_size,
+    )
+    claims = session_from_request(request) or {}
+    response = JSONResponse({"household": household})
+    set_session_cookie(response, issue_session(claims, household, consent=claims.get("consent")))
+    return response
+
+
+@app.get("/api/household/invite")
+async def household_invite_status_endpoint():
+    identity = _require_owner("manage invite links")
+    if identity is None:
+        return {"active": False, "expires_at": None}
+    return await asyncio.to_thread(get_household_invite, identity.household_id)
+
+
+@app.post("/api/household/invite")
+async def create_household_invite_endpoint():
+    """Create a fresh invite link; any earlier link stops working."""
+    identity = _require_owner("create invite links")
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Invites are available on hosted Kitch only.")
+    token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + INVITE_TTL).isoformat()
+    await asyncio.to_thread(set_household_invite, identity.household_id, _invite_hash(token), expires_at)
+    return {"token": token, "expires_at": expires_at}
+
+
+@app.delete("/api/household/invite")
+async def revoke_household_invite_endpoint():
+    identity = _require_owner("turn off invite links")
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Invites are available on hosted Kitch only.")
+    await asyncio.to_thread(set_household_invite, identity.household_id, None, None)
+    return {"active": False, "expires_at": None}
+
+
+@app.get("/api/invites/{token}")
+async def invite_preview_endpoint(token: str):
+    """Public: who is inviting, and which members are still unclaimed."""
+    if not auth_required():
+        raise HTTPException(status_code=404, detail="Invites are available on hosted Kitch only.")
+    preview = await asyncio.to_thread(get_invite_preview, _invite_hash(token))
+    if preview is None:
+        status, message = JOIN_ERROR_MESSAGES["invite_invalid"]
+        raise HTTPException(status_code=status, detail={"code": "invite_invalid", "message": message})
+    return preview
+
+
 @app.delete("/api/account")
 async def delete_account_endpoint():
-    """Delete the signed-in owner's account, household data and agent memory."""
+    """Owners delete the whole household and its memory; members leave it."""
     if not auth_required():
         raise HTTPException(status_code=404, detail="Account deletion applies to hosted Kitch only.")
     identity = require_identity()
+    if not identity.is_owner:
+        deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
+        response = JSONResponse({"deleted": deleted, "memory": "kept_for_household"})
+        clear_session_cookie(response)
+        return response
     for provider_id in ("swiggy_instamart",):
         adapter = provider_registry.get(provider_id)
         if isinstance(adapter, InstamartProviderAdapter):
@@ -1414,6 +1538,7 @@ async def grocery_provider_selection_endpoint(payload: Dict[str, Any]):
 
 @app.post("/api/grocery/providers/{provider_id}/connection/start")
 async def start_provider_connection_endpoint(provider_id: str):
+    _require_owner("connect a grocery app")
     adapter = provider_registry.get(provider_id)
     if not isinstance(adapter, InstamartProviderAdapter):
         raise ProviderOperationError(
@@ -1447,6 +1572,7 @@ async def provider_oauth_callback_endpoint(
 
 @app.delete("/api/grocery/providers/{provider_id}/connection")
 async def disconnect_provider_endpoint(provider_id: str):
+    _require_owner("disconnect a grocery app")
     adapter = provider_registry.get(provider_id)
     if not isinstance(adapter, InstamartProviderAdapter):
         raise ProviderOperationError(
@@ -1501,6 +1627,7 @@ async def place_provider_order_endpoint(
     provider_id: str,
     payload: Dict[str, Any],
 ):
+    _require_owner("place grocery orders")
     return await grocery_checkout_service.place_order(provider_id, payload)
 
 

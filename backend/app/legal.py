@@ -4,7 +4,7 @@ Bump ``LEGAL_TERMS_VERSION`` whenever the Privacy Policy or Terms of Use change
 materially; every owner is then asked to review and accept again.
 """
 
-LEGAL_TERMS_VERSION = "2026-10-17"
+LEGAL_TERMS_VERSION = "2026-10-18"
 
 # Requests a signed-in owner may make before accepting the current notice:
 # reading the session, accepting, signing out, and deleting the account.

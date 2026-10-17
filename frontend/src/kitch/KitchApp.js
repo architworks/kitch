@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useKitch } from "./useKitch.js";
 import Icon from "./components/Icon.js";
-import { SplashScreen, SignInScreen, OnboardingScreen, ConsentScreen } from "./components/EntryScreens.js";
+import { SplashScreen, SignInScreen, OnboardingScreen, ConsentScreen, HouseholdSetupScreen, LegalLinks } from "./components/EntryScreens.js";
 import HouseholdView from "./components/HouseholdView.js";
 import RecipesView from "./components/RecipesView.js";
 import GroceriesView from "./components/GroceriesView.js";
@@ -117,6 +117,7 @@ export default function KitchApp() {
   if (authState.loading) return <SplashScreen startup={k.startupState} onRetry={k.startSession} />;
   if (authState.required && !authState.authenticated) return <SignInScreen k={k} />;
   if (authState.consentRequired) return <ConsentScreen k={k} />;
+  if (authState.setupRequired) return <HouseholdSetupScreen k={k} />;
   if (householdBootstrap === null) return <SplashScreen />;
   if (!householdBootstrap.initialized) return <OnboardingScreen k={k} />;
 
@@ -153,6 +154,7 @@ export default function KitchApp() {
             </button>
           ))}
         </nav>
+        <LegalLinks className="rail-legal" />
         <MemberMenu k={k} placement="up" onManage={k.openMemberEditor} />
       </aside>
 

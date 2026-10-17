@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon.js";
 import { apiErrorMessage } from "../lib/helpers.js";
-import { LegalLinks } from "./EntryScreens.js";
+import { LegalLinks, InviteLinkControls } from "./EntryScreens.js";
 
 function useDialogFocus(ref, onEscape) {
   useEffect(() => {
@@ -75,16 +75,19 @@ export function ConfirmDialog({ k }) {
 function DeleteAccount({ k }) {
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
+  const owner = k.isHouseholdOwner;
   if (!confirming) {
     return (
       <button type="button" className="btn danger sm" onClick={() => { k.setDeleteAccountError(""); setConfirming(true); }}>
-        <Icon name="trash" size="sm" />Delete account and data
+        <Icon name="trash" size="sm" />{owner ? "Delete account and data" : "Leave household and delete my data"}
       </button>
     );
   }
   return (
     <div className="delete-account">
-      <p>This permanently deletes your household: every member, meal plan, recipe, pantry item, shopping list, nutrition log and remembered preference, and disconnects Swiggy. It cannot be undone. Orders already placed stay in the Swiggy app.</p>
+      <p>{owner
+        ? "This permanently deletes your household for everyone in it: every member, meal plan, recipe, pantry item, shopping list, nutrition log and remembered preference, and disconnects Swiggy. It cannot be undone. Orders already placed stay in the Swiggy app."
+        : "This removes your sign-in and your own nutrition log from this household. The shared plans, pantry and lists stay for everyone else. It cannot be undone."}</p>
       <label htmlFor="delete-confirm">Type DELETE to confirm</label>
       <div>
         <input id="delete-confirm" className="input" autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} />
@@ -102,6 +105,11 @@ export function MemberDialog({ k, go }) {
   const ref = useRef(null);
   const close = () => k.setMemberEditorOpen(false);
   useDialogFocus(ref, close);
+  const canInvite = k.authState.required && k.isHouseholdOwner;
+  const { loadInviteStatus } = k;
+  useEffect(() => {
+    if (canInvite) loadInviteStatus();
+  }, [canInvite, loadInviteStatus]);
   return (
     <div className="scrim" role="presentation" onMouseDown={close}>
       <section ref={ref} className="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} onMouseDown={event => event.stopPropagation()}>
@@ -142,6 +150,14 @@ export function MemberDialog({ k, go }) {
             <button type="button" className="icon-btn sm" aria-label="More people" disabled={k.householdSize >= 12} onClick={() => k.updateHouseholdSize(k.householdSize + 1)}><Icon name="plus" size="sm" /></button>
           </div>
         </div>
+
+        {canInvite && (<>
+          <h3 className="settings-sub">Invite people</h3>
+          <div className="settings-data">
+            <p>Share a link so others can join with their own Google account. They share the plans, pantry and lists; only you can place grocery orders.</p>
+            <InviteLinkControls k={k} />
+          </div>
+        </>)}
 
         <h3 className="settings-sub">Your data</h3>
         <div className="settings-data">
