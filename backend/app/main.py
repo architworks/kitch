@@ -51,6 +51,8 @@ from app.storage import (
     complete_household_setup,
     delete_household_account,
     get_household_account_context,
+    OwnershipTransferError,
+    transfer_household_ownership,
     get_household_invite,
     get_invite_preview,
     join_household_with_invite,
@@ -810,6 +812,44 @@ async def revoke_household_invite_endpoint():
         raise HTTPException(status_code=404, detail="Invites are available on hosted Kitch only.")
     await asyncio.to_thread(set_household_invite, identity.household_id, None, None)
     return {"active": False, "expires_at": None}
+
+
+OWNERSHIP_ERROR_MESSAGES = {
+    "owner_required": (403, "Only the household owner can hand over ownership."),
+    "new_owner_needs_account": (422, "Only someone who has joined with their own Google account can become the owner."),
+    "already_owner": (422, "You are already the owner."),
+}
+
+
+@app.post("/api/household/owner")
+async def transfer_household_ownership_endpoint(payload: Dict[str, Any]):
+    """Hand the household to another signed-in member.
+
+    The new owner connects their own grocery app; the previous owner's
+    connection and any open checkout are removed first, never handed over.
+    """
+    identity = _require_owner("hand over ownership")
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Ownership applies to hosted Kitch only.")
+    new_owner = str(payload.get("profile_id") or "").strip()
+    if not any(member["id"] == new_owner for member in identity.members) or new_owner == identity.profile_id:
+        status, message = OWNERSHIP_ERROR_MESSAGES["new_owner_needs_account"]
+        raise HTTPException(status_code=status, detail={"code": "new_owner_needs_account", "message": message})
+    for provider_id in ("swiggy_instamart",):
+        adapter = provider_registry.get(provider_id)
+        if isinstance(adapter, InstamartProviderAdapter):
+            try:
+                await adapter.oauth.disconnect()
+            except Exception:
+                logger.exception("Provider disconnect failed during ownership transfer")
+    try:
+        household = await asyncio.to_thread(
+            transfer_household_ownership, identity.google_subject, new_owner,
+        )
+    except OwnershipTransferError as error:
+        status, message = OWNERSHIP_ERROR_MESSAGES[error.code]
+        raise HTTPException(status_code=status, detail={"code": error.code, "message": message}) from error
+    return {"household": household}
 
 
 @app.get("/api/invites/{token}")
@@ -1611,6 +1651,7 @@ async def grocery_providers_endpoint():
 @app.patch("/api/grocery/provider-selection")
 async def grocery_provider_selection_endpoint(payload: Dict[str, Any]):
     """Persist the checkout UI's active provider as operational workflow state."""
+    _require_owner("choose the household's grocery app")
     provider_id = str(payload.get("selected_provider") or "").strip()
     provider_registry.get(provider_id)
     return {

@@ -37,6 +37,26 @@ CHECKOUT_OPERATION_LEASE_SECONDS = 300
 # A review read from Instamart this recently is what the person just looked at;
 # re-reading it again at the moment they press Place order adds latency and
 # false alarms, not safety.
+def _require_household_owner(action: str) -> None:
+    """The household's grocery-app account belongs to its owner.
+
+    Members share the plan, pantry and shopping list, but only the owner sees
+    the grocery app's addresses, payment options and live cart, prepares the
+    app cart and places orders, from the Groceries screen or from chat.
+    """
+    from app.auth import current_identity
+
+    identity = current_identity()
+    if identity is not None and not identity.is_owner:
+        raise ProviderOperationError(
+            provider="household",
+            operation="owner_required",
+            code="owner_required",
+            message=f"Only the household owner can {action}.",
+            status_code=403,
+        )
+
+
 # A checkout that has been submitted to the provider stays locked until its
 # outcome is known, so it can never be reopened and bought twice. An outcome
 # that stays unknown this long is released so the household is never stuck.
@@ -116,14 +136,32 @@ class GroceryCheckoutService:
         return {"providers": self.registry.descriptors()}
 
     async def addresses(self, provider_id: str) -> Dict[str, Any]:
+        _require_household_owner("see grocery-app addresses")
         adapter = self.registry.get(provider_id)
         return await adapter.list_addresses()
 
     def draft(self, provider_id: str) -> Dict[str, Any]:
+        from app.auth import current_identity
+
         adapter = self.registry.get(provider_id)
         descriptor = adapter.descriptor()
         environment = descriptor.environment
         row = get_provider_checkout_draft(provider_id, environment)
+        identity = current_identity()
+        if identity is not None and not identity.is_owner:
+            # Members see whether the household's order went through, never
+            # the owner's addresses, payment options or app cart.
+            status = str((row or {}).get("status") or "")
+            return {
+                "status": "success",
+                "provider": provider_id,
+                "draft": None,
+                "order_status": (
+                    {"status": status, "updated_at": (row or {}).get("updated_at")}
+                    if status in {"checkout_pending", "payment_pending", "unknown", "ordered"}
+                    else None
+                ),
+            }
         if row:
             row = refresh_checkout_eligibility(row, descriptor.label)
         review = draft_row_to_review(row)
@@ -133,6 +171,7 @@ class GroceryCheckoutService:
 
     async def read_cart_from_chat(self, provider_id: str = "") -> Dict[str, Any]:
         """Read the live provider cart without changing provider or Kitch state."""
+        _require_household_owner("see the grocery-app cart")
         live = await self.live_cart(provider_id)
         canonical_provider = str(live.get("provider") or "")
         provider_cart = live.get("provider_cart") or {}
@@ -162,6 +201,7 @@ class GroceryCheckoutService:
 
     async def live_cart(self, provider_id: str = "") -> Dict[str, Any]:
         """Fetch the provider cart exactly as it exists, without checkout logic."""
+        _require_household_owner("see the grocery-app cart")
         canonical_provider = ProviderRegistry.canonical_id(provider_id)
         if not canonical_provider:
             canonical_provider = ProviderRegistry.canonical_id(
@@ -264,6 +304,7 @@ class GroceryCheckoutService:
         *,
         authority_source: str = "ui_sync",
     ) -> Dict[str, Any]:
+        _require_household_owner("prepare a grocery-app cart")
         adapter = self.registry.get(provider_id)
         descriptor = adapter.descriptor()
         operation_id = str(uuid4())
@@ -374,6 +415,7 @@ class GroceryCheckoutService:
         provider_id: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
+        _require_household_owner("change the grocery order")
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
         # Review edits take the same lease as sync and ordering, so they cannot
@@ -450,6 +492,7 @@ class GroceryCheckoutService:
         }
 
     async def revalidate(self, provider_id: str) -> Dict[str, Any]:
+        _require_household_owner("refresh the grocery order")
         adapter = self.registry.get(provider_id)
         descriptor = adapter.descriptor()
         operation_id = str(uuid4())
@@ -494,6 +537,7 @@ class GroceryCheckoutService:
         provider_id: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
+        _require_household_owner("place grocery orders")
         adapter = self.registry.get(provider_id)
         descriptor = adapter.descriptor()
         operation_id = str(uuid4())
@@ -620,6 +664,7 @@ class GroceryCheckoutService:
             )
 
     async def payment_status(self, provider_id: str) -> Dict[str, Any]:
+        _require_household_owner("check grocery payments")
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
         row = get_provider_checkout_draft(provider_id, environment)
@@ -652,6 +697,7 @@ class GroceryCheckoutService:
         selected_payment_method_id: str = "",
     ) -> Dict[str, Any]:
         """Persist safe review choices while keeping final approval in the UI."""
+        _require_household_owner("change the grocery order")
         provider_id = "swiggy_instamart"
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
@@ -724,6 +770,7 @@ class GroceryCheckoutService:
         payment_method_query: str = "",
     ) -> Dict[str, Any]:
         """Resolve text only against choices already returned for the current draft."""
+        _require_household_owner("change the grocery order")
         provider_id = "swiggy_instamart"
         adapter = self.registry.get(provider_id)
         row = get_provider_checkout_draft(provider_id, adapter.descriptor().environment)
@@ -794,6 +841,7 @@ class GroceryCheckoutService:
 
     async def converse_with_instamart(self, user_request: str) -> Dict[str, Any]:
         """Delegate provider-specific, non-checkout chat to the Instamart agent."""
+        _require_household_owner("use the grocery app")
         provider_id = "swiggy_instamart"
         adapter = self.registry.get(provider_id)
         environment = adapter.descriptor().environment
@@ -840,6 +888,7 @@ class GroceryCheckoutService:
         native_cart_changes: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Synchronize an explicitly requested or UI-selected provider cart."""
+        _require_household_owner("prepare a grocery-app cart")
         provider_id = ProviderRegistry.canonical_id(provider_id)
         if not provider_id:
             provider_id = ProviderRegistry.canonical_id(

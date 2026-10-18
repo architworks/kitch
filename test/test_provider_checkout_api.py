@@ -623,5 +623,86 @@ class CheckoutIntegritySecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("payment method", describe_material_changes(review["changes"], "Instamart"))
 
 
+class OwnerOnlyGroceryAppTests(unittest.IsolatedAsyncioTestCase):
+    """Only the household owner uses the grocery app; members see order status."""
+
+    draft_row = ProviderCheckoutServiceTests.draft_row
+    service = ProviderCheckoutServiceTests.service
+
+    def _as(self, role):
+        from app.auth import HouseholdIdentity, begin_identity_scope
+        return begin_identity_scope(HouseholdIdentity(
+            google_subject="subject", email="m@example.com", household_id="household-a",
+            owner_profile_id="owner-a", members=({"id": "owner-a", "name": "Owner"},),
+            profile_id="member-b" if role == "member" else "owner-a", role=role,
+        ))
+
+    async def test_members_cannot_use_the_grocery_app_from_any_path(self):
+        from app.auth import end_identity_scope
+        agent = SimpleNamespace(converse=AsyncMock(), synchronize=AsyncMock())
+        adapter = SimpleNamespace(
+            descriptor=lambda: SimpleNamespace(environment="production", label="Instamart"),
+            list_addresses=AsyncMock(), get_cart=AsyncMock(), revalidate_cart=AsyncMock(),
+            payment_status=AsyncMock(),
+        )
+        service = self.service(adapter, instamart_agent=agent)
+        token = self._as("member")
+        try:
+            with patch("app.grocery_checkout.claim_provider_checkout_operation") as claim:
+                for call in (
+                    lambda: service.addresses("swiggy_instamart"),
+                    lambda: service.live_cart("swiggy_instamart"),
+                    lambda: service.read_cart_from_chat("swiggy_instamart"),
+                    lambda: service.sync("swiggy_instamart", {"selected_address_id": "home"}),
+                    lambda: service.revalidate("swiggy_instamart"),
+                    lambda: service.place_order("swiggy_instamart", {}),
+                    lambda: service.payment_status("swiggy_instamart"),
+                    lambda: service.converse_with_instamart("add milk"),
+                    lambda: service.sync_from_chat(provider_id="swiggy_instamart"),
+                    lambda: service.configure_instamart_review_by_query(address_query="home"),
+                ):
+                    with self.assertRaises(ProviderOperationError) as caught:
+                        await call()
+                    self.assertEqual(caught.exception.code, "owner_required")
+                with self.assertRaises(ProviderOperationError):
+                    service.update_draft("swiggy_instamart", {"selected_payment_method_id": "upi"})
+                claim.assert_not_called()
+        finally:
+            end_identity_scope(token)
+        for mock in (adapter.list_addresses, adapter.get_cart, adapter.revalidate_cart,
+                     adapter.payment_status, agent.converse, agent.synchronize):
+            mock.assert_not_awaited()
+
+    async def test_members_see_only_the_order_status(self):
+        from app.auth import end_identity_scope
+        adapter = SimpleNamespace(descriptor=lambda: SimpleNamespace(environment="production", label="Instamart"))
+        service = self.service(adapter)
+        ordered = {**self.draft_row(), "status": "ordered", "updated_at": "2026-10-18T10:00:00+00:00"}
+        token = self._as("member")
+        try:
+            with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=ordered):
+                response = service.draft("swiggy_instamart")
+        finally:
+            end_identity_scope(token)
+        self.assertIsNone(response["draft"])
+        self.assertEqual(response["order_status"], {"status": "ordered", "updated_at": "2026-10-18T10:00:00+00:00"})
+        self.assertNotIn("address", str(response))
+        self.assertNotIn("payment", str(response))
+
+    async def test_the_owner_still_sees_the_full_review(self):
+        from app.auth import end_identity_scope
+        adapter = SimpleNamespace(descriptor=lambda: SimpleNamespace(environment="production", label="Instamart"))
+        service = self.service(adapter)
+        token = self._as("owner")
+        try:
+            with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=self.draft_row()), patch(
+                "app.grocery_checkout.refresh_checkout_eligibility", side_effect=lambda row, label: row,
+            ):
+                response = service.draft("swiggy_instamart")
+        finally:
+            end_identity_scope(token)
+        self.assertEqual(response["draft"]["selected_address_id"], "address-1")
+
+
 if __name__ == "__main__":
     unittest.main()

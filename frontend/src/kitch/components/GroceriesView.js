@@ -829,6 +829,32 @@ function PaymentHandoff({ k }) {
 
 /* ---------- Sidebar ---------- */
 
+// Members plan and edit the shared list; the owner reviews it in their own
+// grocery app and places the order.
+function MemberOrdering({ k }) {
+  const owner = k.householdMembers.find(member => member.role === "owner");
+  const name = owner?.value || "The household owner";
+  const status = k.memberOrderStatus;
+  const when = status?.updated_at
+    ? new Date(status.updated_at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })
+    : "";
+  const text = status && {
+    ordered: "Last order placed",
+    payment_pending: "Last order is waiting for payment",
+    checkout_pending: "An order is being placed",
+    unknown: "Last order is being confirmed"
+  }[status.status];
+  return (
+    <section className="card card-pad checkout" aria-labelledby="checkout-title">
+      <div className="section-head">
+        <h2 id="checkout-title">Ordering</h2>
+      </div>
+      <p>{name} orders the household’s groceries. Add and tick what you need on the shopping list; {owner ? name : "they"} reviews the cart in their grocery app and places the order.</p>
+      {text && <p className="muted">{text}{when ? ` · ${when}` : ""}.</p>}
+    </section>
+  );
+}
+
 function OrderSummary({ k }) {
   const p = k.selectedProvider;
   const label = p.id ? p.label : "App";
@@ -936,10 +962,10 @@ export default function GroceriesView({ k, ask, go }) {
             </div>
             {tab === "cart" ? <ShoppingList k={k} ask={ask} go={go} /> : <PantryPanel k={k} />}
           </section>
-          <Checkout k={k} />
+          {k.isHouseholdOwner ? <Checkout k={k} /> : <MemberOrdering k={k} />}
         </div>
         <aside className="groceries-side">
-          <OrderSummary k={k} />
+          {k.isHouseholdOwner && <OrderSummary k={k} />}
           <ListTools k={k} />
         </aside>
       </div>

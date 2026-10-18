@@ -86,7 +86,7 @@ function DeleteAccount({ k }) {
   return (
     <div className="delete-account">
       <p>{owner
-        ? "This permanently deletes your household for everyone in it: every member, meal plan, recipe, pantry item, shopping list, nutrition log and remembered preference, and disconnects Swiggy. It cannot be undone. Orders already placed stay in the Swiggy app."
+        ? "This permanently deletes your household for everyone in it: every member, meal plan, recipe, pantry item, shopping list, nutrition log and remembered preference, and disconnects Swiggy. It cannot be undone. Orders already placed stay in the Swiggy app. To keep the household for the others, make someone else the owner first, then leave."
         : "This removes your sign-in and your own nutrition log from this household. The shared plans, pantry and lists stay for everyone else. It cannot be undone."}</p>
       <label htmlFor="delete-confirm">Type DELETE to confirm</label>
       <div>
@@ -99,6 +99,15 @@ function DeleteAccount({ k }) {
       {k.deleteAccountError && <p className="form-error" role="alert">{k.deleteAccountError}</p>}
     </div>
   );
+}
+
+// Signed-in members carry their role; others have not joined with their own
+// Google account yet (and so cannot become the owner).
+function memberRoleLabel(k, member) {
+  if (!k.authState.required) return member.id === k.householdBootstrap?.owner_profile_id ? "Household owner" : "Member";
+  if (member.role === "owner") return "Household owner";
+  if (member.role === "member") return "Member";
+  return "Member · not signed in yet";
 }
 
 export function MemberDialog({ k, go }) {
@@ -123,7 +132,7 @@ export function MemberDialog({ k, go }) {
             const unchanged = String(draft).trim() === member.value || !String(draft).trim();
             return (
               <li key={member.id}>
-                <label htmlFor={`rename-${member.id}`}>{member.id === k.householdBootstrap?.owner_profile_id ? "Household owner" : "Member"}</label>
+                <label htmlFor={`rename-${member.id}`}>{memberRoleLabel(k, member)}</label>
                 <div>
                   <input
                     id={`rename-${member.id}`}
@@ -135,6 +144,9 @@ export function MemberDialog({ k, go }) {
                   <button type="button" className="btn sm" disabled={k.savingMemberId === member.id || unchanged} onClick={() => k.saveMemberName(member)}>
                     {k.savingMemberId === member.id ? "Saving…" : "Save"}
                   </button>
+                  {k.authState.required && k.isHouseholdOwner && member.role === "member" && (
+                    <button type="button" className="btn quiet sm" onClick={() => k.transferOwnership(member)}>Make owner</button>
+                  )}
                 </div>
               </li>
             );

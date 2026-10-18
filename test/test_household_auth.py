@@ -349,6 +349,48 @@ for module in (
                 self.assertEqual(client.get("/api/pantry").status_code, 200)
         self.assertEqual(seen, ["household-c"])
 
+    def test_owner_hands_the_household_to_a_signed_in_member(self):
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        owner_cookie = self._member_session(environment, {**household, "google_subject": "google-user-1",
+                                                          "email": "owner@example.com"})
+        owner_context = {**household, "members": member["members"]}
+        disconnected = []
+
+        class FakeOAuth:
+            async def disconnect(self):
+                disconnected.append(True)
+
+        adapter = main.InstamartProviderAdapter.__new__(main.InstamartProviderAdapter)
+        adapter.oauth = FakeOAuth()
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=owner_context,
+        ), patch("app.main.provider_registry.get", return_value=adapter), patch(
+            "app.main.transfer_household_ownership",
+            return_value={**owner_context, "role": "member"},
+        ) as transfer:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", owner_cookie)
+                refused = client.post("/api/household/owner", json={"profile_id": "someone-else"})
+                self.assertEqual(refused.status_code, 422)
+                handed = client.post("/api/household/owner", json={"profile_id": "member-b"})
+                self.assertEqual(handed.status_code, 200)
+                self.assertEqual(handed.json()["household"]["role"], "member")
+        transfer.assert_called_once_with("google-user-1", "member-b")
+        self.assertEqual(disconnected, [True])
+
+    def test_members_cannot_hand_over_ownership(self):
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        cookie = self._member_session(environment, member)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=member,
+        ), patch("app.main.transfer_household_ownership") as transfer:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", cookie)
+                self.assertEqual(client.post("/api/household/owner", json={"profile_id": "owner-a"}).status_code, 403)
+        transfer.assert_not_called()
+
     def test_stale_invite_link_explains_itself(self):
         _, claims, environment = self._consent_fixtures()
         with patch.dict(os.environ, environment), patch(

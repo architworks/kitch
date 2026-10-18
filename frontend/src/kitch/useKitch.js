@@ -91,6 +91,11 @@ export function useKitch() {
   const [isOnboardingSaving, setIsOnboardingSaving] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
   const [authState, setAuthState] = useState({ loading: true, required: false, authenticated: false, email: "", consentRequired: false });
+  // Only the owner uses the household's grocery app (its addresses, payment
+  // options, app cart and orders). Without sign-in (local mode) the one
+  // person is the owner.
+  const isHouseholdOwner = !authState.loading && (!authState.required || householdBootstrap?.role === "owner");
+  const [memberOrderStatus, setMemberOrderStatus] = useState(null);
   const [authError, setAuthError] = useState("");
   // Explicit consent ticked on the sign-in screen travels with the Google
   // credential; the ref lets the Google callback read the latest ticks.
@@ -227,9 +232,12 @@ export function useKitch() {
   ), [orderingProviders, selectedOrderingProvider]);
   const selectedProviderLabel = selectedProvider.label;
   const selectedProviderId = selectedProvider.id;
-  const selectedProviderLiveCartRoute = selectedProvider.routes?.liveCart || "";
-  const selectedProviderCheckoutDraftRoute = selectedProvider.routes?.checkoutDraft || "";
-  const selectedProviderAddressesRoute = selectedProvider.routes?.addresses || "";
+  const selectedProviderLiveCartRoute = isHouseholdOwner ? selectedProvider.routes?.liveCart || "" : "";
+  const selectedProviderCheckoutDraftRoute = isHouseholdOwner ? selectedProvider.routes?.checkoutDraft || "" : "";
+  const selectedProviderAddressesRoute = isHouseholdOwner ? selectedProvider.routes?.addresses || "" : "";
+  const memberOrderStatusRoute = !isHouseholdOwner && authState.authenticated
+    ? selectedProvider.routes?.checkoutDraft || ""
+    : "";
   const selectedProviderEnabled = Boolean(selectedProvider.enabled);
   const selectedProviderRequiresConnection = Boolean(selectedProvider.requires_connection);
   const selectedProviderRegistryState = selectedProvider.state || "unknown";
@@ -461,7 +469,10 @@ export function useKitch() {
     const members = (data?.members || []).map(member => ({
       id: member.id,
       value: member.name,
-      label: member.name
+      label: member.name,
+      // "owner" or "member" for people who signed in; null for members who
+      // have not joined with their own Google account.
+      role: member.role || null
     }));
     if (members.length > 0) {
       // Each signed-in person starts on their own profile; the owner's is first.
@@ -629,6 +640,27 @@ export function useKitch() {
       setAuthError(apiErrorMessage(error, "Google sign-in could not be completed."));
     }
   }, [routeHousehold, clearJoinInvite]);
+
+  const transferOwnership = useCallback((member) => {
+    // One dialog at a time: settings closes, then the handover is confirmed.
+    setMemberEditorOpen(false);
+    setConfirmationDialog({
+      title: `Make ${member.value} the owner?`,
+      message: `${member.value} will connect their own grocery app and place the household’s orders. Your Swiggy connection and any open order review are removed, and you become a member. Plans, pantry, lists and nutrition logs stay shared as they are.`,
+      confirmLabel: "Make owner",
+      onConfirm: async () => {
+        const res = await apiFetch(apiUrl("/api/household/owner"), {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile_id: member.id })
+        });
+        await requireSuccessfulResponse(res);
+        // Roles change for everyone; reload so every view reflects them.
+        window.location.reload();
+      }
+    });
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
@@ -926,6 +958,19 @@ export function useKitch() {
     // The selected day is navigated explicitly so it does not trigger duplicate requests.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, activeUser, mealPlan.today, loadNutritionDashboard]);
+
+  // Members see whether the household's last order went through; the owner's
+  // addresses, payment options and app cart stay with the owner.
+  useEffect(() => {
+    if (activeTab !== "groceries" || !memberOrderStatusRoute) return undefined;
+    let ignore = false;
+    apiFetch(apiUrl(memberOrderStatusRoute))
+      .then(requireSuccessfulResponse)
+      .then(res => res.json())
+      .then(data => { if (!ignore) setMemberOrderStatus(data.order_status || null); })
+      .catch(() => { if (!ignore) setMemberOrderStatus(null); });
+    return () => { ignore = true; };
+  }, [activeTab, memberOrderStatusRoute]);
 
   useEffect(() => {
     if (activeTab !== "groceries" || !selectedProviderAddressesRoute) return undefined;
@@ -2473,6 +2518,15 @@ export function useKitch() {
     failed: `Reconnect ${selectedProvider.label} and try again.`,
     unknown: `Checking whether ${selectedProvider.label} is ready.`
   }[providerConnectionState] || "");
+  // Roles come from the signed-in household context; the shared state sync
+  // that refreshes names does not carry them, so they are joined by id here.
+  const householdMembersWithRoles = useMemo(() => {
+    const roles = Object.fromEntries(
+      (householdBootstrap?.members || []).map(member => [member.id, member.role || null])
+    );
+    return householdMembers.map(member => ({ ...member, role: roles[member.id] ?? member.role ?? null }));
+  }, [householdBootstrap, householdMembers]);
+
   const planDays = useMemo(() => (
     Array.isArray(mealPlan.days) ? mealPlan.days : []
   ), [mealPlan.days]);
@@ -2557,7 +2611,7 @@ export function useKitch() {
     setExpandedMealKey,
     householdSize,
     setHouseholdSize,
-    householdMembers,
+    householdMembers: householdMembersWithRoles,
     setHouseholdMembers,
     activeUser,
     setActiveUser,
@@ -2742,7 +2796,9 @@ export function useKitch() {
     consentError,
     deleteAccount,
     isDeletingAccount,
-    isHouseholdOwner: householdBootstrap?.role !== "member",
+    isHouseholdOwner,
+    memberOrderStatus,
+    transferOwnership,
     submitHouseholdSetup,
     finishHouseholdSetup,
     pendingHouseholdName,

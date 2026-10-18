@@ -690,6 +690,35 @@ def join_household_with_invite(
     return data
 
 
+class OwnershipTransferError(ValueError):
+    """An ownership change the person can fix: pick someone who has signed in."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def transfer_household_ownership(google_subject: str, new_owner_profile_id: str) -> Dict[str, Any]:
+    """Make another signed-in member the owner; returns the caller's new context."""
+    try:
+        response = supabase.rpc("transfer_household_ownership", {
+            "p_google_subject": google_subject,
+            "p_new_owner_profile_id": new_owner_profile_id,
+        }).execute()
+    except Exception as error:
+        message = str(getattr(error, "message", "") or error)
+        for code in ("owner_required", "new_owner_needs_account", "already_owner"):
+            if code in message:
+                raise OwnershipTransferError(code) from error
+        raise persistence_error_from_exception(
+            "transfer_household_ownership", "household_accounts", error,
+        ) from error
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("transfer_household_ownership", "household_accounts")
+    return data
+
+
 def complete_household_setup(
     google_subject: str,
     owner_name: str,
