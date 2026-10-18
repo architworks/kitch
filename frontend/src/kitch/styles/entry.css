@@ -99,6 +99,7 @@
 .settings-members { list-style: none; display: grid; gap: 10px; margin-top: 10px; }
 .settings-members label { font-size: 12.5px; font-weight: 600; color: var(--mute); }
 .settings-members li > div { display: flex; gap: 8px; margin-top: 4px; }
+.settings-note { margin-top: 10px; font-size: 13px; line-height: 1.45; }
 .stepper-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 8px; }
 .stepper-row p { color: var(--ink-2); font-size: 14px; }
 .stepper { display: flex; align-items: center; gap: 8px; }

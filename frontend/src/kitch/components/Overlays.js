@@ -152,6 +152,9 @@ export function MemberDialog({ k, go }) {
             );
           })}
         </ul>
+        {k.authState.required && k.isHouseholdOwner && !k.householdMembers.some(member => member.role === "member") && (
+          <p className="muted settings-note">To hand the household to someone, invite them below. Once they join with their own Google account, you can make them the owner.</p>
+        )}
 
         <h3 className="settings-sub">Cooking for</h3>
         <div className="stepper-row">
