@@ -206,13 +206,14 @@ def _rate_limit_for(path: str) -> tuple[int, int] | None:
 AI_QUOTA_PATH_SUFFIXES = ("/checkout/sync",)
 AI_QUOTA_PATHS = {"/api/chat", "/api/upload-photo", "/api/grocery-cart/reconcile-pantry"}
 TEN_MINUTES, ONE_DAY = 600, 86_400
-# (limit per 10 minutes, limit per day). A busy planning session is roughly
-# 10-20 messages; households share flatmates, and one IP can be a shared
-# Wi-Fi, so those caps are wider than one account's.
+# (limit per 10 minutes, limit per day). A heavy day for one person is about
+# one planning session (15-25 messages), a few plate photos and a couple of
+# cart builds: 30-40 requests. Daily caps sit at roughly 1.5x that; a
+# household fits two or three heavy members, and an IP a shared flat.
 AI_QUOTAS = {
-    "account": (30, 200),
-    "household": (60, 400),
-    "ip": (90, 600),
+    "account": (30, 60),
+    "household": (60, 150),
+    "ip": (90, 200),
 }
 
 
