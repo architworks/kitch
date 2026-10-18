@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 
 from app.schemas import ChatRequest, ChatResponse
+from app.agent.run_limits import RUN_LIMIT_MESSAGE, RUN_TIMEOUT_SECONDS, is_run_limit_error, limited_run_config
 from app.agent.structured_models import PhotoAnalysis
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
 from app.providers.base import ProviderOperationError
@@ -1090,25 +1091,27 @@ async def chat_endpoint(payload: ChatRequest):
             if is_explicit_recipe_detail_prompt(payload.message)
             else runner
         )
-        async for event in chat_runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=user_message
-        ):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    function_response = getattr(part, "function_response", None)
-                    if function_response and tool_confirmation_action is None:
-                        tool_confirmation_action = _confirmation_action_from_tool_response(
+        async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+            async for event in chat_runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=user_message,
+                run_config=limited_run_config(),
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        function_response = getattr(part, "function_response", None)
+                        if function_response and tool_confirmation_action is None:
+                            tool_confirmation_action = _confirmation_action_from_tool_response(
+                                getattr(function_response, "response", None)
+                            )
+                        source = _provider_source_from_tool_response(
                             getattr(function_response, "response", None)
-                        )
-                    source = _provider_source_from_tool_response(
-                        getattr(function_response, "response", None)
-                    ) if function_response else ""
-                    if source and source not in provider_sources:
-                        provider_sources.append(source)
-            if event.is_final_response() and event.content and event.content.parts:
-                text_reply = event.content.parts[0].text
+                        ) if function_response else ""
+                        if source and source not in provider_sources:
+                            provider_sources.append(source)
+                if event.is_final_response() and event.content and event.content.parts:
+                    text_reply = event.content.parts[0].text
                 
         meal_plan_after = get_meal_plan_snapshot()
         pantry_after = get_pantry_stock()
@@ -1193,7 +1196,10 @@ async def chat_endpoint(payload: ChatRequest):
         
     except (HTTPException, AmbiguousMemberNameError):
         raise
-    except Exception:
+    except Exception as error:
+        if is_run_limit_error(error):
+            logger.warning("Chat run stopped at its limit: %s", type(error).__name__)
+            return ChatResponse(text=RUN_LIMIT_MESSAGE, action=None)
         logger.exception("Chat execution failed")
         raise HTTPException(status_code=500, detail={
             "code": "chat_failed", "message": "Kitch could not complete that request. Please try again.",
@@ -1241,14 +1247,16 @@ async def upload_photo_endpoint(
         analysis_text = ""
         vision_session_id = f"vision-{uuid4()}"
         try:
-            async for event in vision_runner.run_async(
-                user_id=user_id, session_id=vision_session_id,
-                new_message=Content(parts=[Part(text=prompt), Part.from_bytes(
-                    data=file_bytes, mime_type=file.content_type or "image/jpeg"
-                )], role="user"),
-            ):
-                if event.is_final_response() and event.content and event.content.parts:
-                    analysis_text = event.content.parts[0].text or ""
+            async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+                async for event in vision_runner.run_async(
+                    user_id=user_id, session_id=vision_session_id,
+                    new_message=Content(parts=[Part(text=prompt), Part.from_bytes(
+                        data=file_bytes, mime_type=file.content_type or "image/jpeg"
+                    )], role="user"),
+                    run_config=limited_run_config(),
+                ):
+                    if event.is_final_response() and event.content and event.content.parts:
+                        analysis_text = event.content.parts[0].text or ""
         finally:
             # The one-shot session holds the photo bytes; drop it once read.
             await _agent_core().vision_session_service.delete_session(
@@ -1303,12 +1311,14 @@ async def upload_photo_endpoint(
             action = {"type": "UPDATE_PANTRY"}
 
         result_text = ""
-        async for event in runner.run_async(
-            user_id=user_id, session_id=session_id,
-            new_message=Content(parts=[Part(text=dispatch_prompt)], role="user"),
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                result_text = event.content.parts[0].text or ""
+        async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+            async for event in runner.run_async(
+                user_id=user_id, session_id=session_id,
+                new_message=Content(parts=[Part(text=dispatch_prompt)], role="user"),
+                run_config=limited_run_config(),
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    result_text = event.content.parts[0].text or ""
 
         if analysis.classification == "meal":
             if get_macro_diary(active_user) == diary_before:
@@ -1329,7 +1339,10 @@ async def upload_photo_endpoint(
         }
     except (HTTPException, AmbiguousMemberNameError):
         raise
-    except Exception:
+    except Exception as error:
+        if is_run_limit_error(error):
+            logger.warning("Photo run stopped at its limit: %s", type(error).__name__)
+            raise HTTPException(status_code=504, detail={"code": "agent_run_limit", "message": RUN_LIMIT_MESSAGE})
         logger.exception("Photo upload execution failed")
         raise HTTPException(status_code=500, detail={
             "code": "photo_processing_failed", "message": "Kitch could not process that image. Please try again.",

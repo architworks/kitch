@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, List
@@ -16,6 +17,8 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 )
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.genai.types import Content, Part
+
+from app.agent.run_limits import RUN_LIMIT_MESSAGE, RUN_TIMEOUT_SECONDS, is_run_limit_error, limited_run_config
 
 from app.commerce_policy import (
     CommercePermission,
@@ -307,13 +310,15 @@ class InstamartCartAgentService:
                 operation_id=run_id,
                 capture=capture,
             ):
-                async for event in runner.run_async(
-                    user_id=household_user_id,
-                    session_id=session_id,
-                    new_message=prompt,
-                ):
-                    if event.is_final_response() and event.content and event.content.parts:
-                        final_text = str(event.content.parts[0].text or "")
+                async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+                    async for event in runner.run_async(
+                        user_id=household_user_id,
+                        session_id=session_id,
+                        new_message=prompt,
+                        run_config=limited_run_config(),
+                    ):
+                        if event.is_final_response() and event.content and event.content.parts:
+                            final_text = str(event.content.parts[0].text or "")
         except CommercePolicyError as exc:
             raise ProviderOperationError(
                 provider="swiggy_instamart",
@@ -321,6 +326,17 @@ class InstamartCartAgentService:
                 code=exc.code,
                 message=str(exc),
                 status_code=403,
+            ) from exc
+        except Exception as exc:
+            if not is_run_limit_error(exc):
+                raise
+            raise ProviderOperationError(
+                provider="swiggy_instamart",
+                operation="agent_sync_cart",
+                code="agent_run_limit",
+                message=RUN_LIMIT_MESSAGE,
+                retryable=True,
+                status_code=504,
             ) from exc
         finally:
             await toolset.close()
@@ -423,13 +439,15 @@ class InstamartCartAgentService:
                 operation_id=run_id,
                 capture=capture,
             ):
-                async for event in runner.run_async(
-                    user_id=household_user_id,
-                    session_id=session_id,
-                    new_message=Content(role="user", parts=[Part(text=request)]),
-                ):
-                    if event.is_final_response() and event.content and event.content.parts:
-                        final_text = str(event.content.parts[0].text or "")
+                async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+                    async for event in runner.run_async(
+                        user_id=household_user_id,
+                        session_id=session_id,
+                        new_message=Content(role="user", parts=[Part(text=request)]),
+                        run_config=limited_run_config(),
+                    ):
+                        if event.is_final_response() and event.content and event.content.parts:
+                            final_text = str(event.content.parts[0].text or "")
         except CommercePolicyError as exc:
             raise ProviderOperationError(
                 provider="swiggy_instamart",
@@ -437,6 +455,17 @@ class InstamartCartAgentService:
                 code=exc.code,
                 message=str(exc),
                 status_code=403,
+            ) from exc
+        except Exception as exc:
+            if not is_run_limit_error(exc):
+                raise
+            raise ProviderOperationError(
+                provider="swiggy_instamart",
+                operation="agent_conversation",
+                code="agent_run_limit",
+                message=RUN_LIMIT_MESSAGE,
+                retryable=True,
+                status_code=504,
             ) from exc
         finally:
             await toolset.close()

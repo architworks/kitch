@@ -117,3 +117,29 @@ class AgentScopeTests(unittest.TestCase):
         # Loose by design: food, nutrition and wellness talk stays welcome.
         self.assertIn("nutrition questions and advice", core.SCOPE_RULE)
         self.assertIn("When a request is borderline or you are unsure, help.", core.SCOPE_RULE)
+
+
+class AgentRunLimitTests(unittest.TestCase):
+    def test_every_agent_run_has_the_call_cap_and_time_limit(self):
+        import re
+        from pathlib import Path
+        backend = Path(__file__).resolve().parents[1] / "backend" / "app"
+        runs = 0
+        for path in backend.rglob("*.py"):
+            lines = path.read_text().splitlines()
+            for i, line in enumerate(lines):
+                if re.search(r"\.run_async\($", line):
+                    runs += 1
+                    header = "\n".join(lines[i:i + 8])
+                    self.assertIn("run_config=limited_run_config()", header, f"{path.name}:{i + 1}")
+                    self.assertIn("asyncio.timeout(RUN_TIMEOUT_SECONDS)", lines[i - 1], f"{path.name}:{i + 1}")
+        self.assertGreaterEqual(runs, 6)
+
+    def test_limits_are_100_model_calls_and_five_minutes(self):
+        from app.agent import run_limits
+        from google.adk.agents.invocation_context import LlmCallsLimitExceededError
+        self.assertEqual(run_limits.limited_run_config().max_llm_calls, 100)
+        self.assertEqual(run_limits.RUN_TIMEOUT_SECONDS, 300)
+        self.assertTrue(run_limits.is_run_limit_error(TimeoutError()))
+        self.assertTrue(run_limits.is_run_limit_error(LlmCallsLimitExceededError("cap")))
+        self.assertFalse(run_limits.is_run_limit_error(ValueError()))

@@ -451,7 +451,7 @@ for module in (
                 })
                 self.assertEqual(response.status_code, 422)
 
-    def _chat_with_tool_responses(self, tool_responses, message="what's in my cart?"):
+    def _chat_with_tool_responses(self, tool_responses, message="what's in my cart?", runner=None):
         """Run one chat turn whose agent returns the given tool responses."""
         from contextlib import ExitStack
         from types import SimpleNamespace
@@ -496,7 +496,7 @@ for module in (
                     stack.enter_context(patch(target, AsyncMock(return_value=None)))
                 else:
                     stack.enter_context(patch(target, return_value=value))
-            stack.enter_context(patch("app.main.runner", Runner()))
+            stack.enter_context(patch("app.main.runner", runner or Runner()))
             stack.enter_context(patch(
                 "app.main.provider_registry.descriptor",
                 return_value={"environment": "production"},
@@ -510,6 +510,19 @@ for module in (
                 })
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
+
+    def test_chat_run_that_hits_its_limit_gets_a_clear_reply(self):
+        from google.adk.agents.invocation_context import LlmCallsLimitExceededError
+        from app.agent.run_limits import RUN_LIMIT_MESSAGE
+
+        class CappedRunner:
+            async def run_async(self, **kwargs):
+                assert kwargs["run_config"].max_llm_calls == 100
+                raise LlmCallsLimitExceededError("cap")
+                yield  # pragma: no cover
+
+        body = self._chat_with_tool_responses([], runner=CappedRunner())
+        self.assertEqual(body["text"], RUN_LIMIT_MESSAGE)
 
     def test_chat_reply_names_the_grocery_app_whose_content_it_carries(self):
         body = self._chat_with_tool_responses([

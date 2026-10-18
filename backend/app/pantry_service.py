@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from typing import Any
@@ -9,6 +10,12 @@ from uuid import uuid4
 
 from google.genai.types import Content, Part
 
+from app.agent.run_limits import (
+    RUN_LIMIT_MESSAGE,
+    RUN_TIMEOUT_SECONDS,
+    is_run_limit_error,
+    limited_run_config,
+)
 from app.agent.structured_models import PantryReconciliation
 from app.household_config import get_household_profile_id
 from app.storage import (
@@ -91,12 +98,18 @@ async def _reconcile_with_agent(
     text = ""
     user_id = get_household_profile_id()
     try:
-        async for event in pantry_reconciliation_runner.run_async(
-            user_id=user_id, session_id=session_id,
-            new_message=Content(parts=[Part(text=prompt)], role="user"),
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                text = event.content.parts[0].text or ""
+        async with asyncio.timeout(RUN_TIMEOUT_SECONDS):
+            async for event in pantry_reconciliation_runner.run_async(
+                user_id=user_id, session_id=session_id,
+                new_message=Content(parts=[Part(text=prompt)], role="user"),
+                run_config=limited_run_config(),
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    text = event.content.parts[0].text or ""
+    except Exception as error:
+        if is_run_limit_error(error):
+            raise PantryReconciliationError(RUN_LIMIT_MESSAGE) from error
+        raise
     finally:
         # One-shot session: drop the household's pantry and cart copy once read.
         await pantry_reconciliation_session_service.delete_session(
