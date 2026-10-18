@@ -28,11 +28,14 @@ from app.supabase_client import supabase  # noqa: E402
 OUT = ROOT / "reports" / "usage"
 WINDOW_DAYS = 30
 # Estimated Gemini price for the configured model (Gemini 3.5 Flash-Lite, list
-# price per 1M tokens, USD). Thinking tokens bill as output. Update when the
-# model or price changes.
+# price per 1M tokens, USD), shown in rupees at INR_PER_USD. Thinking tokens
+# bill as output. Update when the model, price or exchange rate changes.
 PRICE_MODEL = "Gemini 3.5 Flash-Lite"
 PRICE_INPUT_PER_M = 0.30
 PRICE_OUTPUT_PER_M = 2.50
+INR_PER_USD = 96.5
+OUTCOMES = ("ok", "limit", "quota", "rejected", "error")
+FEATURES = ("chat", "meal_planning", "recipes_and_groceries", "nutrition", "photo", "pantry", "grocery_app")
 KINDS = ("chat", "photo", "pantry_reconcile", "grocery_cart_build")
 
 
@@ -58,7 +61,9 @@ def percentile(values: list[float], q: float) -> float | None:
 
 
 def cost(input_tokens: int, output_tokens: int) -> float:
-    return round(input_tokens / 1e6 * PRICE_INPUT_PER_M + output_tokens / 1e6 * PRICE_OUTPUT_PER_M, 4)
+    """Estimated cost in rupees."""
+    usd = input_tokens / 1e6 * PRICE_INPUT_PER_M + output_tokens / 1e6 * PRICE_OUTPUT_PER_M
+    return round(usd * INR_PER_USD, 4)
 
 
 def day_of(value: str) -> str:
@@ -109,7 +114,7 @@ def main() -> None:
             **{kind: sum(1 for e in rows if e["kind"] == kind) for kind in KINDS},
             "input_tokens": tin,
             "output_tokens": tout,
-            "est_cost_usd": cost(tin, tout),
+            "est_cost_inr": cost(tin, tout),
             "p50_ms": percentile(durations, 0.5),
             "p95_ms": percentile(durations, 0.95),
             "avg_first_response_ms": round(mean(firsts)) if firsts else None,
@@ -152,11 +157,12 @@ def main() -> None:
         "avg_first_response_ms_30d": round(mean(firsts)) if firsts else None,
         "input_tokens_30d": tin,
         "output_tokens_30d": tout,
-        "est_cost_usd_30d": cost(tin, tout),
-        "est_cost_usd_per_active_user_30d": round(cost(tin, tout) / len(month_users), 4) if month_users else None,
+        "est_cost_inr_30d": cost(tin, tout),
+        "est_cost_inr_per_active_user_30d": round(cost(tin, tout) / len(month_users), 4) if month_users else None,
         "error_rate_30d": round(sum(1 for e in recent if e["outcome"] == "error") / len(recent), 4) if recent else None,
         "limited_30d": sum(1 for e in recent if e["outcome"] in ("limit", "quota")),
         "price_model": PRICE_MODEL,
+        "inr_per_usd": INR_PER_USD,
         "generated_at": now.isoformat(timespec="seconds"),
     }]
 
@@ -175,12 +181,16 @@ def main() -> None:
             "avg_first_response_ms": round(mean(fs)) if fs else None,
             "avg_model_calls": round(mean(e["model_calls"] for e in rows), 1) if rows else None,
             "avg_tokens": round(mean(e["input_tokens"] + e["output_tokens"] for e in rows)) if rows else None,
-            "est_cost_usd": cost(sum(e["input_tokens"] for e in rows), sum(e["output_tokens"] for e in rows)),
+            "est_cost_inr": cost(sum(e["input_tokens"] for e in rows), sum(e["output_tokens"] for e in rows)),
         })
 
     feature_counts = Counter(feature for e in recent for feature in (e.get("features") or []))
-    features = [{"feature": name, "requests": n} for name, n in feature_counts.most_common()]
-    outcomes = [{"outcome": name, "requests": n} for name, n in Counter(e["outcome"] for e in recent).most_common()]
+    # Every known feature and outcome is listed, with zeros, so the files are
+    # never empty; tool names seen in use follow the main features.
+    names = list(FEATURES) + sorted((n for n in feature_counts if n not in FEATURES), key=lambda n: -feature_counts[n])
+    features = sorted(({"feature": n, "requests": feature_counts.get(n, 0)} for n in names), key=lambda r: -r["requests"])
+    outcome_counts = Counter(e["outcome"] for e in recent)
+    outcomes = [{"outcome": name, "requests": outcome_counts.get(name, 0)} for name in OUTCOMES]
 
     buckets = (("1", 1, 1), ("2–5", 2, 5), ("6–10", 6, 10), ("11–25", 11, 25), ("26+", 26, 10**9))
     distribution = [
