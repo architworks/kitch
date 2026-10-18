@@ -683,7 +683,11 @@ function Payment({ k }) {
           onChange={event => {
             const checked = event.target.checked;
             k.setProviderReviewAcknowledged(checked);
-            k.updateProviderReview({ order_review_acknowledged: checked });
+            // Approval names the review on screen, so the server can refuse
+            // it if the cart changed meanwhile.
+            k.updateProviderReview(checked
+              ? { order_review_acknowledged: true, seen_snapshot_hash: k.providerCartReview?.snapshot_hash }
+              : { order_review_acknowledged: false });
           }}
         />
         <span>I’ve checked the exact {label} cart, total, delivery address, payment and the items that won’t be ordered{k.providerMultiStore ? ", and that it ships from several stores" : ""}.</span>

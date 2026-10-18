@@ -1564,6 +1564,11 @@ export function useKitch() {
       }
     } catch (e) {
       console.error(`Failed to update ${selectedProvider.label} review`, e);
+      // A refused approval leaves the box unticked; if the cart changed,
+      // show the new review for a fresh look.
+      const changedDraft = e instanceof ApiResponseError ? e.detail?.draft : null;
+      if (changedDraft) applyProviderDraft(changedDraft, { resetAcknowledgement: true });
+      else if (updates.order_review_acknowledged) setProviderReviewAcknowledged(false);
       triggerBannerAlert(apiErrorMessage(e, `Could not update ${selectedProvider.label} review selection.`));
     } finally {
       setIsUpdatingProviderReview(false);
@@ -2102,7 +2107,8 @@ export function useKitch() {
           if (actionProvider === selectedOrderingProvider) {
             await restoreProviderCheckoutDraft();
           }
-          triggerBannerAlert("Provider cart prepared. Review the confirmed products before checkout.");
+          const actionLabel = orderingProviders.find(provider => provider.id === actionProvider)?.label || "Grocery-app";
+          triggerBannerAlert(`${actionLabel} cart prepared. Review the confirmed products before checkout.`);
         } else if (act.type === "CONFIRM_DESTRUCTIVE_ACTION") {
           setConfirmationDialog({
             title: act.impact?.title || "Confirm this change?",
