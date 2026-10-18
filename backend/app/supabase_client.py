@@ -648,6 +648,30 @@ class HouseholdJoinError(ValueError):
 _JOIN_ERROR_CODES = ("invite_invalid", "already_in_household", "profile_unavailable")
 
 
+def consume_ai_quota(buckets: list[str], limits: list[int], windows: list[int]) -> Dict[str, Any]:
+    """Count one AI request against every bucket, or refuse with a retry delay.
+
+    Failures raise PersistenceError without being recorded against the
+    request: the caller lets the request through when the counters are
+    unavailable, so a quota outage must not fail it afterwards.
+    """
+    try:
+        data = supabase.rpc("consume_ai_quota", {
+            "p_buckets": buckets, "p_limits": limits, "p_windows": windows,
+        }).execute().data
+    except Exception as error:
+        raise PersistenceError(
+            operation="consume_ai_quota", table="ai_usage_windows",
+            supabase_code=str(getattr(error, "code", None) or type(error).__name__),
+        ) from error
+    if not isinstance(data, dict) or "allowed" not in data:
+        raise PersistenceError(
+            operation="consume_ai_quota", table="ai_usage_windows",
+            supabase_code="invalid_persistence_response", retryable=False,
+        )
+    return data
+
+
 def get_household_account_context(google_subject: str) -> Dict[str, Any] | None:
     """Return the account's household, role, own profile and setup state."""
     data = _execute(

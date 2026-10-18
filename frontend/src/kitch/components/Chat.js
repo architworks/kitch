@@ -118,6 +118,7 @@ export function Composer({ k, inputRef, floating = false }) {
           id={floating ? "composer-floating" : "composer-docked"}
           ref={inputRef}
           rows={1}
+          maxLength={4000}
           autoComplete="off"
           placeholder={k.pendingPhoto ? "Add a note about this photo…" : "Ask Kitch to plan, cook, shop or log a meal…"}
           value={k.chatInput}

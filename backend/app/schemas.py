@@ -23,8 +23,12 @@ class PlannerContext(BaseModel):
     visible_week_start: str
     selected_date: str
 
+MAX_CHAT_MESSAGE_CHARS = 4000
+
 class ChatRequest(BaseModel):
-    message: str
+    # Long enough for any real kitchen request; stops pasted essays and
+    # assignments from turning into large model calls.
+    message: str = Field(max_length=MAX_CHAT_MESSAGE_CHARS)
     active_user: str
     planner_context: PlannerContext
     pantry_stock: List[Dict[str, Any]]

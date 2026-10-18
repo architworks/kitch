@@ -51,6 +51,7 @@ from app.storage import (
     complete_household_setup,
     delete_household_account,
     get_household_account_context,
+    consume_ai_quota,
     OwnershipTransferError,
     MemberRemovalError,
     remove_household_member,
@@ -198,6 +199,76 @@ def _rate_limit_for(path: str) -> tuple[int, int] | None:
     if path.endswith("/checkout/place-order"):
         return (5, 300)
     return None
+
+
+# Requests that run paid model calls. Inside one request Kitch may make many
+# model and tool calls, so these caps count requests, not model calls.
+AI_QUOTA_PATH_SUFFIXES = ("/checkout/sync",)
+AI_QUOTA_PATHS = {"/api/chat", "/api/upload-photo", "/api/grocery-cart/reconcile-pantry"}
+TEN_MINUTES, ONE_DAY = 600, 86_400
+# (limit per 10 minutes, limit per day). A busy planning session is roughly
+# 10-20 messages; households share flatmates, and one IP can be a shared
+# Wi-Fi, so those caps are wider than one account's.
+AI_QUOTAS = {
+    "account": (30, 200),
+    "household": (60, 400),
+    "ip": (90, 600),
+}
+
+
+def _is_ai_request(path: str) -> bool:
+    return path in AI_QUOTA_PATHS or (
+        path.startswith("/api/grocery/providers/") and path.endswith(AI_QUOTA_PATH_SUFFIXES)
+    )
+
+
+def _client_ip(request: Request) -> str:
+    """The caller's IP. On Vercel the edge sets these headers itself."""
+    if os.environ.get("VERCEL"):
+        for header in ("x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"):
+            value = request.headers.get(header, "").split(",")[0].strip()
+            if value:
+                return value
+    return request.client.host if request.client else "unknown"
+
+
+def _ai_quota_request(google_subject: str, household_id: str, ip: str) -> tuple[list[str], list[int], list[int]]:
+    """Buckets, limits and windows for one AI request. Identifiers are hashed."""
+    principals = {"account": google_subject, "household": household_id, "ip": ip}
+    buckets: list[str] = []
+    limits: list[int] = []
+    windows: list[int] = []
+    for kind, value in principals.items():
+        digest = hashlib.sha256(f"{kind}:{value}".encode()).hexdigest()[:24]
+        for limit, window in zip(AI_QUOTAS[kind], (TEN_MINUTES, ONE_DAY)):
+            buckets.append(f"{kind}:{digest}")
+            limits.append(limit)
+            windows.append(window)
+    return buckets, limits, windows
+
+
+def _ai_quota_refusal(request: Request, claims: dict, context: dict | None) -> JSONResponse | None:
+    """Apply the shared caps; a quota-store outage lets the request through."""
+    household_id = str((context or {}).get("household_id") or "")
+    if not household_id:
+        return None
+    try:
+        result = consume_ai_quota(*_ai_quota_request(str(claims["sub"]), household_id, _client_ip(request)))
+    except PersistenceError:
+        # Fail open: a counter outage must not take Kitch down. The prepaid
+        # model budget and the per-instance throttle still bound the damage.
+        logger.warning("AI quota check unavailable; allowing request")
+        return None
+    if result.get("allowed"):
+        return None
+    retry_after = max(1, int(result.get("retry_after") or 60))
+    response = JSONResponse(status_code=429, content={"detail": {
+        "code": "ai_quota_exceeded",
+        "message": "You've reached Kitch's usage limit for now. Try again a little later.",
+        "retry_after": retry_after,
+    }})
+    response.headers["Retry-After"] = str(retry_after)
+    return response
 
 
 def _rate_limit_exceeded(key: str, maximum: int, window_seconds: int) -> bool:
@@ -630,6 +701,10 @@ async def persistence_postcondition(request: Request, call_next):
                 }})
                 response.headers["Retry-After"] = str(window_seconds)
                 return _security_headers(response)
+        if claims and _is_ai_request(request.url.path):
+            refusal = await asyncio.to_thread(_ai_quota_refusal, request, claims, context)
+            if refusal is not None:
+                return _security_headers(refusal)
         response = await call_next(request)
         raise_recorded_persistence_failure()
         if claims and upgraded_session_context is not None:

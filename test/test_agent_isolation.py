@@ -106,3 +106,14 @@ class AgentIsolationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentScopeTests(unittest.TestCase):
+    def test_every_chat_agent_carries_the_kitchen_scope_rule(self):
+        from app.agent import core
+        for agent in (core.kitch_coordinator, core.chef_planner, core.nutrition_tracker,
+                      core.recipe_grocery_planner, core.recipe_detail_agent):
+            self.assertTrue(agent.instruction.endswith(core.SCOPE_RULE), agent.name)
+        # Loose by design: food, nutrition and wellness talk stays welcome.
+        self.assertIn("nutrition questions and advice", core.SCOPE_RULE)
+        self.assertIn("When a request is borderline or you are unsure, help.", core.SCOPE_RULE)

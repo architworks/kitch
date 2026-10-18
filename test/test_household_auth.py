@@ -476,6 +476,7 @@ for module in (
                 yield event(final_text="Here you go.")
 
         patches = {
+            "consume_ai_quota": {"allowed": True},
             "get_household_account_context": household,
             "get_household_profile": {"household_size": 1},
             "get_or_create_session": None,
@@ -532,6 +533,81 @@ for module in (
     def test_instamart_cancellation_guidance_is_attributed_to_instamart(self):
         body = self._chat_with_tool_responses([], message="cancel my instamart order")
         self.assertEqual(body["provider_sources"], ["swiggy_instamart"])
+
+    def _post_with_quota(self, path, quota, json=None):
+        household, _, environment = self._consent_fixtures()
+        cookie = self._member_session(environment, household)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=household,
+        ), patch("app.main.get_household_profile", return_value={"household_size": 1}), patch(
+            "app.main.consume_ai_quota", **quota,
+        ) as consume:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.cookies.set("kitch_session", cookie)
+                response = client.post(path, json=json if json is not None else {})
+        return response, consume
+
+    def test_ai_requests_over_the_shared_cap_get_429_with_retry_after(self):
+        response, consume = self._post_with_quota(
+            "/api/chat", {"return_value": {"allowed": False, "retry_after": 120}},
+        )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json()["detail"]["code"], "ai_quota_exceeded")
+        self.assertEqual(response.headers["Retry-After"], "120")
+        consume.assert_called_once()
+
+    def test_ai_quota_counts_account_household_and_ip_without_raw_identifiers(self):
+        _, consume = self._post_with_quota(
+            "/api/grocery/providers/swiggy_instamart/checkout/sync",
+            {"return_value": {"allowed": False, "retry_after": 5}},
+        )
+        buckets, limits, windows = consume.call_args.args
+        self.assertEqual(sorted({b.split(":")[0] for b in buckets}), ["account", "household", "ip"])
+        self.assertEqual(len(buckets), 6)
+        self.assertEqual(sorted(set(windows)), [main.TEN_MINUTES, main.ONE_DAY])
+        for bucket in buckets:
+            self.assertNotIn("google-user-1", bucket)
+            self.assertNotIn("household-a", bucket)
+        self.assertTrue(all(limit > 0 for limit in limits))
+
+    def test_ai_quota_outage_lets_the_request_through(self):
+        # The real helper, with the database call failing underneath it.
+        from app import supabase_client
+        household, _, environment = self._consent_fixtures()
+        cookie = self._member_session(environment, household)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=household,
+        ), patch("app.main.consume_ai_quota", supabase_client.consume_ai_quota), patch.object(
+            supabase_client.supabase, "rpc", side_effect=ConnectionError("down"),
+        ) as rpc:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.cookies.set("kitch_session", cookie)
+                response = client.post("/api/upload-photo")
+        rpc.assert_called_once()
+        self.assertNotIn(response.status_code, {429, 503})
+
+    def test_non_ai_requests_do_not_touch_the_ai_quota(self):
+        _, consume = self._post_with_quota("/api/legal/consent", {"return_value": {"allowed": False}})
+        consume.assert_not_called()
+
+    def test_chat_input_is_capped_but_replies_are_not(self):
+        from app.schemas import ChatResponse, MAX_CHAT_MESSAGE_CHARS
+        response, _ = self._post_with_quota("/api/chat", {"return_value": {"allowed": True}}, json={
+            "message": "x" * (MAX_CHAT_MESSAGE_CHARS + 1), "active_user": "Owner",
+            "planner_context": {"visible_week_start": "", "selected_date": ""},
+            "pantry_stock": [], "grocery_list": [],
+        })
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(len(ChatResponse(text="y" * 20000).text), 20000)
+
+    def test_client_ip_comes_from_vercel_headers_only_on_vercel(self):
+        from starlette.requests import Request as StarletteRequest
+        scope = {"type": "http", "headers": [(b"x-vercel-forwarded-for", b"203.0.113.9")], "client": ("10.0.0.1", 1)}
+        with patch.dict(os.environ, {"VERCEL": "1"}):
+            self.assertEqual(main._client_ip(StarletteRequest(scope)), "203.0.113.9")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VERCEL", None)
+            self.assertEqual(main._client_ip(StarletteRequest(scope)), "10.0.0.1")
 
     def test_members_cannot_remove_anyone(self):
         household, _, environment = self._consent_fixtures()
