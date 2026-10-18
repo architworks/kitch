@@ -103,14 +103,6 @@ class AgentIsolationTests(unittest.TestCase):
         })
         self.assertNotIn("household-a:profile-a", service.user_state.get("kitch", {}))
 
-    def test_member_memory_cleanup_matches_full_and_first_names(self):
-        from app.agent.memory import _mentions
-
-        self.assertTrue(_mentions("Asha Rao is allergic to peanuts.", "Asha Rao"))
-        self.assertTrue(_mentions("Asha dislikes okra.", "Asha Rao"))
-        self.assertFalse(_mentions("Ashanti prefers basmati rice.", "Asha Rao"))
-        self.assertFalse(_mentions("The household likes dal.", "Asha Rao"))
-
 
 if __name__ == "__main__":
     unittest.main()

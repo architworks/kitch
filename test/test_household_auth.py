@@ -391,6 +391,56 @@ for module in (
                 self.assertEqual(client.post("/api/household/owner", json={"profile_id": "owner-a"}).status_code, 403)
         transfer.assert_not_called()
 
+    def test_owner_removes_a_member_who_joined_by_mistake(self):
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        owner_cookie = self._member_session(environment, household)
+        owner_context = {**household, "members": member["members"]}
+        purged = []
+
+        async def fake_purge(household_id, profile_ids):
+            purged.append((household_id, list(profile_ids)))
+            return 1
+
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=owner_context,
+        ), patch(
+            "app.main.remove_household_member",
+            return_value={"removed_profile_id": "member-b", "had_account": True, "profile_removed": True},
+        ) as remove, patch("app.main._purge_agent_state", side_effect=fake_purge):
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", owner_cookie)
+                removed = client.delete("/api/household/members/member-b")
+                self.assertEqual(removed.status_code, 200)
+        remove.assert_called_once_with("google-user-1", "member-b")
+        self.assertEqual(purged, [("household-a", ["member-b"])])
+
+    def test_members_cannot_remove_anyone(self):
+        household, _, environment = self._consent_fixtures()
+        member = self._member_fixture(household)
+        cookie = self._member_session(environment, member)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=member,
+        ), patch("app.main.remove_household_member") as remove:
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", cookie)
+                self.assertEqual(client.delete("/api/household/members/owner-a").status_code, 403)
+        remove.assert_not_called()
+
+    def test_member_removal_explains_what_cannot_be_removed(self):
+        household, _, environment = self._consent_fixtures()
+        owner_cookie = self._member_session(environment, household)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=household,
+        ), patch(
+            "app.main.remove_household_member", side_effect=main.MemberRemovalError("household_anchor"),
+        ):
+            with TestClient(app) as client:
+                client.cookies.set("kitch_session", owner_cookie)
+                refused = client.delete("/api/household/members/owner-a")
+                self.assertEqual(refused.status_code, 422)
+                self.assertEqual(refused.json()["detail"]["code"], "household_anchor")
+
     def test_stale_invite_link_explains_itself(self):
         _, claims, environment = self._consent_fixtures()
         with patch.dict(os.environ, environment), patch(

@@ -406,6 +406,29 @@ GRANT EXECUTE ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT,
 -- Deleting the account row first lets the household cascade remove every
 -- profile and its plans, pantry, carts, diary, provider tokens and drafts
 -- (household_accounts.owner_profile_id is ON DELETE RESTRICT).
+CREATE UNIQUE INDEX IF NOT EXISTS profiles_household_name_unique
+    ON public.profiles(household_id, lower(btrim(full_name)));
+
+CREATE OR REPLACE FUNCTION public.remove_member_profile(p_profile_id UUID, p_anchor_profile_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF p_profile_id = p_anchor_profile_id THEN
+        DELETE FROM public.macro_diary WHERE profile_id = p_profile_id;
+        DELETE FROM public.nutrition_targets WHERE profile_id = p_profile_id;
+        INSERT INTO public.nutrition_targets(profile_id) VALUES (p_profile_id);
+        RETURN FALSE;
+    END IF;
+    DELETE FROM public.profiles WHERE id = p_profile_id;
+    RETURN TRUE;
+END;
+$$;
+
+-- Owners delete the whole household; members delete their own login and
+-- personal data.
 CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -413,15 +436,94 @@ SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-    v_household_id UUID;
+    account public.household_accounts%ROWTYPE;
 BEGIN
-    DELETE FROM public.household_accounts
-    WHERE google_subject = p_google_subject
-    RETURNING household_id INTO v_household_id;
-    IF v_household_id IS NULL THEN
+    SELECT * INTO account FROM public.household_accounts WHERE google_subject = p_google_subject;
+    IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
-    DELETE FROM public.households WHERE id = v_household_id;
+    IF account.role = 'owner' THEN
+        DELETE FROM public.household_accounts WHERE household_id = account.household_id;
+        DELETE FROM public.households WHERE id = account.household_id;
+    ELSE
+        DELETE FROM public.household_accounts WHERE google_subject = p_google_subject;
+        PERFORM public.remove_member_profile(account.profile_id, account.owner_profile_id);
+    END IF;
+    RETURN TRUE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.remove_household_member(
+    p_google_subject TEXT,
+    p_profile_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    account public.household_accounts%ROWTYPE;
+    v_has_account BOOLEAN;
+    v_profile_removed BOOLEAN;
+BEGIN
+    SELECT * INTO account FROM public.household_accounts
+    WHERE google_subject = p_google_subject FOR UPDATE;
+    IF NOT FOUND OR account.role <> 'owner' THEN
+        RAISE EXCEPTION 'owner_required' USING ERRCODE = '42501';
+    END IF;
+    IF p_profile_id = account.profile_id THEN
+        RAISE EXCEPTION 'cannot_remove_self' USING ERRCODE = '22023';
+    END IF;
+    PERFORM 1 FROM public.profiles
+    WHERE id = p_profile_id AND household_id = account.household_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'member_not_found' USING ERRCODE = 'P0002';
+    END IF;
+    SELECT EXISTS (SELECT 1 FROM public.household_accounts WHERE profile_id = p_profile_id)
+    INTO v_has_account;
+    IF p_profile_id = account.owner_profile_id AND NOT v_has_account THEN
+        -- The anchor holds the household's shared data and has nobody signed in.
+        RAISE EXCEPTION 'household_anchor' USING ERRCODE = '22023';
+    END IF;
+
+    DELETE FROM public.household_accounts
+    WHERE profile_id = p_profile_id AND household_id = account.household_id;
+    v_profile_removed := public.remove_member_profile(p_profile_id, account.owner_profile_id);
+
+    RETURN jsonb_build_object(
+        'removed_profile_id', p_profile_id,
+        'had_account', v_has_account,
+        'profile_removed', v_profile_removed,
+        'household', public.household_account_context(p_google_subject)
+    );
+END;
+$$;
+REVOKE ALL ON FUNCTION public.remove_member_profile(UUID, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remove_member_profile(UUID, UUID) TO service_role;
+REVOKE ALL ON FUNCTION public.remove_household_member(TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.remove_household_member(TEXT, UUID) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    account public.household_accounts%ROWTYPE;
+BEGIN
+    SELECT * INTO account FROM public.household_accounts WHERE google_subject = p_google_subject;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    IF account.role = 'owner' THEN
+        DELETE FROM public.household_accounts WHERE household_id = account.household_id;
+        DELETE FROM public.households WHERE id = account.household_id;
+    ELSE
+        DELETE FROM public.household_accounts WHERE google_subject = p_google_subject;
+        PERFORM public.remove_member_profile(account.profile_id, account.owner_profile_id);
+    END IF;
     RETURN TRUE;
 END;
 $$;
@@ -640,6 +742,8 @@ DECLARE
     v_timezone TEXT;
     v_name TEXT;
     v_order INTEGER;
+    v_base TEXT;
+    v_suffix INTEGER;
 BEGIN
     IF NULLIF(btrim(p_google_subject), '') IS NULL OR NULLIF(btrim(p_email), '') IS NULL THEN
         RAISE EXCEPTION 'verified Google subject and email are required' USING ERRCODE = '22023';
@@ -676,12 +780,18 @@ BEGIN
         END IF;
     ELSE
         v_name := COALESCE(NULLIF(btrim(p_display_name), ''), split_part(p_email, '@', 1));
-        IF EXISTS (
+        -- Names stay unique within a household, so nobody's nutrition log is
+        -- ever confused with another member's: add the email name, then a number.
+        v_base := v_name;
+        v_suffix := 0;
+        WHILE EXISTS (
             SELECT 1 FROM public.profiles p
             WHERE p.household_id = v_household_id AND lower(btrim(p.full_name)) = lower(btrim(v_name))
-        ) THEN
-            v_name := v_name || ' (' || split_part(p_email, '@', 1) || ')';
-        END IF;
+        ) LOOP
+            v_suffix := v_suffix + 1;
+            v_name := v_base || ' (' || split_part(p_email, '@', 1)
+                || CASE WHEN v_suffix > 1 THEN ' ' || v_suffix ELSE '' END || ')';
+        END LOOP;
         SELECT COALESCE(max(p.member_order), 0) + 1 INTO v_order
         FROM public.profiles p WHERE p.household_id = v_household_id;
         INSERT INTO public.profiles(

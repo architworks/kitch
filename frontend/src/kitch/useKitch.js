@@ -662,6 +662,26 @@ export function useKitch() {
     });
   }, []);
 
+  const removeMember = useCallback((member) => {
+    setMemberEditorOpen(false);
+    const signedIn = member.role === "member";
+    setConfirmationDialog({
+      title: `Remove ${member.value} from the household?`,
+      message: signedIn
+        ? `${member.value} loses access straight away and their nutrition log is deleted. Shared plans, pantry and lists stay. To let them back in, send a new invite link.`
+        : `${member.value} and their nutrition log are deleted. Shared plans, pantry and lists stay.`,
+      confirmLabel: "Remove member",
+      onConfirm: async () => {
+        const res = await apiFetch(apiUrl(`/api/household/members/${encodeURIComponent(member.id)}`), {
+          method: "DELETE",
+          credentials: "include"
+        });
+        await requireSuccessfulResponse(res);
+        window.location.reload();
+      }
+    });
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       const response = await apiFetch(apiUrl("/api/auth/logout"), {
@@ -2799,6 +2819,7 @@ export function useKitch() {
     isHouseholdOwner,
     memberOrderStatus,
     transferOwnership,
+    removeMember,
     submitHouseholdSetup,
     finishHouseholdSetup,
     pendingHouseholdName,

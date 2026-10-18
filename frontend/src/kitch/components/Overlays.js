@@ -147,6 +147,9 @@ export function MemberDialog({ k, go }) {
                   {k.authState.required && k.isHouseholdOwner && member.role === "member" && (
                     <button type="button" className="btn quiet sm" onClick={() => k.transferOwnership(member)}>Make owner</button>
                   )}
+                  {k.authState.required && k.isHouseholdOwner && member.role !== "owner" && (
+                    <button type="button" className="btn danger sm" onClick={() => k.removeMember(member)}>Remove</button>
+                  )}
                 </div>
               </li>
             );

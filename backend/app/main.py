@@ -52,6 +52,8 @@ from app.storage import (
     delete_household_account,
     get_household_account_context,
     OwnershipTransferError,
+    MemberRemovalError,
+    remove_household_member,
     transfer_household_ownership,
     get_household_invite,
     get_invite_preview,
@@ -852,6 +854,33 @@ async def transfer_household_ownership_endpoint(payload: Dict[str, Any]):
     return {"household": household}
 
 
+MEMBER_REMOVAL_MESSAGES = {
+    "owner_required": (403, "Only the household owner can remove members."),
+    "cannot_remove_self": (422, "You can't remove yourself. Hand over ownership, then leave, or delete the household."),
+    "member_not_found": (404, "That member is not in this household."),
+    "household_anchor": (422, "This name holds the household's shared plans and pantry, so it can't be removed. You can rename it instead."),
+}
+
+
+@app.delete("/api/household/members/{member_id}")
+async def remove_household_member_endpoint(member_id: str):
+    """Owner removes another member, for example someone who joined by mistake.
+
+    Their sign-in stops working on the next request and their personal
+    nutrition log is deleted; the shared plans, pantry and lists stay.
+    """
+    identity = _require_owner("remove members")
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Member removal applies to hosted Kitch only.")
+    try:
+        result = await asyncio.to_thread(remove_household_member, identity.google_subject, member_id)
+    except MemberRemovalError as error:
+        status, message = MEMBER_REMOVAL_MESSAGES[error.code]
+        raise HTTPException(status_code=status, detail={"code": error.code, "message": message}) from error
+    await _purge_agent_state(identity.household_id, [member_id])
+    return result
+
+
 @app.get("/api/invites/{token}")
 async def invite_preview_endpoint(token: str):
     """Public: who is inviting, and which members are still unclaimed."""
@@ -871,17 +900,11 @@ async def delete_account_endpoint():
         raise HTTPException(status_code=404, detail="Account deletion applies to hosted Kitch only.")
     identity = require_identity()
     if not identity.is_owner:
-        member_name = next(
-            (member["name"] for member in identity.members if member["id"] == identity.profile_id), "",
-        )
         deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
-        # The leaving member's chat history, and the shared household
-        # memories that name them, go with their profile.
+        # The leaving member's chat history goes with their profile. Household
+        # memory holds shared kitchen preferences only, so it stays.
         await _purge_agent_state(identity.household_id, [identity.profile_id])
-        memory = await _memory_runtime().forget_member_memories(
-            identity.owner_profile_id, member_name,
-        )
-        response = JSONResponse({"deleted": deleted, "memory": memory})
+        response = JSONResponse({"deleted": deleted, "memory": "kept_for_household"})
         clear_session_cookie(response)
         return response
     for provider_id in ("swiggy_instamart",):

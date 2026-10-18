@@ -719,6 +719,35 @@ def transfer_household_ownership(google_subject: str, new_owner_profile_id: str)
     return data
 
 
+class MemberRemovalError(ValueError):
+    """A member removal the owner can understand and fix."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def remove_household_member(google_subject: str, profile_id: str) -> Dict[str, Any]:
+    """Owner removes another member; returns what was removed and the new context."""
+    try:
+        response = supabase.rpc("remove_household_member", {
+            "p_google_subject": google_subject,
+            "p_profile_id": profile_id,
+        }).execute()
+    except Exception as error:
+        message = str(getattr(error, "message", "") or error)
+        for code in ("owner_required", "cannot_remove_self", "member_not_found", "household_anchor"):
+            if code in message:
+                raise MemberRemovalError(code) from error
+        raise persistence_error_from_exception(
+            "remove_household_member", "household_accounts,profiles", error,
+        ) from error
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict):
+        raise malformed_persistence_response("remove_household_member", "household_accounts,profiles")
+    return data
+
+
 def complete_household_setup(
     google_subject: str,
     owner_name: str,

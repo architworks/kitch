@@ -419,59 +419,6 @@ async def purge_household_memory(user_id: str) -> str:
     return "purged"
 
 
-def _mentions(text: str, name: str) -> bool:
-    """True when the member's full name or first name appears as a whole word.
-
-    Memory Bank often shortens "Asha Rao" to "Asha" when it consolidates facts.
-    """
-    import re
-
-    names = {name.strip()}
-    first = name.strip().split()[0] if name.strip() else ""
-    if len(first) >= 3:
-        names.add(first)
-    return any(
-        re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", text or "", re.IGNORECASE)
-        for candidate in names if candidate
-    )
-
-
-async def forget_member_memories(user_id: str, member_name: str) -> str:
-    """Delete household memories that mention a member who is leaving.
-
-    Household memory is free text shared by everyone in the household, so a
-    departing member's facts are found by name. Returns ``forgot_<n>``,
-    ``skipped`` or ``failed``.
-    """
-    name = str(member_name or "").strip()
-    if memory_runtime.backend != "vertex" or not memory_runtime.configured or not name:
-        return "skipped"
-    service = memory_runtime.service
-    memories = service._get_api_client().agent_engines.memories
-    started = time.perf_counter()
-    forgotten = 0
-    try:
-        retrieved = await memories.retrieve(
-            name="reasoningEngines/" + service._agent_engine_id,
-            scope={"app_name": MEMORY_APP_NAME, "user_id": user_id},
-            simple_retrieval_params={"page_size": 100},
-        )
-        matching = [
-            item.memory.name
-            async for item in retrieved
-            if item.memory and _mentions(item.memory.fact or "", name)
-        ]
-        for memory_name in matching:
-            await memories.delete(name=memory_name)
-            forgotten += 1
-    except Exception:
-        _log_operation("forget_member", memory_runtime.backend, "failed", started)
-        logger.exception("Memory Bank member cleanup failed")
-        return "failed"
-    _log_operation("forget_member", memory_runtime.backend, "success", started)
-    return f"forgot_{forgotten}"
-
-
 def _log_operation(operation: str, backend: str, outcome: str, started: float) -> None:
     logger.info(
         "memory_operation operation=%s backend=%s outcome=%s latency_ms=%d",
