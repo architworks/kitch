@@ -6,6 +6,7 @@ results remain valid, but writes must return provider-confirmed rows.
 
 from __future__ import annotations
 
+import logging
 import json
 import math
 import os
@@ -38,6 +39,8 @@ from app.planning_calendar import (
     monday_for,
     parse_iso_date,
 )
+
+logger = logging.getLogger("kitch.storage")
 
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -670,6 +673,29 @@ def consume_ai_quota(buckets: list[str], limits: list[int], windows: list[int]) 
             supabase_code="invalid_persistence_response", retryable=False,
         )
     return data
+
+
+def record_usage_event(row: Dict[str, Any]) -> None:
+    """Store one usage-metrics row. Failures are logged, never raised or recorded."""
+    try:
+        supabase.table("usage_events").insert(row).execute()
+    except Exception as error:  # metrics must never break a request
+        logger.warning("Usage metrics write failed: %s", type(error).__name__)
+
+
+def delete_usage_events(*, household_key: str | None = None, user_key: str | None = None) -> None:
+    """Remove usage metrics for a deleted household or a departing member.
+
+    Failures are logged, never raised: deletion of the account must not fail
+    over metrics, and the rows expire within 90 days anyway.
+    """
+    column, value = ("household_key", household_key) if household_key else ("user_key", user_key)
+    if not value:
+        return
+    try:
+        supabase.table("usage_events").delete().eq(column, value).execute()
+    except Exception as error:  # rows expire within 90 days regardless
+        logger.warning("Usage metrics deletion failed: %s", type(error).__name__)
 
 
 def get_household_account_context(google_subject: str) -> Dict[str, Any] | None:

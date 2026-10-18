@@ -25,8 +25,10 @@ async function setup(t, mode) {
     .split('CREATE EXTENSION IF NOT EXISTS pg_cron;')[0];
   await db.exec(schema);
   if (mode === 'upgrade') {
-    const migration = await readFile(new URL('migrations/20261023_ai_usage_quota.sql', database), 'utf8');
-    await db.exec(withoutCron(migration).replace("NOTIFY pgrst, 'reload schema';", ''));
+    for (const name of ['20261023_ai_usage_quota.sql', '20261024_usage_events.sql']) {
+      const migration = await readFile(new URL(`migrations/${name}`, database), 'utf8');
+      await db.exec(withoutCron(migration).replace("NOTIFY pgrst, 'reload schema';", ''));
+    }
   }
   await db.exec('SET ROLE service_role');
   return db;
@@ -87,4 +89,26 @@ for (const mode of ['fresh', 'upgrade']) {
       assert.deepEqual(grants, { t: false, f: false });
     }
   });
+
+  test(`${mode}: usage events hold names and numbers only, and stay private`, { skip }, async t => {
+    const db = await setup(t, mode);
+    const columns = (await db.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'usage_events' ORDER BY column_name",
+    )).rows.map(r => r.column_name);
+    assert.deepEqual(columns, ['duration_ms', 'features', 'first_response_ms', 'household_key', 'id', 'input_tokens',
+      'kind', 'model_calls', 'occurred_at', 'outcome', 'output_tokens', 'user_key']);
+    await db.query(`INSERT INTO usage_events (user_key, household_key, kind, features, outcome, duration_ms)
+      VALUES ('u', 'h', 'chat', '{chat,grocery_app}', 'ok', 1200)`);
+    await assert.rejects(db.query(`INSERT INTO usage_events (user_key, household_key, kind, outcome, duration_ms)
+      VALUES ('u', 'h', 'browse_swiggy', 'ok', 1)`), /check constraint/);
+    await assert.rejects(db.query(`INSERT INTO usage_events (user_key, household_key, kind, outcome, duration_ms)
+      VALUES ('u', 'h', 'chat', 'ok', -1)`), /check constraint/);
+    const rls = (await db.query("SELECT relrowsecurity FROM pg_class WHERE relname = 'usage_events'")).rows[0];
+    assert.equal(rls.relrowsecurity, true);
+    for (const role of ['anon', 'authenticated']) {
+      const r = (await db.query("SELECT has_table_privilege($1, 'public.usage_events', 'SELECT') AS s, has_table_privilege($1, 'public.usage_events', 'INSERT') AS i", [role])).rows[0];
+      assert.deepEqual(r, { s: false, i: false });
+    }
+  });
 }
+

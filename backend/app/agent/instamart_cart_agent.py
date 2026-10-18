@@ -19,6 +19,7 @@ from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.genai.types import Content, Part
 
 from app.agent.run_limits import RUN_LIMIT_MESSAGE, RUN_TIMEOUT_SECONDS, is_run_limit_error, limited_run_config
+from app.usage_metrics import note_agent_event
 
 from app.commerce_policy import (
     CommercePermission,
@@ -317,6 +318,7 @@ class InstamartCartAgentService:
                         new_message=prompt,
                         run_config=limited_run_config(),
                     ):
+                        note_agent_event(event)
                         if event.is_final_response() and event.content and event.content.parts:
                             final_text = str(event.content.parts[0].text or "")
         except CommercePolicyError as exc:
@@ -446,6 +448,7 @@ class InstamartCartAgentService:
                         new_message=Content(role="user", parts=[Part(text=request)]),
                         run_config=limited_run_config(),
                     ):
+                        note_agent_event(event)
                         if event.is_final_response() and event.content and event.content.parts:
                             final_text = str(event.content.parts[0].text or "")
         except CommercePolicyError as exc:

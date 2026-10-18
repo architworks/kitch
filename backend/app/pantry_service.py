@@ -17,6 +17,7 @@ from app.agent.run_limits import (
     limited_run_config,
 )
 from app.agent.structured_models import PantryReconciliation
+from app.usage_metrics import note_agent_event
 from app.household_config import get_household_profile_id
 from app.storage import (
     apply_pantry_inventory_change,
@@ -104,6 +105,7 @@ async def _reconcile_with_agent(
                 new_message=Content(parts=[Part(text=prompt)], role="user"),
                 run_config=limited_run_config(),
             ):
+                note_agent_event(event)
                 if event.is_final_response() and event.content and event.content.parts:
                     text = event.content.parts[0].text or ""
     except Exception as error:

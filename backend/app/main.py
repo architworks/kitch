@@ -21,6 +21,7 @@ from collections import defaultdict, deque
 
 from app.schemas import ChatRequest, ChatResponse
 from app.agent.run_limits import RUN_LIMIT_MESSAGE, RUN_TIMEOUT_SECONDS, is_run_limit_error, limited_run_config
+from app.usage_metrics import end_usage, mark_outcome, note_agent_event, pseudonym, start_usage, usage_row
 from app.agent.structured_models import PhotoAnalysis
 from app.planning_calendar import dates_between, household_zone, parse_iso_date
 from app.providers.base import ProviderOperationError
@@ -53,6 +54,8 @@ from app.storage import (
     delete_household_account,
     get_household_account_context,
     consume_ai_quota,
+    delete_usage_events,
+    record_usage_event,
     OwnershipTransferError,
     MemberRemovalError,
     remove_household_member,
@@ -216,6 +219,24 @@ AI_QUOTAS = {
     "household": (60, 150),
     "ip": (90, 200),
 }
+
+
+def _ai_request_kind(path: str) -> str:
+    if path == "/api/chat":
+        return "chat"
+    if path == "/api/upload-photo":
+        return "photo"
+    if path == "/api/grocery-cart/reconcile-pantry":
+        return "pantry_reconcile"
+    return "grocery_cart_build"
+
+
+def _record_usage(collector, status_code: int, claims: dict, context: dict | None) -> None:
+    user_key = pseudonym("account", str(claims.get("sub") or ""))
+    household_key = pseudonym("household", str((context or {}).get("household_id") or ""))
+    if collector is None or not user_key or not household_key:
+        return
+    record_usage_event(usage_row(collector, status_code, user_key, household_key))
 
 
 def _is_ai_request(path: str) -> bool:
@@ -703,11 +724,22 @@ async def persistence_postcondition(request: Request, call_next):
                 }})
                 response.headers["Retry-After"] = str(window_seconds)
                 return _security_headers(response)
+        usage_token = None
         if claims and _is_ai_request(request.url.path):
+            usage_token = start_usage(_ai_request_kind(request.url.path))
             refusal = await asyncio.to_thread(_ai_quota_refusal, request, claims, context)
             if refusal is not None:
+                await asyncio.to_thread(_record_usage, end_usage(usage_token), refusal.status_code, claims, context)
                 return _security_headers(refusal)
-        response = await call_next(request)
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        finally:
+            if usage_token is not None:
+                # Awaited, not fire-and-forget: a serverless function may be
+                # frozen once the response is sent.
+                await asyncio.to_thread(_record_usage, end_usage(usage_token), status_code, claims, context)
         raise_recorded_persistence_failure()
         if claims and upgraded_session_context is not None:
             set_session_cookie(
@@ -992,6 +1024,11 @@ async def invite_preview_endpoint(token: str):
     return preview
 
 
+async def _delete_usage_metrics(**keys: str | None) -> None:
+    """Usage metrics leave with the account; a failure never blocks deletion."""
+    await asyncio.to_thread(delete_usage_events, **keys)
+
+
 @app.delete("/api/account")
 async def delete_account_endpoint():
     """Owners delete the whole household and its memory; members leave it."""
@@ -1000,6 +1037,7 @@ async def delete_account_endpoint():
     identity = require_identity()
     if not identity.is_owner:
         deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
+        await _delete_usage_metrics(user_key=pseudonym("account", identity.google_subject))
         # The leaving member's chat history goes with their profile. Household
         # memory holds shared kitchen preferences only, so it stays.
         await _purge_agent_state(identity.household_id, [identity.profile_id])
@@ -1015,6 +1053,7 @@ async def delete_account_endpoint():
                 logger.exception("Provider disconnect failed during account deletion")
     memory = await _memory_runtime().purge_household_memory(identity.owner_profile_id)
     deleted = await asyncio.to_thread(delete_household_account, identity.google_subject)
+    await _delete_usage_metrics(household_key=pseudonym("household", identity.household_id))
     await _purge_agent_state(
         identity.household_id, [member["id"] for member in identity.members],
     )
@@ -1098,6 +1137,7 @@ async def chat_endpoint(payload: ChatRequest):
                 new_message=user_message,
                 run_config=limited_run_config(),
             ):
+                note_agent_event(event)
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         function_response = getattr(part, "function_response", None)
@@ -1199,6 +1239,7 @@ async def chat_endpoint(payload: ChatRequest):
     except Exception as error:
         if is_run_limit_error(error):
             logger.warning("Chat run stopped at its limit: %s", type(error).__name__)
+            mark_outcome("limit")
             return ChatResponse(text=RUN_LIMIT_MESSAGE, action=None)
         logger.exception("Chat execution failed")
         raise HTTPException(status_code=500, detail={
@@ -1255,6 +1296,7 @@ async def upload_photo_endpoint(
                     )], role="user"),
                     run_config=limited_run_config(),
                 ):
+                    note_agent_event(event)
                     if event.is_final_response() and event.content and event.content.parts:
                         analysis_text = event.content.parts[0].text or ""
         finally:
@@ -1317,6 +1359,7 @@ async def upload_photo_endpoint(
                 new_message=Content(parts=[Part(text=dispatch_prompt)], role="user"),
                 run_config=limited_run_config(),
             ):
+                note_agent_event(event)
                 if event.is_final_response() and event.content and event.content.parts:
                     result_text = event.content.parts[0].text or ""
 

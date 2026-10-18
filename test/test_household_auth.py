@@ -25,6 +25,12 @@ from app.sqlite_supabase import SQLiteKitchClient
 
 
 class HostedSessionTests(unittest.TestCase):
+    def setUp(self):
+        # Tests never write usage metrics to a real database.
+        recorder = patch("app.main.record_usage_event")
+        self.recorded_usage = recorder.start()
+        self.addCleanup(recorder.stop)
+
     def test_session_check_does_not_initialize_agent_or_checkout_runtime(self):
         backend_dir = Path(__file__).resolve().parents[1] / "backend"
         script = """
@@ -621,6 +627,28 @@ for module in (
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VERCEL", None)
             self.assertEqual(main._client_ip(StarletteRequest(scope)), "10.0.0.1")
+
+    def test_ai_request_records_one_content_free_usage_row(self):
+        self._chat_with_tool_responses([
+            {"status": "success", "provider": "swiggy_instamart", "items": [{"name": "Amul Milk"}]},
+        ], message="plan paneer for Tuesday")
+        self.assertEqual(self.recorded_usage.call_count, 1)
+        row = self.recorded_usage.call_args.args[0]
+        self.assertEqual(set(row), {
+            "user_key", "household_key", "kind", "features", "outcome", "duration_ms",
+            "first_response_ms", "model_calls", "input_tokens", "output_tokens",
+        })
+        self.assertEqual((row["kind"], row["outcome"]), ("chat", "ok"))
+        flat = repr(row).lower()
+        for private in ("paneer", "amul", "google-user-1", "household-a", "swiggy", "instamart"):
+            self.assertNotIn(private, flat)
+
+    def test_quota_refusals_are_recorded_and_other_requests_are_not(self):
+        self._post_with_quota("/api/chat", {"return_value": {"allowed": False, "retry_after": 9}})
+        self.assertEqual(self.recorded_usage.call_args.args[0]["outcome"], "quota")
+        self.recorded_usage.reset_mock()
+        self._post_with_quota("/api/legal/consent", {"return_value": {"allowed": True}})
+        self.recorded_usage.assert_not_called()
 
     def test_members_cannot_remove_anyone(self):
         household, _, environment = self._consent_fixtures()

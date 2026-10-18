@@ -1,4 +1,6 @@
 import { Bricolage_Grotesque, Figtree } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import "../kitch/styles/shell.css";
 import "../kitch/styles/household.css";
@@ -43,6 +45,9 @@ export default function RootLayout({ children }) {
     <html lang="en" className={`${display.variable} ${ui.variable}`}>
       <body suppressHydrationWarning>
         {children}
+        {/* Anonymous page views and page-load metrics; no cookies, no personal data. */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
