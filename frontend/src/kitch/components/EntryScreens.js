@@ -82,7 +82,7 @@ function ConsentNotice({ k, compact = false }) {
         <ul className="consent-list">
           <li><strong>What Kitch keeps:</strong> your Google name and email, household member names, meal plans, recipes, pantry and shopping lists, and the messages you send.</li>
           <li><strong>Health-related data:</strong> each member’s nutrition logs and meal or fridge photos. Everyone in the household can see these.</li>
-          <li><strong>Grocery orders:</strong> carts and delivery addresses, only if you connect Swiggy Instamart. Kitch never sees payment details.</li>
+          <li><strong>Grocery orders:</strong> carts and delivery addresses, only if the household connects a grocery app. Kitch never sees payment details.</li>
           <li><strong>Why:</strong> only to plan, cook, shop and log for your household. No ads, no selling data.</li>
           <li><strong>Who processes it:</strong> Google (Sign-In and Gemini AI), Supabase and Vercel, and Swiggy for orders you approve.</li>
           <li><strong>Your control:</strong> delete everything any time from Household settings, or write in to see or correct your data.</li>

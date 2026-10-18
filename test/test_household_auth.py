@@ -5,7 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -450,6 +450,88 @@ for module in (
                     "pantry_stock": [], "grocery_list": [],
                 })
                 self.assertEqual(response.status_code, 422)
+
+    def _chat_with_tool_responses(self, tool_responses, message="what's in my cart?"):
+        """Run one chat turn whose agent returns the given tool responses."""
+        from contextlib import ExitStack
+        from types import SimpleNamespace
+
+        household, _, environment = self._consent_fixtures()
+        cookie = self._member_session(environment, household)
+
+        def event(response=None, final_text=None):
+            part = SimpleNamespace(
+                function_response=SimpleNamespace(response=response) if response is not None else None,
+                text=final_text,
+            )
+            return SimpleNamespace(
+                content=SimpleNamespace(parts=[part]),
+                is_final_response=lambda: final_text is not None,
+            )
+
+        class Runner:
+            async def run_async(self, **_):
+                for response in tool_responses:
+                    yield event(response=response)
+                yield event(final_text="Here you go.")
+
+        patches = {
+            "get_household_account_context": household,
+            "get_household_profile": {"household_size": 1},
+            "get_or_create_session": None,
+            "get_meal_plan_snapshot": {},
+            "get_pantry_stock": [],
+            "get_grocery_cart": [],
+            "get_macro_diary": [],
+            "get_latest_recipe_grocery_plan_metadata": None,
+            "get_provider_checkout_draft": None,
+            "requested_confirmation": None,
+        }
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(os.environ, environment))
+            for name, value in patches.items():
+                target = f"app.main.{name}"
+                if name == "get_or_create_session":
+                    stack.enter_context(patch(target, AsyncMock(return_value=None)))
+                else:
+                    stack.enter_context(patch(target, return_value=value))
+            stack.enter_context(patch("app.main.runner", Runner()))
+            stack.enter_context(patch(
+                "app.main.provider_registry.descriptor",
+                return_value={"environment": "production"},
+            ))
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.cookies.set("kitch_session", cookie)
+                response = client.post("/api/chat", json={
+                    "message": message, "active_user": "Owner",
+                    "planner_context": {"visible_week_start": "", "selected_date": ""},
+                    "pantry_stock": [], "grocery_list": [],
+                })
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_chat_reply_names_the_grocery_app_whose_content_it_carries(self):
+        body = self._chat_with_tool_responses([
+            {"status": "success", "provider": "swiggy_instamart", "items": []},
+        ])
+        self.assertEqual(body["provider_sources"], ["swiggy_instamart"])
+
+    def test_chat_reply_without_grocery_app_content_has_no_attribution(self):
+        body = self._chat_with_tool_responses([
+            {"status": "success", "pantry": []},
+            {"status": "error", "provider": "swiggy_instamart", "code": "provider_auth_required"},
+        ])
+        self.assertEqual(body["provider_sources"], [])
+
+    def test_chat_reply_attributes_another_grocery_app_only_to_itself(self):
+        body = self._chat_with_tool_responses([
+            {"status": "success", "provider": "zepto", "items": []},
+        ])
+        self.assertEqual(body["provider_sources"], ["zepto"])
+
+    def test_instamart_cancellation_guidance_is_attributed_to_instamart(self):
+        body = self._chat_with_tool_responses([], message="cancel my instamart order")
+        self.assertEqual(body["provider_sources"], ["swiggy_instamart"])
 
     def test_members_cannot_remove_anyone(self):
         household, _, environment = self._consent_fixtures()

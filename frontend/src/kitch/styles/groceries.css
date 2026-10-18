@@ -215,6 +215,6 @@
 .order-help { margin-top: 6px; font-size: 13.5px; }
 
 /* Attribution required by Swiggy's brand guidelines */
-.powered-by { display: inline-flex; align-items: center; gap: 8px; margin: 2px 0 6px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.powered-by { display: inline-flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
 .powered-by img { width: 24px; height: 24px; border-radius: 6px; }
 .totals .unitemised dt, .totals .unitemised dd { color: var(--turmeric-ink); }

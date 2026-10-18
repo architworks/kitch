@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List
 
 from app.providers.base import (
     GroceryProviderAdapter,
+    ProviderAttribution,
     ProviderCapabilities,
     ProviderDescriptor,
     ProviderOperationError,
@@ -294,6 +295,9 @@ class InstamartProviderAdapter(GroceryProviderAdapter):
                 order_tracking=True,
             ),
             theme={"start": "#ff7f22", "end": "#d84b10"},
+            # Swiggy's brand guidelines: the square logo with "Powered by
+            # Instamart" wherever Instamart content appears, chat included.
+            attribution=ProviderAttribution(text="Powered by Instamart"),
         )
 
     def _client_for_request(self) -> McpProviderClient:

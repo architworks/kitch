@@ -198,6 +198,10 @@ class InstamartProviderTests(unittest.TestCase):
         adapter.enabled = True
         return adapter
 
+    def test_instamart_declares_its_required_attribution(self):
+        descriptor = self.adapter().descriptor().as_dict()
+        self.assertEqual(descriptor["attribution"], {"text": "Powered by Instamart"})
+
     def test_bill_lines_are_kept_exactly_as_swiggy_returns_them(self):
         summary = self.adapter()._cart_summary({
             "cartTotalAmount": 200,

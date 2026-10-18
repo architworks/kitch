@@ -70,6 +70,8 @@
 .receipt span { flex: 1; }
 .receipt button { padding: 5px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--sage-2); font-weight: 650; font-size: 13px; color: var(--green); }
 .receipt button:hover { background: #fff; }
+.reply-attribution { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.reply-attribution .powered-by { margin: 0; }
 
 .typing { display: flex; gap: 5px; padding: 14px 16px; }
 .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); animation: typing 1.2s infinite ease-in-out; }

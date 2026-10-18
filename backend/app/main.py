@@ -27,7 +27,7 @@ from app.providers.instamart import (
     InstamartProviderAdapter,
     instamart_cancellation_guidance,
 )
-from app.providers.registry import provider_registry
+from app.providers.registry import ProviderRegistry, provider_registry
 from app.household_config import AmbiguousMemberNameError, canonical_user_name, get_user_id
 from app.auth import (
     HouseholdIdentity,
@@ -316,6 +316,23 @@ def _confirmation_action_from_tool_response(value: Any, depth: int = 0) -> Dict[
         if nested:
             return nested
     return None
+
+
+CHAT_PROVIDER_IDS = ("zepto", "swiggy_instamart")
+
+
+def _provider_source_from_tool_response(value: Any, depth: int = 0) -> str:
+    """Name the grocery provider whose content a successful tool response carries."""
+    if depth > 3 or not isinstance(value, dict):
+        return ""
+    provider_id = ProviderRegistry.canonical_id(str(value.get("provider") or ""))
+    if provider_id in CHAT_PROVIDER_IDS and value.get("status") != "error":
+        return provider_id
+    for key in ("result", "response", "output", "data"):
+        nested = _provider_source_from_tool_response(value.get(key), depth + 1)
+        if nested:
+            return nested
+    return ""
 
 
 async def delete_past_meal_plans_at_household_midnight() -> None:
@@ -962,7 +979,11 @@ async def chat_endpoint(payload: ChatRequest):
 
         cancellation_guidance = instamart_cancellation_guidance(payload.message)
         if cancellation_guidance:
-            return ChatResponse(text=cancellation_guidance, action=None)
+            return ChatResponse(
+                text=cancellation_guidance,
+                action=None,
+                provider_sources=["swiggy_instamart"],
+            )
 
         meal_plan_before = get_meal_plan_snapshot()
         pantry_before = get_pantry_stock()
@@ -971,7 +992,7 @@ async def chat_endpoint(payload: ChatRequest):
         latest_recipe_plan_before = get_latest_recipe_grocery_plan_metadata()
         provider_environments = {
             provider_id: str(provider_registry.descriptor(provider_id)["environment"])
-            for provider_id in ("zepto", "swiggy_instamart")
+            for provider_id in CHAT_PROVIDER_IDS
         }
         provider_drafts_before = {
             provider_id: get_provider_checkout_draft(provider_id, environment)
@@ -987,6 +1008,7 @@ async def chat_endpoint(payload: ChatRequest):
         # 4. Stream and run the persistent agent turn
         text_reply = ""
         tool_confirmation_action = None
+        provider_sources: List[str] = []
         chat_runner = (
             recipe_grocery_runner
             if is_explicit_recipe_detail_prompt(payload.message)
@@ -1004,6 +1026,11 @@ async def chat_endpoint(payload: ChatRequest):
                         tool_confirmation_action = _confirmation_action_from_tool_response(
                             getattr(function_response, "response", None)
                         )
+                    source = _provider_source_from_tool_response(
+                        getattr(function_response, "response", None)
+                    ) if function_response else ""
+                    if source and source not in provider_sources:
+                        provider_sources.append(source)
             if event.is_final_response() and event.content and event.content.parts:
                 text_reply = event.content.parts[0].text
                 
@@ -1081,8 +1108,12 @@ async def chat_endpoint(payload: ChatRequest):
             action = {"type": "UPDATE_GROCERY_CART"}
         elif latest_recipe_plan_after != latest_recipe_plan_before:
             action = {"type": "UPDATE_RECIPE_GROCERY"}
-            
-        return ChatResponse(text=text_reply, action=action)
+
+        if changed_provider and changed_provider not in provider_sources:
+            provider_sources.append(changed_provider)
+        if pending_confirmation:
+            provider_sources = []
+        return ChatResponse(text=text_reply, action=action, provider_sources=provider_sources)
         
     except (HTTPException, AmbiguousMemberNameError):
         raise

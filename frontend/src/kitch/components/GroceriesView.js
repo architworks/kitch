@@ -5,6 +5,7 @@ import Icon from "./Icon.js";
 import Art from "./Art.js";
 import { SnapCard } from "./PhotoCapture.js";
 import { SkeletonLine } from "./Skeleton.js";
+import { ProviderAttribution, ProviderLogo } from "./ProviderBrand.js";
 import {
   GROCERY_CATEGORY_DESCRIPTIONS,
   cartItemKey,
@@ -19,11 +20,6 @@ import {
 } from "../lib/helpers.js";
 
 const CATEGORIES = ["Fresh Produce", "Proteins & Dairy", "Grains & Bakery", "Pantry & Spices", "General"];
-const PROVIDER_LOGOS = {
-  swiggy_instamart: "/instamart-logo.jpg",
-  zepto: "/zepto-logo.jpg",
-  blinkit: "/blinkit-logo.jpg"
-};
 
 const rupees = (minor) => formatMinorCurrency(minor, "INR") || "—";
 
@@ -53,26 +49,6 @@ function describeChange(change) {
     default:
       return "The cart changed";
   }
-}
-
-// Swiggy's brand guidelines require "Powered by Instamart" beside the cart,
-// the checkout summary and order status.
-function PoweredBy({ provider }) {
-  if (provider?.id !== "swiggy_instamart") return null;
-  return (
-    <span className="powered-by">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/instamart-logo.jpg" alt="" width="24" height="24" />
-      <span>Powered by Instamart</span>
-    </span>
-  );
-}
-
-function ProviderLogo({ provider, size = 36 }) {
-  const src = PROVIDER_LOGOS[provider?.id];
-  if (!src) return <span className="provider-logo fallback" style={{ width: size, height: size }} aria-hidden="true">{String(provider?.label || "?").slice(0, 1)}</span>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img className="provider-logo" src={src} alt="" width={size} height={size} />;
 }
 
 function ListLoading({ label }) {
@@ -535,7 +511,7 @@ function ProviderReview({ k }) {
 
   return (
     <div className="review">
-      <PoweredBy provider={k.selectedProvider} />
+      <ProviderAttribution provider={k.selectedProvider} />
       <div className={`callout ${tone}`}>
         <Icon name={tone === "good" ? "checkCircle" : "alert"} />
         <div>{message}<span className="review-checked">Checked {k.providerLastChecked}</span></div>
@@ -593,7 +569,7 @@ function ProviderReview({ k }) {
                         Asked for {match.matching.requested_quantity ?? native.amount ?? "—"} {match.matching.requested_unit || native.unit || ""}
                         {match.matching.fulfilled_quantity != null && ` · covers ${match.matching.fulfilled_quantity}`}
                         {Number(match.matching.excess_quantity || 0) > 0 && ` · ${match.matching.excess_quantity} extra`}
-                        {" · "}{match.matching.preference_source === "explicit" ? "household preference" : match.matching.preference_source === "history" ? "Swiggy history" : "no preference"}
+                        {" · "}{match.matching.preference_source === "explicit" ? "household preference" : match.matching.preference_source === "history" ? `${label} history` : "no preference"}
                         {match.matching.reason && <span className="match-reason">{match.matching.reason}</span>}
                       </small>
                     )}
@@ -635,7 +611,7 @@ function Payment({ k }) {
         <div className={`callout ${k.providerOrderCompleted ? "good" : "warn"}`} role="status">
           <Icon name={k.providerOrderCompleted ? "checkCircle" : "alert"} />
           <div>
-            <strong>{k.providerOrderCompleted ? "Order placed" : "Check this order in the Swiggy app"}</strong>
+            <strong>{k.providerOrderCompleted ? "Order placed" : `Check this order in the ${label} app`}</strong>
             {k.providerOrderCompleted
               ? (k.providerOrderMessage || `${label} confirmed this order.`)
               : `Kitch won’t resubmit this checkout. Confirm it in ${label} before doing anything else.`}
@@ -654,7 +630,7 @@ function Payment({ k }) {
             {k.selectedProvider.id === "swiggy_instamart" && k.providerOrderCompleted && (
               <p className="order-help">To change or cancel this order, call Swiggy customer care on <a href="tel:08067466729">080-67466729</a>.</p>
             )}
-            <PoweredBy provider={k.selectedProvider} />
+            <ProviderAttribution provider={k.selectedProvider} />
           </div>
         </div>
       )}
@@ -808,7 +784,7 @@ function PaymentHandoff({ k }) {
             ? qr
               ? `${label}’s payment page opened in a new tab. Scan its QR code with any UPI app on your phone. If the tab didn’t open, use the button below.`
               : `${label}’s payment page opened in a new tab; on a phone it hands over to your UPI app. If it didn’t open, use the button below.`
-            : `The payment link isn’t available on this screen any more. Finish or check the payment in the Swiggy app.`}
+            : `The payment link isn’t available on this screen any more. Finish or check the payment in the ${label} app.`}
         </p>
         <div className="inline-actions">
           {url && (
@@ -826,7 +802,7 @@ function PaymentHandoff({ k }) {
           )}
         </div>
         <small className="handoff-note">
-          {k.isCheckingProviderPayment ? "Checking with Instamart…" : checked ? `Last checked ${checked}.` : "Kitch checks the payment automatically."} Don’t place the order again while this is pending.
+          {k.isCheckingProviderPayment ? `Checking with ${label}…` : checked ? `Last checked ${checked}.` : "Kitch checks the payment automatically."} Don’t place the order again while this is pending.
         </small>
       </div>
     </div>
@@ -884,11 +860,11 @@ function OrderSummary({ k }) {
   return (
     <section className="card card-pad summary" aria-labelledby="summary-title">
       <div className="summary-head">
-        {/* Instamart's logo already sits in the required "Powered by" badge. */}
-        {p.id && p.id !== "swiggy_instamart" && <ProviderLogo provider={p} size={30} />}
+        {/* A provider whose attribution carries its logo doesn't need it twice. */}
+        {p.id && !p.attribution?.text && <ProviderLogo provider={p} size={30} />}
         <h2 id="summary-title">Order summary</h2>
       </div>
-      <PoweredBy provider={p} />
+      <ProviderAttribution provider={p} />
       <dl className="totals">
         <div><dt>Items to buy</dt><dd>{k.eligibleBuyCount}</dd></div>
         <div><dt>Selected to order</dt><dd>{k.pendingBuyCount}</dd></div>
@@ -899,7 +875,7 @@ function OrderSummary({ k }) {
               <div key={`${line.label}-${index}`} className={index === 0 ? "sep" : ""}><dt>{line.label}</dt><dd>{line.value}</dd></div>
             ))}
             {unitemised > 0 && (
-              <div className="unitemised"><dt>Not itemised by Instamart</dt><dd>{formatMinorCurrency(unitemised, k.providerCurrency)}</dd></div>
+              <div className="unitemised"><dt>Not itemised by {label}</dt><dd>{formatMinorCurrency(unitemised, k.providerCurrency)}</dd></div>
             )}
           </>
         ) : (
@@ -907,7 +883,7 @@ function OrderSummary({ k }) {
             <div className="sep"><dt>Subtotal</dt><dd>{k.providerSubtotal || (emptyCart ? "—" : shown ? "Not returned" : "Not synced")}</dd></div>
             {k.providerFees.map(fee => <div key={`${fee.label}-${fee.value}`}><dt>{fee.label}</dt><dd>{fee.value}</dd></div>)}
             {k.providerDiscount && <div className="discount"><dt>Discount</dt><dd>−{k.providerDiscount}</dd></div>}
-            {otherCharges > 0 && <div className="unitemised"><dt>Not itemised by Instamart</dt><dd>{formatMinorCurrency(otherCharges, k.providerCurrency)}</dd></div>}
+            {otherCharges > 0 && <div className="unitemised"><dt>Not itemised by {label}</dt><dd>{formatMinorCurrency(otherCharges, k.providerCurrency)}</dd></div>}
           </>
         )}
         <div className="grand"><dt>{label} total</dt><dd>{k.providerTotal || (emptyCart ? "Empty" : shown ? "Unavailable" : "Not synced")}</dd></div>

@@ -30,6 +30,16 @@ class ProviderCapabilities:
 
 
 @dataclass(frozen=True)
+class ProviderAttribution:
+    """Attribution a provider requires wherever its content is shown."""
+
+    text: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"text": self.text}
+
+
+@dataclass(frozen=True)
 class ProviderDescriptor:
     id: str
     label: str
@@ -44,6 +54,7 @@ class ProviderDescriptor:
     production_gated: bool = False
     capabilities: ProviderCapabilities = field(default_factory=ProviderCapabilities)
     theme: Dict[str, str] = field(default_factory=dict)
+    attribution: ProviderAttribution | None = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +71,7 @@ class ProviderDescriptor:
             "production_gated": self.production_gated,
             "capabilities": self.capabilities.as_dict(),
             "theme": dict(self.theme),
+            "attribution": self.attribution.as_dict() if self.attribution else None,
             "api_base": f"/api/grocery/providers/{self.id}",
         }
 

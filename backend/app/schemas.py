@@ -33,6 +33,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     text: str
     action: Optional[Dict[str, Any]] = None
+    # Grocery providers whose content this reply carries, so the UI can show
+    # each one's required attribution beside it.
+    provider_sources: List[str] = Field(default_factory=list)
 
 class PantryAddRequest(BaseModel):
     name: str

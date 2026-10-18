@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon.js";
+import { ProviderAttribution } from "./ProviderBrand.js";
 import { SnapButton, useCameraDevice } from "./PhotoCapture.js";
 import { renderMarkdownContent } from "../lib/helpers.js";
 import { formatPlanDate, getWeekStartForDate } from "../../app/householdConfig.js";
@@ -23,14 +24,30 @@ const describeAction = (action, k) => {
       return { icon: "pantry", text: "Pantry updated", cta: "Open pantry", target: "groceries", groceryTab: "pantry" };
     case "UPDATE_GROCERY_CART":
       return { icon: "basket", text: "Shopping list updated", cta: "Open list", target: "groceries", groceryTab: "cart" };
-    case "UPDATE_PROVIDER_CART":
-      return { icon: "store", text: "Provider cart prepared for your review", cta: "Review", target: "groceries", groceryTab: "cart" };
+    case "UPDATE_PROVIDER_CART": {
+      const label = k.orderingProviders.find(provider => provider.id === action.provider)?.label;
+      return { icon: "store", text: `${label ? `${label} cart` : "Grocery-app cart"} ready for your review`, cta: "Review", target: "groceries", groceryTab: "cart" };
+    }
     case "CONFIRM_DESTRUCTIVE_ACTION":
       return { icon: "alert", text: "Waiting for your confirmation", cta: null };
     default:
       return null;
   }
 };
+
+// Each grocery app whose content a reply carries gets its own attribution,
+// so Instamart's badge appears only on replies that used Instamart.
+function ReplyAttribution({ sources, k }) {
+  const providers = (sources || [])
+    .map(id => k.orderingProviders.find(provider => provider.id === id))
+    .filter(provider => provider?.attribution?.text);
+  if (providers.length === 0) return null;
+  return (
+    <div className="reply-attribution">
+      {providers.map(provider => <ProviderAttribution key={provider.id} provider={provider} />)}
+    </div>
+  );
+}
 
 function ChangeReceipt({ action, k, go }) {
   const info = describeAction(action, k);
@@ -196,6 +213,7 @@ export function ChatDrawer({ k, go, inputRef }) {
             <div key={`${k.visibleChatStartIndex + index}-${message.sender}-${message.time}`} className={`msg ${message.sender}`}>
               <div className="bubble prose">{renderMarkdownContent(message.text)}</div>
               {message.sender === "agent" && message.action && <ChangeReceipt action={message.action} k={k} go={go} />}
+              {message.sender === "agent" && <ReplyAttribution sources={message.providerSources} k={k} />}
               <time>{message.time}</time>
             </div>
           ))}

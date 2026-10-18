@@ -646,7 +646,7 @@ export function useKitch() {
     setMemberEditorOpen(false);
     setConfirmationDialog({
       title: `Make ${member.value} the owner?`,
-      message: `${member.value} will connect their own grocery app and place the household’s orders. Your Swiggy connection and any open order review are removed, and you become a member. Plans, pantry, lists and nutrition logs stay shared as they are.`,
+      message: `${member.value} will connect their own grocery app and place the household’s orders. Your grocery-app connection and any open order review are removed, and you become a member. Plans, pantry, lists and nutrition logs stay shared as they are.`,
       confirmLabel: "Make owner",
       onConfirm: async () => {
         const res = await apiFetch(apiUrl("/api/household/owner"), {
@@ -1645,8 +1645,11 @@ export function useKitch() {
       paymentWindow = window.open("", "kitch-instamart-payment");
       if (paymentWindow) {
         paymentWindow.opener = null;
-        paymentWindow.document.title = "Opening Instamart payment…";
-        paymentWindow.document.body.innerHTML = '<p style="font:16px system-ui;margin:40vh auto;text-align:center;color:#474f42">Placing your order with Instamart…<br>The payment page opens here in a moment.</p>';
+        paymentWindow.document.title = `Opening ${selectedProvider.label} payment…`;
+        const waiting = paymentWindow.document.createElement("p");
+        waiting.style.cssText = "font:16px system-ui;margin:40vh auto;text-align:center;color:#474f42";
+        waiting.append(`Placing your order with ${selectedProvider.label}…`, paymentWindow.document.createElement("br"), "The payment page opens here in a moment.");
+        paymentWindow.document.body.replaceChildren(waiting);
       }
     }
 
@@ -1739,7 +1742,7 @@ export function useKitch() {
     if (!selectedProvider?.routes?.releaseAttempt) return;
     setConfirmationDialog({
       title: "Start a new order?",
-      message: `Kitch couldn’t confirm whether the last ${selectedProvider.label} order went through. Open the Swiggy app and check your orders first. If it was placed, don’t order again.`,
+      message: `Kitch couldn’t confirm whether the last ${selectedProvider.label} order went through. Open the ${selectedProvider.label} app and check your orders first. If it was placed, don’t order again.`,
       confirmLabel: "I’ve checked, start a new order",
       onConfirm: async () => {
         const res = await apiFetch(apiUrl(selectedProvider.routes.releaseAttempt), {
@@ -2064,9 +2067,17 @@ export function useKitch() {
           sender: "agent",
           text: response.text,
           time: responseTime,
-          action: response.action || null
+          action: response.action || null,
+          providerSources: response.provider_sources || []
         }
       ]);
+
+      // The reply shows each grocery app's own attribution, which comes from
+      // the provider registry; load it if the Groceries tab hasn't yet.
+      const sources = response.provider_sources || [];
+      if (sources.some(id => !orderingProviders.some(provider => provider.id === id))) {
+        syncProviderRegistry();
+      }
 
       await syncLiveState(activeUser);
 
