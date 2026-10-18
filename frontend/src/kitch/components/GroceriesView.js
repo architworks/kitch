@@ -639,6 +639,9 @@ function Payment({ k }) {
             {k.providerOrderCompleted
               ? (k.providerOrderMessage || `${label} confirmed this order.`)
               : `Kitch won’t resubmit this checkout. Confirm it in ${label} before doing anything else.`}
+            {!k.providerOrderCompleted && k.providerAttemptReleasable && (
+              <button type="button" className="btn sm" onClick={k.releaseUnresolvedAttempt}>I’ve checked {label}, start a new order</button>
+            )}
             {k.providerOrderResults.length > 0 && (
               <ul className="change-list">
                 {k.providerOrderResults.map((result, index) => (
@@ -812,6 +815,9 @@ function PaymentHandoff({ k }) {
             <a className="btn primary" href={url} target="_blank" rel="noopener noreferrer">
               {qr ? "Show payment QR" : "Open payment page"} <Icon name="external" size="sm" />
             </a>
+          )}
+          {k.providerAttemptReleasable && (
+            <button type="button" className="btn quiet" onClick={k.releaseUnresolvedAttempt}>I’ve checked {label}, start a new order</button>
           )}
           {k.selectedProvider.capabilities?.payment_status && (
             <button type="button" className="btn" onClick={() => k.checkProviderPaymentStatus({ manual: true })} disabled={k.isCheckingProviderPayment}>

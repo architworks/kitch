@@ -69,6 +69,7 @@ export const withProviderRoutes = (provider) => {
       revalidateCart: `${base}/checkout/revalidate`,
       placeOrder: `${base}/checkout/place-order`,
       paymentStatus: `${base}/checkout/payment-status`,
+      releaseAttempt: `${base}/checkout/release-attempt`,
       connectionStart: `${base}/connection/start`,
       connection: `${base}/connection`
     }

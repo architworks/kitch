@@ -668,7 +668,7 @@ export function useKitch() {
     setConfirmationDialog({
       title: `Remove ${member.value} from the household?`,
       message: signedIn
-        ? `${member.value} loses access straight away and their nutrition log is deleted. Shared plans, pantry and lists stay. To let them back in, send a new invite link.`
+        ? `${member.value} loses access straight away and their nutrition log is deleted. Shared plans, pantry and lists stay. The current invite link will stop working for everyone. Create a new link for anyone you want to invite.`
         : `${member.value} and their nutrition log are deleted. Shared plans, pantry and lists stay.`,
       confirmLabel: "Remove member",
       onConfirm: async () => {
@@ -1735,6 +1735,28 @@ export function useKitch() {
     }
   };
 
+  const releaseUnresolvedAttempt = () => {
+    if (!selectedProvider?.routes?.releaseAttempt) return;
+    setConfirmationDialog({
+      title: "Start a new order?",
+      message: `Kitch couldn’t confirm whether the last ${selectedProvider.label} order went through. Open the Swiggy app and check your orders first. If it was placed, don’t order again.`,
+      confirmLabel: "I’ve checked, start a new order",
+      onConfirm: async () => {
+        const res = await apiFetch(apiUrl(selectedProvider.routes.releaseAttempt), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checked_in_provider_app: true })
+        });
+        await requireSuccessfulResponse(res);
+        const data = await res.json();
+        setProviderPaymentHandoff(null);
+        setIsProviderOrderComplete(false);
+        applyProviderDraft(data.draft, { resetAcknowledgement: true });
+        triggerBannerAlert(`You can prepare a new ${selectedProvider.label} cart now.`, "info");
+      }
+    });
+  };
+
   // Status checks run inline while the person is paying (often scanning a QR
   // on another screen), so they never take over the page with a dialog.
   const checkProviderPaymentStatus = useCallback(async ({ manual = false } = {}) => {
@@ -2481,6 +2503,10 @@ export function useKitch() {
     : [];
   const providerPaymentPending = providerCartReview?.status === "payment_pending";
   const providerOrderAmbiguous = providerCartReview?.status === "unknown" || providerCartReview?.ambiguous_order;
+  // An unresolved order is never retried automatically. After 30 minutes the
+  // owner can clear it, having checked their orders in the Swiggy app.
+  const providerAttemptReleasable = ["unknown", "payment_pending", "checkout_pending"].includes(providerCartReview?.status)
+    && Date.now() - Date.parse(providerCartReview?.updated_at || "") > 30 * 60 * 1000;
   const providerOrderBlockers = Array.isArray(providerCartReview?.order_blockers) ? providerCartReview.order_blockers : [];
   const nativeCartStageComplete = checkoutItems.length > 0;
   const providerStageComplete = Boolean(selectedProvider.id && selectedProvider.enabled);
@@ -2966,6 +2992,8 @@ export function useKitch() {
     providerOrderResults,
     providerPaymentPending,
     providerOrderAmbiguous,
+    providerAttemptReleasable,
+    releaseUnresolvedAttempt,
     providerOrderBlockers,
     nativeCartStageComplete,
     providerStageComplete,

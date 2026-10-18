@@ -58,24 +58,27 @@ def _require_household_owner(action: str) -> None:
 
 
 # A checkout that has been submitted to the provider stays locked until its
-# outcome is known, so it can never be reopened and bought twice. An outcome
-# that stays unknown this long is released so the household is never stuck.
+# outcome is known, so it can never be reopened and bought twice. Swiggy's
+# guidance is that an ambiguous result is never permission to resubmit, so the
+# lock never expires by itself: after IN_FLIGHT_HOLD_SECONDS the owner may
+# release it explicitly, having checked their orders in the Swiggy app.
 IN_FLIGHT_STATUSES = {"checkout_pending", "payment_pending", "unknown"}
 IN_FLIGHT_HOLD_SECONDS = 30 * 60
 
 
-def _attempt_in_flight(review: Dict[str, Any] | None, now: datetime | None = None) -> bool:
-    if not review or str(review.get("status") or "") not in IN_FLIGHT_STATUSES:
-        return False
+def _attempt_in_flight(review: Dict[str, Any] | None) -> bool:
+    return bool(review) and str(review.get("status") or "") in IN_FLIGHT_STATUSES
+
+
+def _attempt_age_seconds(review: Dict[str, Any], now: datetime | None = None) -> float | None:
     raw = str(review.get("updated_at") or "")
     try:
         updated = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        return True
+        return None
     if updated.tzinfo is None:
         updated = updated.replace(tzinfo=timezone.utc)
-    age = ((now or datetime.now(timezone.utc)) - updated).total_seconds()
-    return age < IN_FLIGHT_HOLD_SECONDS
+    return ((now or datetime.now(timezone.utc)) - updated).total_seconds()
 
 
 def _rupees(minor: Any) -> str:
@@ -663,6 +666,72 @@ class GroceryCheckoutService:
                 descriptor.environment,
             )
 
+    def release_unresolved_attempt(
+        self,
+        provider_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Let the owner start over after checking an unresolved order in Swiggy.
+
+        Kitch never resubmits an order whose outcome it could not confirm. Only
+        an explicit owner action, after the hold, clears it; the earlier
+        attempt's identifiers stay on record.
+        """
+        _require_household_owner("start a new grocery order")
+        adapter = self.registry.get(provider_id)
+        environment = adapter.descriptor().environment
+        if payload.get("checked_in_provider_app") is not True:
+            raise ProviderOperationError(
+                provider=provider_id,
+                operation="release_attempt",
+                code="provider_check_required",
+                message="Check this order in the Swiggy app first, then confirm.",
+                status_code=422,
+            )
+        operation_id = str(uuid4())
+        self._claim(provider_id, environment, operation_id)
+        try:
+            row = get_provider_checkout_draft(provider_id, environment)
+            if not _attempt_in_flight(row):
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="release_attempt",
+                    code="no_unresolved_attempt",
+                    message="There is no unresolved order to clear.",
+                    status_code=409,
+                )
+            age = _attempt_age_seconds(row)
+            if age is not None and age < IN_FLIGHT_HOLD_SECONDS:
+                raise ProviderOperationError(
+                    provider=provider_id,
+                    operation="release_attempt",
+                    code="attempt_still_settling",
+                    message="This order may still be going through. Check it again in a few minutes.",
+                    status_code=409,
+                    draft=draft_row_to_review(row),
+                )
+            released = save_provider_checkout_draft(
+                {
+                    "status": "blocked",
+                    "can_place_order": False,
+                    "order_review_acknowledged": False,
+                    "confirmation_token": None,
+                    "order_blockers": [
+                        "The previous order could not be confirmed by Kitch. "
+                        "The owner checked it in the Swiggy app and chose to start a new order.",
+                    ],
+                },
+                provider_id,
+                environment,
+            )
+            return {
+                "status": "success",
+                "provider": provider_id,
+                "draft": draft_row_to_review(released),
+            }
+        finally:
+            release_provider_checkout_operation(operation_id, provider_id, environment)
+
     async def payment_status(self, provider_id: str) -> Dict[str, Any]:
         _require_household_owner("check grocery payments")
         adapter = self.registry.get(provider_id)
@@ -1071,8 +1140,8 @@ class GroceryCheckoutService:
                 operation=operation,
                 code="checkout_already_started",
                 message=(
-                    "An order from this review is still being placed or paid. "
-                    "Check its payment status before changing or reordering the cart."
+                    "An order from this review is still being placed, paid or confirmed. "
+                    "Check it in the Swiggy app; once it has settled you can start a new order."
                 ),
                 status_code=409,
                 draft=draft_row_to_review(current),

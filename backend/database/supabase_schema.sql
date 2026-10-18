@@ -297,115 +297,7 @@ CREATE INDEX IF NOT EXISTS idx_provider_oauth_flows_expiry
 CREATE INDEX IF NOT EXISTS idx_pending_agent_actions_profile_status
     ON public.pending_agent_actions(profile_id, status, expires_at);
 
--- Resolve one verified Google subject to exactly one household. The optional
--- legacy claim is decided by trusted backend configuration, never by the
--- browser, and can succeed only while an unclaimed legacy household exists.
-CREATE OR REPLACE FUNCTION public.ensure_google_household(
-    p_google_subject TEXT,
-    p_email TEXT,
-    p_display_name TEXT,
-    p_timezone_name TEXT,
-    p_claim_legacy BOOLEAN DEFAULT FALSE
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-    account public.household_accounts%ROWTYPE;
-    v_household_id UUID;
-    v_owner_profile_id UUID;
-    member_name TEXT;
-    members JSONB;
-BEGIN
-    IF NULLIF(btrim(p_google_subject), '') IS NULL OR NULLIF(btrim(p_email), '') IS NULL THEN
-        RAISE EXCEPTION 'verified Google subject and email are required' USING ERRCODE = '22023';
-    END IF;
-
-    SELECT * INTO account
-    FROM public.household_accounts
-    WHERE google_subject = p_google_subject
-    FOR UPDATE;
-
-    IF FOUND THEN
-        UPDATE public.household_accounts
-        SET email = p_email, last_seen_at = now()
-        WHERE google_subject = p_google_subject
-        RETURNING * INTO account;
-    ELSE
-        IF p_claim_legacy THEN
-            SELECT h.id INTO v_household_id
-            FROM public.households h
-            WHERE h.legacy_claimable = TRUE
-              AND NOT EXISTS (
-                  SELECT 1 FROM public.household_accounts a WHERE a.household_id = h.id
-              )
-            ORDER BY h.created_at
-            LIMIT 1
-            FOR UPDATE;
-        END IF;
-
-        IF v_household_id IS NOT NULL THEN
-            SELECT p.id INTO v_owner_profile_id
-            FROM public.profiles p
-            WHERE p.household_id = v_household_id
-            ORDER BY p.member_order, p.created_at
-            LIMIT 1;
-            UPDATE public.households
-            SET legacy_claimable = FALSE, updated_at = now()
-            WHERE id = v_household_id;
-        ELSE
-            INSERT INTO public.households(timezone_name)
-            VALUES (COALESCE(NULLIF(btrim(p_timezone_name), ''), 'UTC'))
-            RETURNING id INTO v_household_id;
-
-            member_name := COALESCE(
-                NULLIF(btrim(p_display_name), ''), split_part(p_email, '@', 1), 'Household owner'
-            );
-            INSERT INTO public.profiles(
-                id, household_id, full_name, household_size, timezone_name,
-                member_order, created_at, updated_at
-            ) VALUES (
-                gen_random_uuid(), v_household_id, member_name, 1,
-                COALESCE(NULLIF(btrim(p_timezone_name), ''), 'UTC'), 0, now(), now()
-            ) RETURNING id INTO v_owner_profile_id;
-            INSERT INTO public.nutrition_targets(profile_id) VALUES (v_owner_profile_id);
-        END IF;
-
-        INSERT INTO public.household_accounts(
-            google_subject, household_id, owner_profile_id, email
-        ) VALUES (
-            p_google_subject, v_household_id, v_owner_profile_id, p_email
-        ) RETURNING * INTO account;
-    END IF;
-
-    SELECT COALESCE(jsonb_agg(
-        jsonb_build_object('id', p.id, 'name', p.full_name)
-        ORDER BY p.member_order, p.created_at
-    ), '[]'::jsonb)
-    INTO members
-    FROM public.profiles p
-    WHERE p.household_id = account.household_id;
-
-    RETURN jsonb_build_object(
-        'google_subject', account.google_subject,
-        'email', account.email,
-        'household_id', account.household_id,
-        'owner_profile_id', account.owner_profile_id,
-        'members', members
-    );
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BOOLEAN)
-    FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ensure_google_household(TEXT, TEXT, TEXT, TEXT, BOOLEAN)
-    TO service_role;
-
--- Deleting the account row first lets the household cascade remove every
--- profile and its plans, pantry, carts, diary, provider tokens and drafts
--- (household_accounts.owner_profile_id is ON DELETE RESTRICT).
+-- Member names are unique within a household (case-insensitive).
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_household_name_unique
     ON public.profiles(household_id, lower(btrim(full_name)));
 
@@ -429,6 +321,9 @@ $$;
 
 -- Owners delete the whole household; members delete their own login and
 -- personal data.
+-- Deleting the account row first lets the household cascade remove every
+-- profile and its plans, pantry, carts, diary, provider tokens and drafts
+-- (household_accounts.owner_profile_id is ON DELETE RESTRICT).
 CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -475,6 +370,9 @@ BEGIN
     IF p_profile_id = account.profile_id THEN
         RAISE EXCEPTION 'cannot_remove_self' USING ERRCODE = '22023';
     END IF;
+    -- Join locks the household before a profile. Use the same order so a
+    -- concurrent claim cannot race the account check or invite revocation.
+    PERFORM 1 FROM public.households WHERE id = account.household_id FOR UPDATE;
     PERFORM 1 FROM public.profiles
     WHERE id = p_profile_id AND household_id = account.household_id FOR UPDATE;
     IF NOT FOUND THEN
@@ -491,6 +389,14 @@ BEGIN
     WHERE profile_id = p_profile_id AND household_id = account.household_id;
     v_profile_removed := public.remove_member_profile(p_profile_id, account.owner_profile_id);
 
+    IF v_has_account THEN
+        -- An old shared invite must not restore the removed account's access.
+        -- A fresh owner-issued invitation can still deliberately let them back.
+        UPDATE public.households
+        SET invite_token_hash = NULL, invite_expires_at = NULL, updated_at = now()
+        WHERE id = account.household_id;
+    END IF;
+
     RETURN jsonb_build_object(
         'removed_profile_id', p_profile_id,
         'had_account', v_has_account,
@@ -499,34 +405,12 @@ BEGIN
     );
 END;
 $$;
+
 REVOKE ALL ON FUNCTION public.remove_member_profile(UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.remove_member_profile(UUID, UUID) TO service_role;
 REVOKE ALL ON FUNCTION public.remove_household_member(TEXT, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.remove_household_member(TEXT, UUID) TO service_role;
 
-CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-    account public.household_accounts%ROWTYPE;
-BEGIN
-    SELECT * INTO account FROM public.household_accounts WHERE google_subject = p_google_subject;
-    IF NOT FOUND THEN
-        RETURN FALSE;
-    END IF;
-    IF account.role = 'owner' THEN
-        DELETE FROM public.household_accounts WHERE household_id = account.household_id;
-        DELETE FROM public.households WHERE id = account.household_id;
-    ELSE
-        DELETE FROM public.household_accounts WHERE google_subject = p_google_subject;
-        PERFORM public.remove_member_profile(account.profile_id, account.owner_profile_id);
-    END IF;
-    RETURN TRUE;
-END;
-$$;
 
 REVOKE ALL ON FUNCTION public.delete_household_account(TEXT)
     FROM PUBLIC, anon, authenticated;
@@ -874,29 +758,6 @@ $$;
 
 -- Owners delete the whole household; members delete only their own login and
 -- their own member profile (with its nutrition history).
-CREATE OR REPLACE FUNCTION public.delete_household_account(p_google_subject TEXT)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-    account public.household_accounts%ROWTYPE;
-BEGIN
-    SELECT * INTO account FROM public.household_accounts WHERE google_subject = p_google_subject;
-    IF NOT FOUND THEN
-        RETURN FALSE;
-    END IF;
-    IF account.role = 'owner' THEN
-        DELETE FROM public.household_accounts WHERE household_id = account.household_id;
-        DELETE FROM public.households WHERE id = account.household_id;
-    ELSE
-        DELETE FROM public.household_accounts WHERE google_subject = p_google_subject;
-        DELETE FROM public.profiles WHERE id = account.profile_id;
-    END IF;
-    RETURN TRUE;
-END;
-$$;
 
 REVOKE ALL ON FUNCTION public.household_account_context(TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.household_account_context(TEXT) TO service_role;

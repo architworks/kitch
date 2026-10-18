@@ -596,15 +596,43 @@ class CheckoutIntegritySecurityTests(unittest.IsolatedAsyncioTestCase):
         adapter.revalidate_cart.assert_not_awaited()
         read_cart.assert_not_called()
 
-    def test_an_unresolved_attempt_is_released_after_the_hold(self):
+    def test_an_unresolved_attempt_is_never_released_by_time_alone(self):
+        """Swiggy: an ambiguous result is never permission to resubmit."""
         from datetime import datetime, timedelta, timezone
         from app.grocery_checkout import _attempt_in_flight
+        old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        for status in ("unknown", "payment_pending", "checkout_pending"):
+            self.assertTrue(_attempt_in_flight({"status": status, "updated_at": old}))
+        self.assertFalse(_attempt_in_flight({"status": "ordered", "updated_at": old}))
+        self.assertFalse(_attempt_in_flight({"status": "blocked", "updated_at": old}))
+
+    def test_owner_can_start_over_only_after_checking_and_after_the_hold(self):
+        from datetime import datetime, timedelta, timezone
+        service = self.service(self._adapter())
         now = datetime.now(timezone.utc)
-        recent = {"status": "unknown", "updated_at": (now - timedelta(minutes=5)).isoformat()}
-        stale = {"status": "unknown", "updated_at": (now - timedelta(hours=2)).isoformat()}
-        self.assertTrue(_attempt_in_flight(recent, now))
-        self.assertFalse(_attempt_in_flight(stale, now))
-        self.assertFalse(_attempt_in_flight({"status": "ordered", "updated_at": now.isoformat()}, now))
+        recent = {**self.draft_row(), "status": "unknown", "updated_at": now.isoformat()}
+        settled = {**self.draft_row(), "status": "unknown", "provider_order_ids": ["ord-1"],
+                   "updated_at": (now - timedelta(hours=1)).isoformat()}
+        saved = []
+        with (
+            patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
+            patch("app.grocery_checkout.save_provider_checkout_draft",
+                  side_effect=lambda payload, *args: saved.append(payload) or {**settled, **payload}),
+        ):
+            with self.assertRaises(ProviderOperationError) as caught:
+                service.release_unresolved_attempt("swiggy_instamart", {})
+            self.assertEqual(caught.exception.code, "provider_check_required")
+            with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=recent):
+                with self.assertRaises(ProviderOperationError) as caught:
+                    service.release_unresolved_attempt("swiggy_instamart", {"checked_in_provider_app": True})
+                self.assertEqual(caught.exception.code, "attempt_still_settling")
+            with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=settled):
+                response = service.release_unresolved_attempt("swiggy_instamart", {"checked_in_provider_app": True})
+        self.assertEqual(response["draft"]["status"], "blocked")
+        self.assertFalse(response["draft"]["can_place_order"])
+        self.assertEqual(response["draft"]["provider_order_ids"], ["ord-1"])
+        self.assertEqual(len(saved), 1)
 
     def test_preflight_never_swaps_the_approved_payment_method(self):
         """#9: Instamart now offers only wallet; the owner approved UPI."""
@@ -666,6 +694,9 @@ class OwnerOnlyGroceryAppTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(caught.exception.code, "owner_required")
                 with self.assertRaises(ProviderOperationError):
                     service.update_draft("swiggy_instamart", {"selected_payment_method_id": "upi"})
+                with self.assertRaises(ProviderOperationError) as caught:
+                    service.release_unresolved_attempt("swiggy_instamart", {"checked_in_provider_app": True})
+                self.assertEqual(caught.exception.code, "owner_required")
                 claim.assert_not_called()
         finally:
             end_identity_scope(token)

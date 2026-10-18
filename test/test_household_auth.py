@@ -415,6 +415,42 @@ for module in (
         remove.assert_called_once_with("google-user-1", "member-b")
         self.assertEqual(purged, [("household-a", ["member-b"])])
 
+    def test_ambiguous_nutrition_target_name_is_a_validation_error_not_a_write(self):
+        household, _, environment = self._consent_fixtures()
+        household = {**household, "members": [
+            {"id": "owner-a", "name": "Straße"},
+            {"id": "member-b", "name": "Strasse"},
+        ]}
+        cookie = self._member_session(environment, household)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=household,
+        ), patch("app.main.update_nutrition_targets") as update:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.cookies.set("kitch_session", cookie)
+                response = client.patch("/api/nutrition/targets/STRASSE", json={"calories": 2000})
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("ambiguous", response.json()["detail"])
+        update.assert_not_called()
+
+    def test_ambiguous_member_name_in_chat_is_a_validation_error(self):
+        household, _, environment = self._consent_fixtures()
+        household = {**household, "members": [
+            {"id": "owner-a", "name": "Straße"},
+            {"id": "member-b", "name": "Strasse"},
+        ]}
+        cookie = self._member_session(environment, household)
+        with patch.dict(os.environ, environment), patch(
+            "app.main.get_household_account_context", return_value=household,
+        ), patch("app.main.get_household_profile", return_value={"household_size": 2}):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.cookies.set("kitch_session", cookie)
+                response = client.post("/api/chat", json={
+                    "message": "hi", "active_user": "STRASSE",
+                    "planner_context": {"visible_week_start": "", "selected_date": ""},
+                    "pantry_stock": [], "grocery_list": [],
+                })
+                self.assertEqual(response.status_code, 422)
+
     def test_members_cannot_remove_anyone(self):
         household, _, environment = self._consent_fixtures()
         member = self._member_fixture(household)
@@ -532,6 +568,41 @@ for module in (
 
 
 class HouseholdMemberIdentityTests(unittest.TestCase):
+    def test_exact_names_with_equal_casefold_do_not_share_nutrition_identity(self):
+        identity = HouseholdIdentity(
+            google_subject="owner", email="owner@example.test", household_id="household",
+            owner_profile_id="first", members=(
+                {"id": "first", "name": "Straße"},
+                {"id": "second", "name": "Strasse"},
+            ),
+        )
+        with patch.dict(os.environ, {"KITCH_DATABASE_BACKEND": "supabase"}):
+            token = begin_identity_scope(identity)
+            try:
+                self.assertEqual(get_user_id("Straße"), "first")
+                self.assertEqual(get_user_id("Strasse"), "second")
+                self.assertEqual(canonical_user_name("Strasse"), "Strasse")
+                for resolve in (get_user_id, canonical_user_name):
+                    with self.assertRaisesRegex(ValueError, "ambiguous"):
+                        resolve("STRASSE")
+            finally:
+                end_identity_scope(token)
+
+    def test_unambiguous_case_and_space_variations_still_resolve(self):
+        identity = HouseholdIdentity(
+            google_subject="owner", email="owner@example.test", household_id="household",
+            owner_profile_id="first", members=(
+                {"id": "first", "name": "Alex"}, {"id": "second", "name": "Sam"},
+            ),
+        )
+        with patch.dict(os.environ, {"KITCH_DATABASE_BACKEND": "supabase"}):
+            token = begin_identity_scope(identity)
+            try:
+                self.assertEqual(get_user_id("  sAM  "), "second")
+                self.assertEqual(canonical_user_name("  sAM  "), "Sam")
+            finally:
+                end_identity_scope(token)
+
     def test_rename_preserves_profile_and_nutrition_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             client = SQLiteKitchClient(os.path.join(directory, "kitch.sqlite3"))

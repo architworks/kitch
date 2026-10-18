@@ -27,6 +27,27 @@ def _local_client():
     return create_sqlite_client()
 
 
+class AmbiguousMemberNameError(ValueError):
+    """A shorthand name matches multiple profiles; an exact name is needed."""
+
+
+def _matching_member(members, user_name: str | None):
+    """Prefer the actual stored name; never guess between folded names.
+
+    Postgres lower() uniqueness does not imply Python casefold() uniqueness
+    (for example Straße and Strasse). The UI sends the actual member name.
+    """
+    raw = str(user_name or "")
+    exact = [member for member in members if member["name"] == raw]
+    matches = exact or [
+        member for member in members
+        if member["name"].strip().casefold() == raw.strip().casefold()
+    ]
+    if len(matches) > 1:
+        raise AmbiguousMemberNameError("Member name is ambiguous. Use the exact name shown in the household.")
+    return matches[0] if matches else None
+
+
 def canonical_user_name(user_name: str | None) -> str:
     """Return a configured household member name, falling back to the default."""
     local = _local_client()
@@ -35,10 +56,9 @@ def canonical_user_name(user_name: str | None) -> str:
     from app.auth import current_identity
     identity = current_identity()
     if identity is not None:
-        wanted = str(user_name or "").strip().casefold()
-        for member in identity.members:
-            if member["name"].casefold() == wanted:
-                return member["name"]
+        member = _matching_member(identity.members, user_name)
+        if member is not None:
+            return member["name"]
         owner = next(
             (member for member in identity.members if member["id"] == identity.owner_profile_id),
             identity.members[0],
@@ -59,10 +79,9 @@ def get_user_id(user_name: str | None) -> str:
     from app.auth import current_identity
     identity = current_identity()
     if identity is not None:
-        wanted = str(user_name or "").strip().casefold()
-        for member in identity.members:
-            if member["name"].casefold() == wanted:
-                return member["id"]
+        member = _matching_member(identity.members, user_name)
+        if member is not None:
+            return member["id"]
         return identity.owner_profile_id
     return USER_ID_MAP[canonical_user_name(user_name)]
 

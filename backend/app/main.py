@@ -28,7 +28,7 @@ from app.providers.instamart import (
     instamart_cancellation_guidance,
 )
 from app.providers.registry import provider_registry
-from app.household_config import canonical_user_name, get_user_id
+from app.household_config import AmbiguousMemberNameError, canonical_user_name, get_user_id
 from app.auth import (
     HouseholdIdentity,
     auth_required,
@@ -639,6 +639,11 @@ async def persistence_postcondition(request: Request, call_next):
         if memory_auth_token is not None:
             _memory_runtime().end_memory_auth_scope(memory_auth_token)
 
+@app.exception_handler(AmbiguousMemberNameError)
+async def ambiguous_member_name_handler(request: Request, error: AmbiguousMemberNameError):
+    return JSONResponse(status_code=422, content={"detail": str(error)})
+
+
 @app.exception_handler(PersistenceError)
 async def persistence_exception_handler(
     request: Request,
@@ -1079,7 +1084,7 @@ async def chat_endpoint(payload: ChatRequest):
             
         return ChatResponse(text=text_reply, action=action)
         
-    except HTTPException:
+    except (HTTPException, AmbiguousMemberNameError):
         raise
     except Exception:
         logger.exception("Chat execution failed")
@@ -1215,7 +1220,7 @@ async def upload_photo_endpoint(
             "result": result_text, "analysis": analysis.model_dump(),
             "action": action, "filename": file.filename,
         }
-    except HTTPException:
+    except (HTTPException, AmbiguousMemberNameError):
         raise
     except Exception:
         logger.exception("Photo upload execution failed")
@@ -1776,6 +1781,12 @@ async def place_provider_order_endpoint(
 ):
     _require_owner("place grocery orders")
     return await grocery_checkout_service.place_order(provider_id, payload)
+
+
+@app.post("/api/grocery/providers/{provider_id}/checkout/release-attempt")
+async def release_unresolved_checkout_endpoint(provider_id: str, payload: Dict[str, Any]):
+    _require_owner("start a new grocery order")
+    return grocery_checkout_service.release_unresolved_attempt(provider_id, payload)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/payment-status")
