@@ -40,6 +40,9 @@ docs/test_artifacts/*.png
 # Local security audit reports and evidence
 /reports/security/
 
+# Aggregated usage-dashboard data (generated)
+/reports/usage/
+
 # Generated media and personal application material (kept outside the repo)
 /assets/
 /docs/swiggy/
