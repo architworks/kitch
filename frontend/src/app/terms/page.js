@@ -26,7 +26,7 @@ export default function TermsPage() {
       <h2>5. Grocery carts and orders</h2>
       <ul>
         <li>Kitch only prepares carts. Nothing is ordered until you review the real cart and press Place order yourself; the chat assistant cannot place orders.</li>
-        <li>Products, prices, fees, availability and delivery are provided by the grocery app you choose, such as Swiggy Instamart. Your purchase is with that app and its sellers, under their terms, and Kitch is not a seller.</li>
+        <li>Products, prices, fees, availability and delivery are provided by Swiggy Instamart. Your purchase is with Swiggy Instamart and its sellers, under their terms, and Kitch is not a seller.</li>
         <li>Payments are completed in the grocery app’s own payment flow. Kitch never handles your payment details.</li>
         <li>For order problems, refunds or cancellations, contact the grocery app’s support.</li>
       </ul>

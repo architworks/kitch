@@ -7,7 +7,6 @@ from typing import Dict
 
 from app.providers.base import (
     GroceryProviderAdapter,
-    ProviderCapabilities,
     ProviderDescriptor,
     ProviderOperationError,
 )
@@ -63,21 +62,16 @@ class ProviderRegistry:
         )
 
     def descriptors(self) -> list[Dict[str, object]]:
+        """Grocery apps the household can order with.
+
+        Kitch is offered with Swiggy Instamart. The Zepto adapter remains only
+        for single-household local development and is listed only when it is
+        explicitly enabled there; the hosted app never shows it.
+        """
         instamart = InstamartProviderAdapter().descriptor()
         zepto = ZeptoProviderAdapter().descriptor()
-        blinkit = ProviderDescriptor(
-            id="blinkit",
-            label="Blinkit",
-            brand_label="blinkit",
-            description="A future ordering option for the same reviewed native cart.",
-            enabled=False,
-            state="coming_soon",
-            message="Blinkit support is coming soon.",
-            badge="Coming soon",
-            capabilities=ProviderCapabilities(),
-            theme={"start": "#f5c400", "end": "#148447"},
-        )
-        return [instamart.as_dict(), zepto.as_dict(), blinkit.as_dict()]
+        listed = [instamart] + ([zepto] if zepto.enabled else [])
+        return [descriptor.as_dict() for descriptor in listed]
 
     def get(self, provider_id: str) -> GroceryProviderAdapter:
         provider_id = self.canonical_id(provider_id)
@@ -147,13 +141,8 @@ class ProviderRegistry:
                 })
             else:
                 readiness.append(result)
-        readiness.append({
-            "provider": "blinkit",
-            "environment": "production",
-            "state": "disconnected",
-            "message": "Blinkit support is coming soon.",
-        })
-        return readiness
+        listed = {descriptor["id"] for descriptor in self.descriptors()}
+        return [entry for entry in readiness if entry.get("provider") in listed]
 
 
 provider_registry = ProviderRegistry()

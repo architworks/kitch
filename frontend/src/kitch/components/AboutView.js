@@ -9,7 +9,7 @@ const FLOW = [
   { icon: "calendar", title: "Plan", body: "Dated breakfasts, lunches and dinners for everyone at home." },
   { icon: "recipe", title: "Cook", body: "Recipes written from what’s already in your pantry." },
   { icon: "basket", title: "List", body: "Missing ingredients land on one shared shopping list." },
-  { icon: "store", title: "Prepare", body: "Kitch fills an Instamart or Zepto cart for you to check." },
+  { icon: "store", title: "Prepare", body: "Kitch fills a Swiggy Instamart cart for you to check." },
   { icon: "checkCircle", title: "Approve", body: "You review the real cart and place the order yourself." }
 ];
 
@@ -95,7 +95,7 @@ export default function AboutView({ k, ask, go }) {
       </section>
 
       <footer className="about-legal">
-        <p>Kitch is an independent personal project, not affiliated with Google, Swiggy, Zepto or Blinkit. Nutrition figures are estimates, not medical advice.</p>
+        <p>Kitch is an independent personal project, not affiliated with Google or Swiggy. Nutrition figures are estimates, not medical advice.</p>
         <LegalLinks />
       </footer>
     </div>

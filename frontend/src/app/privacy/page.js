@@ -17,7 +17,7 @@ export default function PrivacyPage() {
         <li><strong>Household details you enter.</strong> Member names, timezone, household size, food preferences and anything you tell Kitch to remember, such as dislikes or favourite brands.</li>
         <li><strong>Kitchen data.</strong> Meal plans, recipes, pantry items, shopping lists and the messages you send to Kitch’s assistant.</li>
         <li><strong>Nutrition logs and photos.</strong> What each member ate, estimated calories and macros, daily goals, and photos of meals or your fridge. Because these describe what people eat, Kitch treats them as health-related information and handles them with extra care.</li>
-        <li><strong>Grocery ordering data</strong>, only if you connect a grocery app such as Swiggy Instamart: the cart Kitch prepares, delivery addresses and payment options returned by that app, and the outcome of orders you approve. Kitch never sees or stores your card, UPI or bank details.</li>
+        <li><strong>Grocery ordering data</strong>, only if you connect Swiggy Instamart: the cart Kitch prepares, delivery addresses and payment options returned by that app, and the outcome of orders you approve. Kitch never sees or stores your card, UPI or bank details.</li>
         <li><strong>Technical data.</strong> A sign-in cookie and standard server logs (time, request path, errors) needed to run and secure the service. Kitch also counts anonymous page views and page-load speed with Vercel Web Analytics and Speed Insights, which use no cookies. Kitch does not use advertising or analytics cookies.</li>
         <li><strong>Usage metrics.</strong> For each request to Kitch’s assistant: which features it used (for example meal planning or nutrition), how it ended, how long it took, and how many AI model calls and tokens it used. Never the text of your messages, your photos, your food, or anything from a grocery app. People are identified only by a one-way pseudonymous code, and Kitch looks at these numbers in aggregate, to see which features are used and where speed and cost can improve.</li>
       </ul>
@@ -34,7 +34,7 @@ export default function PrivacyPage() {
         <li><strong>Google</strong>: Sign in with Google; the Gemini API, which reads your messages and photos to generate plans, recipes and nutrition estimates; and Vertex AI Memory Bank, which stores remembered household preferences. Kitch uses Google’s paid API service, under which Google does not use prompts or responses to improve its products.</li>
         <li><strong>Supabase</strong>: the database that stores your household data.</li>
         <li><strong>Vercel</strong>: hosting for the Kitch website and server, and anonymous page-view and page-speed statistics.</li>
-        <li><strong>Swiggy</strong> (and any other grocery app you connect): receives the cart and order you approve. Orders, payments and delivery are governed by that app’s own terms and privacy policy.</li>
+        <li><strong>Swiggy</strong>: receives the cart and order you approve through Swiggy Instamart. Orders, payments and delivery are governed by Swiggy’s own terms and privacy policy.</li>
       </ul>
       <p>These providers may store or process data outside India, including in the United States. Each is bound by its own security and data-protection terms.</p>
 

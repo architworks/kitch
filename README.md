@@ -16,10 +16,10 @@ seeded kitchen activity.
 - Plans and edits meals for exact calendar dates and ranges.
 - Generates recipes and durable recipe artifacts.
 - Reads, edits, replaces, and visually reviews household pantry stock.
-- Builds a provider-neutral native grocery cart from recipes, chat, or manual
-  UI changes.
-- Prepares Zepto or Swiggy Instamart carts for review without allowing chat to
-  place an order.
+- Builds the household's shopping list from recipes, chat, or manual UI
+  changes, leaving out what is already in the pantry.
+- Prepares a Swiggy Instamart cart for review without allowing chat to place an
+  order.
 - Logs and corrects personal nutrition entries from text or meal photos.
 - Remembers selected natural-language household kitchen context through the
   configured ADK memory backend.
@@ -47,7 +47,7 @@ flowchart LR
    behind backend-only RLS.
 4. ADK chat sessions are process-local. Household memory is process-local with
    `in_memory` and persistent with Vertex AI Memory Bank when `vertex` is configured.
-5. A provider-neutral checkout service prepares and revalidates external carts;
+5. A checkout service prepares and revalidates the Instamart cart;
    final ordering remains an explicit UI-only action.
 
 The browser never calls Gemini, ADK, elevated Supabase APIs, or provider MCP

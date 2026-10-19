@@ -244,7 +244,35 @@ class ProviderReadinessTimeoutTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["state"], "degraded")
         self.assertIn("timed out", result[0]["message"])
         self.assertEqual(result[1]["state"], "degraded")
-        self.assertEqual(result[-1]["provider"], "blinkit")
+        self.assertNotIn("blinkit", [entry["provider"] for entry in result])
+
+
+class HostedGroceryAppListTests(unittest.TestCase):
+    """Kitch is offered with Swiggy Instamart only."""
+
+    def _descriptor(self, provider_id, enabled):
+        return ProviderDescriptor(
+            id=provider_id,
+            label=provider_id,
+            brand_label=provider_id,
+            description="",
+            enabled=enabled,
+            state="connected" if enabled else "disabled",
+            message="",
+            capabilities=ProviderCapabilities(),
+        )
+
+    def test_hosted_app_lists_only_instamart(self):
+        instamart = self._descriptor("swiggy_instamart", True)
+        zepto = self._descriptor("zepto", False)
+        with (
+            patch.object(registry_module, "InstamartProviderAdapter",
+                         return_value=type("A", (), {"descriptor": lambda self: instamart})()),
+            patch.object(registry_module, "ZeptoProviderAdapter",
+                         return_value=type("A", (), {"descriptor": lambda self: zepto})()),
+        ):
+            ids = [d["id"] for d in registry_module.ProviderRegistry().descriptors()]
+        self.assertEqual(ids, ["swiggy_instamart"])
 
 
 if __name__ == "__main__":
