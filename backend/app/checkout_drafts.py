@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
-from app.storage import save_provider_checkout_draft
+from app.storage import delete_provider_checkout_draft, save_provider_checkout_draft
 
 
 def _now_iso() -> str:
@@ -418,7 +418,15 @@ def update_draft_review_fields(
 def save_order_outcome(
     existing_row: Dict[str, Any],
     outcome: Dict[str, Any],
-) -> Dict[str, Any]:
+) -> Dict[str, Any] | None:
+    """Record an order attempt's outcome, or discard the review if it failed.
+
+    A failed order or payment keeps nothing: the cart, address and payment
+    state from a transaction that did not go through are deleted at once
+    (Swiggy's integration terms), and None is returned. Placed, pending and
+    unconfirmed attempts are kept, so Kitch can finish or verify them and never
+    submits a second order while one may still be going through.
+    """
     existing = draft_row_to_review(existing_row) or {}
     outcome_status = str(outcome.get("status") or "unknown")
     status = {
@@ -426,7 +434,13 @@ def save_order_outcome(
         "payment_pending": "payment_pending",
         "payment_confirmation_pending": "payment_pending",
         "unknown": "unknown",
-    }.get(outcome_status, "blocked")
+    }.get(outcome_status, "failed")
+    if status == "failed":
+        delete_provider_checkout_draft(
+            str(existing_row.get("provider") or ""),
+            str(existing_row.get("provider_environment") or "production"),
+        )
+        return None
     payment_state = dict(outcome.get("payment_state") or existing.get("payment_state") or {})
     # Payment deep links are immediate hand-off material, not durable review
     # state. The caller still receives them in the direct checkout response.
@@ -447,11 +461,6 @@ def save_order_outcome(
         "order_review_acknowledged": False,
         "confirmation_token": None,
     }
-    if status == "blocked":
-        payload["order_blockers"] = list(dict.fromkeys([
-            *(existing.get("order_blockers") or []),
-            str(outcome.get("message") or "The provider did not confirm the order."),
-        ]))
     payload["snapshot_hash"] = checkout_snapshot_hash({**existing, **payload})
     return draft_row_to_review(save_provider_checkout_draft(
         payload,

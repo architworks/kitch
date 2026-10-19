@@ -1694,7 +1694,10 @@ export function useKitch() {
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
-      setProviderCartReview(data.review || data);
+      // A failed order keeps nothing: the server deletes the review, so the
+      // owner prepares the cart again for another try.
+      if (data.review) setProviderCartReview(data.review);
+      else invalidateProviderReview();
       const handoff = data.result?.payment_state || null;
       setProviderPaymentHandoff(handoff && (
         handoff.upi_intent_url || handoff.bridge_url || handoff.is_qr_flow
@@ -1722,7 +1725,8 @@ export function useKitch() {
           "info"
         );
       } else {
-        triggerBannerAlert(data.result?.message || `${selectedProvider.label} order could not be placed.`, "error");
+        const reason = data.result?.message || `${selectedProvider.label} order could not be placed.`;
+        triggerBannerAlert(`${reason} Prepare the cart again to try once more.`, "error");
       }
     } catch (e) {
       console.error(`Failed to place ${selectedProvider.label} order`, e);
@@ -1778,11 +1782,14 @@ export function useKitch() {
       });
       await requireSuccessfulResponse(res);
       const data = await res.json();
-      const review = data.review || data;
+      // A failed payment comes back without a review: the server deleted it.
+      const review = data.review || null;
       applyProviderDraft(review);
       setProviderPaymentCheckedAt(new Date().toISOString());
-      setIsProviderOrderComplete(review.status === "ordered");
-      if (review.status === "ordered") {
+      setIsProviderOrderComplete(review?.status === "ordered");
+      if (!review) {
+        triggerBannerAlert(`The ${selectedProvider.label} payment did not go through. Prepare the cart again to try once more.`, "error");
+      } else if (review.status === "ordered") {
         setProviderPaymentHandoff(null);
         triggerBannerAlert(`${selectedProvider.label} confirmed the payment and order.`, "success");
       } else if (review.status !== "payment_pending") {

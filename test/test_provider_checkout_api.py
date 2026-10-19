@@ -613,12 +613,10 @@ class CheckoutIntegritySecurityTests(unittest.IsolatedAsyncioTestCase):
         recent = {**self.draft_row(), "status": "unknown", "updated_at": now.isoformat()}
         settled = {**self.draft_row(), "status": "unknown", "provider_order_ids": ["ord-1"],
                    "updated_at": (now - timedelta(hours=1)).isoformat()}
-        saved = []
         with (
             patch("app.grocery_checkout.claim_provider_checkout_operation", return_value=True),
             patch("app.grocery_checkout.release_provider_checkout_operation", return_value=True),
-            patch("app.grocery_checkout.save_provider_checkout_draft",
-                  side_effect=lambda payload, *args: saved.append(payload) or {**settled, **payload}),
+            patch("app.grocery_checkout.delete_provider_checkout_draft") as delete,
         ):
             with self.assertRaises(ProviderOperationError) as caught:
                 service.release_unresolved_attempt("swiggy_instamart", {})
@@ -629,10 +627,9 @@ class CheckoutIntegritySecurityTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caught.exception.code, "attempt_still_settling")
             with patch("app.grocery_checkout.get_provider_checkout_draft", return_value=settled):
                 response = service.release_unresolved_attempt("swiggy_instamart", {"checked_in_provider_app": True})
-        self.assertEqual(response["draft"]["status"], "blocked")
-        self.assertFalse(response["draft"]["can_place_order"])
-        self.assertEqual(response["draft"]["provider_order_ids"], ["ord-1"])
-        self.assertEqual(len(saved), 1)
+        # The unconfirmed attempt is deleted once the owner has checked it.
+        self.assertIsNone(response["draft"])
+        delete.assert_called_once_with("swiggy_instamart", "production")
 
     def test_preflight_never_swaps_the_approved_payment_method(self):
         """#9: Instamart now offers only wallet; the owner approved UPI."""

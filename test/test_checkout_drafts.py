@@ -470,6 +470,42 @@ class CheckoutDraftTests(unittest.TestCase):
         self.assertNotIn("upi_intent_url", saved["payment_state"])
         self.assertNotIn("bridge_url", saved["payment_state"])
 
+    def test_failed_order_or_payment_deletes_the_review(self):
+        """Swiggy's terms: keep nothing from a transaction that did not go through."""
+        initial = persisted_row({
+            "status": "payment_pending",
+            "provider": "swiggy_instamart",
+            "selected_address_id": "address-1",
+            "payment_state": {"paas_id": "paas-1"},
+        })
+        for status in ("payment_failed", "error", "failed"):
+            with (
+                patch("app.checkout_drafts.save_provider_checkout_draft") as save,
+                patch("app.checkout_drafts.delete_provider_checkout_draft") as delete,
+            ):
+                self.assertIsNone(save_order_outcome(initial, {"status": status, "message": "Declined"}))
+            delete.assert_called_once_with("swiggy_instamart", "production")
+            save.assert_not_called()
+
+    def test_pending_or_unconfirmed_orders_are_kept(self):
+        """They may still go through, so Kitch keeps them to finish or verify."""
+        initial = persisted_row({"status": "checkout_pending", "payment_state": {}})
+        for status, expected in (
+            ("payment_pending", "payment_pending"),
+            ("payment_confirmation_pending", "payment_pending"),
+            ("unknown", "unknown"),
+        ):
+            with (
+                patch(
+                    "app.checkout_drafts.save_provider_checkout_draft",
+                    side_effect=lambda payload, **kwargs: persisted_row({**initial, **payload}),
+                ),
+                patch("app.checkout_drafts.delete_provider_checkout_draft") as delete,
+            ):
+                saved = save_order_outcome(initial, {"status": status})
+            self.assertEqual(saved["status"], expected)
+            delete.assert_not_called()
+
     def test_hash_changes_with_confirmed_provider_projection(self):
         review = {
             "native_items": [self.native_item()],

@@ -24,6 +24,7 @@ from app.commerce_policy import (
 from app.storage import (
     apply_native_grocery_cart_changes,
     claim_provider_checkout_operation,
+    delete_provider_checkout_draft,
     get_grocery_cart,
     get_provider_checkout_draft,
     get_selected_grocery_provider,
@@ -674,8 +675,9 @@ class GroceryCheckoutService:
         """Let the owner start over after checking an unresolved order in Swiggy.
 
         Kitch never resubmits an order whose outcome it could not confirm. Only
-        an explicit owner action, after the hold, clears it; the earlier
-        attempt's identifiers stay on record.
+        an explicit owner action, after the hold, clears it. The unconfirmed
+        attempt is then deleted, like any order that did not go through; the
+        owner prepares a fresh cart.
         """
         _require_household_owner("start a new grocery order")
         adapter = self.registry.get(provider_id)
@@ -710,24 +712,11 @@ class GroceryCheckoutService:
                     status_code=409,
                     draft=draft_row_to_review(row),
                 )
-            released = save_provider_checkout_draft(
-                {
-                    "status": "blocked",
-                    "can_place_order": False,
-                    "order_review_acknowledged": False,
-                    "confirmation_token": None,
-                    "order_blockers": [
-                        "The previous order could not be confirmed by Kitch. "
-                        "The owner checked it in the Swiggy app and chose to start a new order.",
-                    ],
-                },
-                provider_id,
-                environment,
-            )
+            delete_provider_checkout_draft(provider_id, environment)
             return {
                 "status": "success",
                 "provider": provider_id,
-                "draft": draft_row_to_review(released),
+                "draft": None,
             }
         finally:
             release_provider_checkout_operation(operation_id, provider_id, environment)

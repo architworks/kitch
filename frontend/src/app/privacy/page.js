@@ -41,7 +41,7 @@ export default function PrivacyPage() {
       <h2>How long Kitch keeps it</h2>
       <ul>
         <li>Household data stays until you edit it, delete it, or delete your account.</li>
-        <li>Grocery checkout reviews, payment status and order outcomes expire 24 hours after they were last used.</li>
+        <li>Grocery checkout reviews, payment status and order outcomes expire 24 hours after they were last used. If an order or its payment fails, its checkout review is deleted at once.</li>
         <li>Grocery app sign-in tokens are kept, encrypted, until you disconnect or they expire; expired connections are removed after 30 days.</li>
         <li>Server logs are kept only as long as needed to run and secure the service.</li>
         <li>Usage metrics are deleted after 90 days, or when you delete your account or leave a household.</li>
