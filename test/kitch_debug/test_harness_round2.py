@@ -225,14 +225,14 @@ async def run_round2():
             log_result("8.3", "FAIL", f"No calorie discussion. Tools: {tools}")
 
     # ========================================================================
-    # SCENARIO 9.3: Order groceries on Blinkit
+    # SCENARIO 9.3: Order groceries on Instamart
     # ========================================================================
     print("\n" + "=" * 70)
-    print("💬 SCENARIO 9.3: Order Groceries on Blinkit")
+    print("💬 SCENARIO 9.3: Order Groceries on Instamart")
     print("=" * 70)
 
-    results = await run_conversation(runner, "archit", "r2_blinkit",
-        ["Order the groceries on Blinkit"])
+    results = await run_conversation(runner, "archit", "r2_instamart",
+        ["Order the groceries on Instamart"])
 
     if results:
         tools = results[0].get("tool_calls", [])

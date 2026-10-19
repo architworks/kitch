@@ -545,9 +545,9 @@ for module in (
 
     def test_chat_reply_attributes_another_grocery_app_only_to_itself(self):
         body = self._chat_with_tool_responses([
-            {"status": "success", "provider": "zepto", "items": []},
+            {"status": "success", "provider": "swiggy_instamart", "items": []},
         ])
-        self.assertEqual(body["provider_sources"], ["zepto"])
+        self.assertEqual(body["provider_sources"], ["swiggy_instamart"])
 
     def test_instamart_cancellation_guidance_is_attributed_to_instamart(self):
         body = self._chat_with_tool_responses([], message="cancel my instamart order")

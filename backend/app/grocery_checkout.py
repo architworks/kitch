@@ -211,7 +211,7 @@ class GroceryCheckoutService:
             canonical_provider = ProviderRegistry.canonical_id(
                 get_selected_grocery_provider()
             )
-        if canonical_provider not in {"zepto", "swiggy_instamart"}:
+        if canonical_provider not in ProviderRegistry.FACTORIES:
             raise ProviderOperationError(
                 provider=canonical_provider or "unselected",
                 operation="read_cart",
@@ -952,7 +952,7 @@ class GroceryCheckoutService:
             provider_id = ProviderRegistry.canonical_id(
                 get_selected_grocery_provider()
             )
-        if provider_id not in {"zepto", "swiggy_instamart"}:
+        if provider_id not in ProviderRegistry.FACTORIES:
             raise ProviderOperationError(
                 provider=provider_id or "unselected", operation="chat_sync_cart",
                 code="provider_selection_required",

@@ -75,7 +75,7 @@ must use unique unresolved native items.
 
 ### OP-001: Live provider testing requires valid external authentication
 
-Zepto can be disabled and Swiggy tokens expire or return 401. In that state the
+Swiggy tokens expire or return 401. In that state the
 provider UI should show disabled or `reconnect_required`, and live Section 7
 tests cannot exercise address, cart, payment, or revalidation behavior. This is
 an external prerequisite, not a core-readiness failure and not evidence of a

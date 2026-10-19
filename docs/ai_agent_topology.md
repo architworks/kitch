@@ -41,8 +41,6 @@ flowchart TB
     InstamartAgent --> MemoryTools
     InstamartAgent --> Policy[CommerceToolPolicy]
     Policy --> InstamartMCP[Swiggy Instamart MCP]
-    Checkout --> ZeptoAdapter[Zepto adapter]
-    ZeptoAdapter --> ZeptoMCP[Zepto MCP]
 ```
 
 Every box labelled `AGENT` is a Gemini-backed ADK `LlmAgent`. Tools and

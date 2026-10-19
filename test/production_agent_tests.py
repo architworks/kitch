@@ -5,7 +5,7 @@ Kitch Production Agent Test Suite
 Runs the scriptable functional scenarios against the live application using
 FastAPI endpoints (localhost:8000) and the live Supabase database. Provider
 checkout scenarios remain in the manual/browser blueprint because they require
-an authenticated Zepto session and must not place a real order.
+an authenticated Instamart session and must not place a real order.
 
 Usage:
     python test/production_agent_tests.py

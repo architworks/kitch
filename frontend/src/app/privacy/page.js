@@ -9,7 +9,7 @@ export default function PrivacyPage() {
   return (
     <LegalDocument
       title="Privacy Policy"
-      intro="Kitch is an independent, personal project that helps one household plan meals, keep a pantry, prepare grocery carts and log nutrition. This policy explains what Kitch collects, why, who processes it on Kitch’s behalf, and the choices you have. Kitch is not affiliated with or endorsed by Google, Swiggy, Zepto or Blinkit."
+      intro="Kitch is an independent, personal project that helps one household plan meals, keep a pantry, prepare grocery carts and log nutrition. This policy explains what Kitch collects, why, who processes it on Kitch’s behalf, and the choices you have. Kitch is not affiliated with or endorsed by Google or Swiggy."
     >
       <h2>What Kitch collects</h2>
       <ul>

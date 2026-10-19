@@ -178,12 +178,9 @@ class _LazyGroceryCheckoutService:
 
     def _load(self):
         if self._service is None:
-            from app.agent.tools import apply_zepto_brand_memory_to_cart_items
             from app.grocery_checkout import GroceryCheckoutService
 
-            self._service = GroceryCheckoutService(
-                cart_mapper=apply_zepto_brand_memory_to_cart_items,
-            )
+            self._service = GroceryCheckoutService()
         return self._service
 
     def __getattr__(self, name: str) -> Any:
@@ -412,7 +409,7 @@ def _confirmation_action_from_tool_response(value: Any, depth: int = 0) -> Dict[
     return None
 
 
-CHAT_PROVIDER_IDS = ("zepto", "swiggy_instamart")
+CHAT_PROVIDER_IDS = ("swiggy_instamart",)
 
 
 def _provider_source_from_tool_response(value: Any, depth: int = 0) -> str:

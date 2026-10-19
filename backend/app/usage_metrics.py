@@ -30,7 +30,7 @@ AGENT_FEATURES = {
 }
 # Anything that touches a grocery app collapses to one generic feature, so no
 # provider, product, cart or order detail is ever recorded.
-GROCERY_APP_MARKERS = ("instamart", "provider", "swiggy", "zepto", "blinkit")
+GROCERY_APP_MARKERS = ("instamart", "provider", "swiggy")
 GROCERY_APP_FEATURE = "grocery_app"
 
 

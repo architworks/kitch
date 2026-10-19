@@ -387,8 +387,7 @@ export function useKitch() {
         if (providers.some(provider => provider.id === current && provider.enabled)) return current;
         if (providers.some(provider => provider.id === selectedByWorkflow && provider.enabled)) return selectedByWorkflow;
         const connectedInstamart = providers.find(provider => provider.id === "swiggy_instamart" && provider.enabled && provider.state === "connected");
-        const connectedZepto = providers.find(provider => provider.id === "zepto" && provider.enabled && provider.state === "configured");
-        return connectedInstamart?.id || connectedZepto?.id || "";
+        return connectedInstamart?.id || "";
       });
       return providers;
     } catch (e) {

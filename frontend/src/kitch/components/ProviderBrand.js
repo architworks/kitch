@@ -1,14 +1,11 @@
 "use client";
 
-// Grocery-app branding. Kitch works with several grocery apps, so nothing
-// here is specific to one: each provider's descriptor from the backend says
-// what attribution it needs, and it is shown only beside that provider's
-// own content.
+// Grocery-app branding. Nothing here is specific to one app: each provider's
+// descriptor from the backend says what attribution it needs, and it is shown
+// only beside that provider's own content.
 
 export const PROVIDER_LOGOS = {
-  swiggy_instamart: "/instamart-logo.jpg",
-  zepto: "/zepto-logo.jpg",
-  blinkit: "/blinkit-logo.jpg"
+  swiggy_instamart: "/instamart-logo.jpg"
 };
 
 export function ProviderLogo({ provider, size = 36 }) {

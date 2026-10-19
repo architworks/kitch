@@ -274,26 +274,6 @@ Provider retention defaults are configured with
 `KITCH_EXPIRED_PROVIDER_CONNECTION_RETENTION_DAYS=30`. See
 `security_and_privacy.md` for the exact lifecycle and deletion behavior.
 
-### Zepto
-
-| Variable | Purpose |
-| --- | --- |
-| `ZEPTO_MCP_ENABLED` | Enable or disable Zepto. Defaults to disabled/Coming Soon unless explicitly set to `true`. |
-| `ZEPTO_MCP_URL` | MCP endpoint; defaults to `https://mcp.zepto.co.in/mcp`. |
-| `ZEPTO_MCP_ACCESS_TOKEN` | Preferred bearer-token variable. |
-| `ZEPTO_MCP_BEARER_TOKEN` | Alternate bearer-token variable. |
-| `ZEPTO_ACCESS_TOKEN` | Alternate bearer-token variable. |
-| `ZEPTO_MCP_HEADERS` | Optional JSON MCP headers. |
-| `ZEPTO_MCP_TRANSPORT` | Optional transport override. |
-| `ZEPTO_MCP_REMOTE_COMMAND` | Local bridge command; defaults to `npx`. |
-| `ZEPTO_MCP_REMOTE_ARGS` | Optional bridge argument list. |
-
-Default local OAuth bridge:
-
-```bash
-npx -y mcp-remote https://mcp.zepto.co.in/mcp
-```
-
 ### Swiggy Instamart
 
 | Variable | Purpose |
@@ -328,7 +308,7 @@ Canonical console procedures are in `vertex_memory_setup.md` and
 
 Provider outages degrade only that provider; they do not make core persistence
 readiness fail. Instamart production remains gated by provider approval and
-staging validation. Blinkit remains a disabled `Coming soon` descriptor.
+staging validation.
 
 Current defects and deliberately deferred engineering work are tracked only in
 `known_issues_and_optimisations.md`.

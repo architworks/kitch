@@ -699,23 +699,20 @@ recommending items already stocked.
 
 ## Section 8: Ordering App Integration
 
-These four scenarios apply the same functional contract to Zepto and Swiggy
-Instamart. Use fixtures or Swiggy staging for order-path tests. Never place an
+These four scenarios cover Swiggy Instamart, Kitch's ordering app. Use fixtures or Swiggy staging for order-path tests. Never place an
 automated or browser-test order against production.
 
 ### Scenario 8.1 - Provider Selection, Connection, and Address
 
-- Prerequisite: Apply the multi-provider migration and configure at least one
-  test provider. Use an authorized Swiggy local/staging account for Instamart.
+- Prerequisite: Apply the provider migration and configure Instamart. Use an authorized Swiggy local/staging account for Instamart.
 - Prompt/action: Open **Groceries**, inspect provider cards, connect Instamart,
   and confirm saved addresses load automatically,
   and choose one when needed.
 - Provider check: Cards, environment, capabilities, connection state, and API
-  actions must come from the backend registry. Blinkit remains visible,
-  disabled, labelled **Coming soon**, and issues no request.
+  actions must come from the backend registry.
 - Preference check: The last selected provider persists for the household. With
-  no preference, connected Zepto wins, then connected Instamart; when neither
-  is connected, provider selection remains active.
+  no preference, a connected Instamart is selected; otherwise provider
+  selection remains active.
 - OAuth check: Instamart Connect completes PKCE authorization. Expired/replayed
   state fails, a 401 or expired token shows **Reconnect**, and Disconnect
   removes the provider draft without changing the native cart. No token, PKCE

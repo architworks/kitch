@@ -12,7 +12,7 @@ export default function TermsPage() {
       intro="These terms apply when you use Kitch. By signing in and accepting them, you agree to them. If you do not agree, do not use Kitch."
     >
       <h2>1. What Kitch is</h2>
-      <p>Kitch is an independent, personal project: an AI kitchen companion for one household. It is provided free of charge, as is, and may change, pause or stop at any time. Kitch is not affiliated with or endorsed by Google, Swiggy, Zepto or Blinkit.</p>
+      <p>Kitch is an independent, personal project: an AI kitchen companion for one household. It is provided free of charge, as is, and may change, pause or stop at any time. Kitch is not affiliated with or endorsed by Google or Swiggy.</p>
 
       <h2>2. Who can use it</h2>
       <p>You must be 18 or older. One Google account owns each household. As the owner you are responsible for activity in your household and for having the agreement of the people you add as members.</p>

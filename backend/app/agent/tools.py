@@ -421,30 +421,6 @@ def delete_recipe_grocery_plan_tool(plan_id: str) -> Dict[str, Any]:
   """Delete one explicitly identified recipe and its linked agent-generated cart rows."""
   return {"status": "success" if db_delete_recipe_grocery_plan(plan_id) else "not_found"}
 
-async def apply_zepto_brand_memory_to_cart_items(
-  items: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-  """Preserve Zepto's existing preference-enriched search terms only.
-
-  Instamart never calls this mapper; its dedicated cart agent reads ordering
-  preferences directly and reasons over the live MCP catalogue.
-  """
-  mapped_items: List[Dict[str, Any]] = []
-  for item in items:
-    item_name = str(item.get("name") or item.get("item") or "").strip()
-    mapped = dict(item)
-    mapped["search_name"] = item_name
-    if item_name:
-      memory_result = await search_household_memory_tool(
-        f"Household brand, pack, or product preference specifically relevant to {item_name}"
-      )
-      if memory_result.get("status") == "success" and memory_result.get("memories"):
-        text = str(memory_result["memories"][0].get("text") or "").strip()
-        if text and len(text) < 160:
-          mapped["search_name"] = f"{item_name} {text}"
-    mapped_items.append(mapped)
-  return mapped_items
-
 def list_grocery_providers_tool() -> Dict[str, Any]:
   """Read provider availability without exposing credentials or mutation tools."""
   return {"status": "success", "providers": provider_registry.descriptors()}
@@ -459,8 +435,8 @@ async def get_provider_cart_tool(provider: str = "") -> Dict[str, Any]:
   """
   Read the current ordering-app cart without changing it. The provider is
   optional; omit it to use the ordering app most recently selected in the UI.
-  Canonical provider IDs are `swiggy_instamart` and `zepto`; natural aliases
-  such as `Instamart` and `Swiggy` are also accepted by the backend.
+  The canonical provider ID is `swiggy_instamart`; natural aliases such as
+  `Instamart` and `Swiggy` are also accepted by the backend.
   """
   from app.main import grocery_checkout_service
 

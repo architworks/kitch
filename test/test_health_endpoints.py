@@ -102,7 +102,7 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             worker_threads.append(threading.get_ident())
             return {"status": "ready"}
 
-        providers = [{"provider": "zepto", "state": "disconnected"}]
+        providers = [{"provider": "swiggy_instamart", "state": "disconnected"}]
         with (
             patch.object(main, "auth_required", return_value=False),
             patch.object(main, "validate_persistence_readiness", side_effect=validate),
@@ -225,54 +225,24 @@ class ProviderReadinessTimeoutTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(1)
                 return {"provider": descriptor.id, "state": "ready"}
 
-        adapters = [SlowAdapter(), SlowAdapter()]
         with (
-            patch.object(
-                registry_module,
-                "ZeptoProviderAdapter",
-                return_value=adapters[0],
-            ),
-            patch.object(
-                registry_module,
-                "InstamartProviderAdapter",
-                return_value=adapters[1],
-            ),
+            patch.dict(registry_module.ProviderRegistry.FACTORIES,
+                       {"slow_a": SlowAdapter, "slow_b": SlowAdapter}, clear=True),
             patch.object(registry_module, "PROVIDER_READINESS_TIMEOUT_SECONDS", 0.01),
         ):
             result = await registry_module.ProviderRegistry().readiness()
 
-        self.assertEqual(result[0]["state"], "degraded")
+        self.assertEqual([entry["state"] for entry in result], ["degraded", "degraded"])
         self.assertIn("timed out", result[0]["message"])
-        self.assertEqual(result[1]["state"], "degraded")
-        self.assertNotIn("blinkit", [entry["provider"] for entry in result])
 
 
-class HostedGroceryAppListTests(unittest.TestCase):
-    """Kitch is offered with Swiggy Instamart only."""
+class GroceryAppListTests(unittest.TestCase):
+    """Kitch orders through Swiggy Instamart only."""
 
-    def _descriptor(self, provider_id, enabled):
-        return ProviderDescriptor(
-            id=provider_id,
-            label=provider_id,
-            brand_label=provider_id,
-            description="",
-            enabled=enabled,
-            state="connected" if enabled else "disabled",
-            message="",
-            capabilities=ProviderCapabilities(),
-        )
-
-    def test_hosted_app_lists_only_instamart(self):
-        instamart = self._descriptor("swiggy_instamart", True)
-        zepto = self._descriptor("zepto", False)
-        with (
-            patch.object(registry_module, "InstamartProviderAdapter",
-                         return_value=type("A", (), {"descriptor": lambda self: instamart})()),
-            patch.object(registry_module, "ZeptoProviderAdapter",
-                         return_value=type("A", (), {"descriptor": lambda self: zepto})()),
-        ):
-            ids = [d["id"] for d in registry_module.ProviderRegistry().descriptors()]
-        self.assertEqual(ids, ["swiggy_instamart"])
+    def test_only_instamart_is_registered(self):
+        self.assertEqual(list(registry_module.ProviderRegistry.FACTORIES), ["swiggy_instamart"])
+        with self.assertRaises(registry_module.ProviderOperationError):
+            registry_module.ProviderRegistry().get("another_grocery_app")
 
 
 if __name__ == "__main__":

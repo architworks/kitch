@@ -46,9 +46,7 @@ flowchart LR
     Checkout --> ProviderExecutor[Selected provider cart executor]
     ProviderExecutor --> ToolPolicy[Commerce tool policy]
     ProviderExecutor --> InstamartMCP[Swiggy Instamart /im MCP]
-    Checkout --> ZeptoAdapter[ZeptoProviderAdapter]
     Checkout --> InstamartAdapter[InstamartProviderAdapter]
-    ZeptoAdapter --> ZeptoMCP[Zepto MCP]
     InstamartAdapter --> InstamartMCP
 ```
 
@@ -107,8 +105,7 @@ not core application readiness.
 ### Provider sync is backend-authorized and provider-specific
 
 All provider sync and order approval sits behind provider-keyed backend HTTP
-endpoints and `GroceryCheckoutService`. Zepto performs matching through its
-adapter. Swiggy Instamart runs a dedicated Gemini cart agent with a restricted
+endpoints and `GroceryCheckoutService`. Swiggy Instamart runs a dedicated Gemini cart agent with a restricted
 MCP toolset, then uses `InstamartProviderAdapter` to normalize the exact captured
 provider cart, prices, payment capabilities, and checkout response.
 
@@ -145,8 +142,7 @@ Current duties:
 - Render the Recipes page for recipe+grocery artifacts.
 - Render the Groceries page as a provider-neutral, six-stage vertical checkout
   workflow with compact numbered markers and a collapsible native cart.
-- Fetch Zepto, Swiggy Instamart, and disabled Blinkit descriptors from the
-  backend registry rather than maintaining a frontend route registry.
+- Fetch the Swiggy Instamart descriptor from the backend registry rather than maintaining a frontend route registry.
 - Render individual nutrition state.
 - Render shared calendar-date plan state with navigable Monday-Sunday views.
 - Render complete pantry inventory, revision/review age, and native purchase
@@ -337,8 +333,8 @@ Why this model:
 
 ## Native Cart to Ordering Provider Flow
 
-The frontend and API are provider-neutral. Zepto and Swiggy Instamart implement
-the same adapter contract. Provider-specific MCP identifiers remain inside the
+The frontend and API are provider-neutral; Swiggy Instamart, the one registered
+provider, implements the adapter contract. Provider-specific MCP identifiers remain inside the
 adapter and normalized mappings stored in the draft.
 
 ```mermaid
@@ -369,7 +365,7 @@ sequenceDiagram
         Agent->>MCP: Read provider cart and repair once if needed
         Agent-->>Service: Match reasoning + captured exact MCP results
         Service->>Adapter: Normalize confirmed cart, bill, and capabilities
-    else Adapter-driven provider such as Zepto
+    else Adapter-driven provider (none registered today)
         Service->>Adapter: Synchronize selected native snapshot
         Adapter->>MCP: Search, replace cart, and read back
         MCP-->>Adapter: Confirmed provider response
@@ -407,9 +403,8 @@ Architectural invariants:
 
 - User selection means "include this native row in the chosen provider projection."
 - Pantry-covered rows are never included.
-- The checkout UI's last operational provider selection is restored. Without one, connected Zepto is chosen
-  first, then connected Instamart; otherwise provider selection stays active.
-  Blinkit is disabled and cannot issue API calls.
+- The checkout UI's last operational provider selection is restored. Without one, a connected
+  Instamart is chosen; otherwise provider selection stays active.
 - A saved delivery address is required before sync.
 - Provider sync cannot start while a native-cart write is still in flight.
 - Sync, revalidation, and checkout are serialized per household/provider;
@@ -463,8 +458,7 @@ Architectural invariants:
   auto-confirmation did not occur.
 - When Instamart returns exactly one supported payment method, Kitch records it
   automatically and presents it as a fixed checkout detail. Multiple Instamart
-  methods still require a choice. Zepto retains its independent multi-option
-  payment selector and is not affected by this Instamart-specific behavior.
+  methods still require a choice.
 - Checkout timeouts are not blindly retried. Order history is checked first;
   unresolved duplicate risk is persisted as an ambiguous `unknown` outcome.
 
@@ -485,7 +479,6 @@ behavior are documented in `ux_user_flows.md`, not duplicated here.
 - SQLite migrations run automatically. Hosted Supabase deployments apply the
   versioned SQL migrations before starting FastAPI; bootstrap DDL stays aligned.
 - Provider OAuth and production approval remain externally controlled.
-- Blinkit live integration is not implemented.
 - Instamart production is gated until explicit approval and staging validation.
 - Hosted sign-in can create unrelated one-owner households. Sharing one
   household across multiple authenticated Google accounts is deliberately not

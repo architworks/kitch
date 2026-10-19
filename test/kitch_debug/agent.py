@@ -550,12 +550,12 @@ def calculate_intermediary_grocery_list(
 
 async def export_to_delivery(items: List[Dict[str, Any]], provider: str, tool_context: ToolContext = None) -> str:
     """
-    Exports the grocery list to a delivery service (Blinkit or Zepto).
+    Exports the grocery list to a delivery service (Swiggy Instamart).
     Maps generic ingredients to branded preferences where available.
 
     Args:
         items: List of grocery items with name, qty/amount, unit
-        provider: Delivery provider - "blinkit" or "zepto"
+        provider: Delivery provider - "instamart"
     """
     provider_clean = provider.lower().strip()
     to_buy = items if isinstance(items, list) else []
@@ -679,9 +679,9 @@ checkout_exporter = LlmAgent(
         "Handles all requests related to grocery shopping and delivery: "
         "compiling grocery lists based on the meal plan, accounting for pantry stock, "
         "recording brand preferences, applying dietary filters to shopping lists, "
-        "and exporting/ordering groceries on Blinkit or Zepto. "
+        "and exporting/ordering groceries on Swiggy Instamart. "
         "Route here when the user asks about groceries, shopping lists, 'what do I need to buy', "
-        "'order on Blinkit', or sets brand preferences."
+        "'order on Instamart', or sets brand preferences."
     ),
     instruction=(
         "You are Kitch's Grocery Manager — you compile shopping lists and handle delivery orders.\n\n"
@@ -735,7 +735,7 @@ kitch_coordinator = LlmAgent(
         "  food in text ('I ate pasta') OR uploads a photo. Also for pantry/fridge scanning, "
         "  calorie tracking, and 'how many calories today' questions.\n\n"
         "→ 'checkout_exporter': For ANYTHING about grocery shopping, shopping lists, "
-        "  'what do I need to buy', brand preferences, or ordering on Blinkit/Zepto.\n\n"
+        "  'what do I need to buy', brand preferences, or ordering on Instamart.\n\n"
         "GUIDELINES:\n"
         "1. Be warm and conversational. You're the household's kitchen buddy, not a robot.\n"
         "2. Route naturally — don't tell the user which agent you're using.\n"

@@ -11,15 +11,17 @@ from app.providers.base import (
     ProviderOperationError,
 )
 from app.providers.instamart import InstamartProviderAdapter
-from app.providers.zepto import ZeptoProviderAdapter
 
 
 PROVIDER_READINESS_TIMEOUT_SECONDS = 5.0
 
 
 class ProviderRegistry:
+    # Every grocery app Kitch can order with, by stable provider key.
+    FACTORIES = {
+        "swiggy_instamart": InstamartProviderAdapter,
+    }
     _ALIASES = {
-        "zepto": "zepto",
         "swiggy": "swiggy_instamart",
         "instamart": "swiggy_instamart",
         "swiggy_instamart": "swiggy_instamart",
@@ -62,24 +64,12 @@ class ProviderRegistry:
         )
 
     def descriptors(self) -> list[Dict[str, object]]:
-        """Grocery apps the household can order with.
-
-        Kitch is offered with Swiggy Instamart. The Zepto adapter remains only
-        for single-household local development and is listed only when it is
-        explicitly enabled there; the hosted app never shows it.
-        """
-        instamart = InstamartProviderAdapter().descriptor()
-        zepto = ZeptoProviderAdapter().descriptor()
-        listed = [instamart] + ([zepto] if zepto.enabled else [])
-        return [descriptor.as_dict() for descriptor in listed]
+        """Grocery apps the household can order with: Swiggy Instamart."""
+        return [factory().descriptor().as_dict() for factory in self.FACTORIES.values()]
 
     def get(self, provider_id: str) -> GroceryProviderAdapter:
         provider_id = self.canonical_id(provider_id)
-        factories = {
-            "zepto": ZeptoProviderAdapter,
-            "swiggy_instamart": InstamartProviderAdapter,
-        }
-        factory = factories.get(provider_id)
+        factory = self.FACTORIES.get(provider_id)
         if not factory:
             raise ProviderOperationError(
                 provider=provider_id,
@@ -114,7 +104,7 @@ class ProviderRegistry:
         )
 
     async def readiness(self) -> list[Dict[str, object]]:
-        adapters = [ZeptoProviderAdapter(), InstamartProviderAdapter()]
+        adapters = [factory() for factory in self.FACTORIES.values()]
         descriptors = await asyncio.gather(
             *(asyncio.to_thread(adapter.descriptor) for adapter in adapters)
         )
@@ -141,8 +131,7 @@ class ProviderRegistry:
                 })
             else:
                 readiness.append(result)
-        listed = {descriptor["id"] for descriptor in self.descriptors()}
-        return [entry for entry in readiness if entry.get("provider") in listed]
+        return readiness
 
 
 provider_registry = ProviderRegistry()

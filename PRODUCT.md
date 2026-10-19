@@ -10,7 +10,7 @@ web
 
 A shared household, typically two to six adults living together in India, who eat from one meal plan and one pantry but track nutrition individually. One person usually drives planning and grocery ordering; everyone checks what's being cooked and logs what they ate. In hosted use one Google account owns the household and members are editable profiles switched inside Kitch, not separate logins. Local installs are login-free and ask for member names on first run.
 
-Typical moments: glancing at tonight's dinner, asking for next week's plan, telling Kitch what's in the fridge (often with a photo), preparing a Swiggy Instamart or Zepto cart, and logging a plate after eating. Sessions are short and recurring, on a laptop or a phone in the kitchen.
+Typical moments: glancing at tonight's dinner, asking for next week's plan, telling Kitch what's in the fridge (often with a photo), preparing a Swiggy Instamart cart, and logging a plate after eating. Sessions are short and recurring, on a laptop or a phone in the kitchen.
 
 ## Product Purpose
 
@@ -25,7 +25,7 @@ One conversational kitchen that connects dated household meal plans, pantry-awar
 - Conversation (text, plate photo, fridge photo) is the primary control surface; structured pages show the resulting shared or personal state and allow direct edits.
 - Surfaces: Household overview with the dated meal planner, Recipes (latest recipe + ingredients artifacts), Groceries (pantry, native cart, provider checkout stages), Nutrition (personal diary, goals, trends), About.
 - Grocery checkout runs in fixed stages: native cart review → provider selection → connect/address → transfer → provider cart review → payment → explicit approval and order.
-- Grocery providers: Swiggy Instamart (live), Zepto (adapter), Blinkit (coming soon).
+- Grocery provider: Swiggy Instamart.
 - Dates, quantities, units, prices in INR, and macros (kcal, protein, carbs, fats) are the core data.
 
 ## Capabilities and Constraints
@@ -51,7 +51,7 @@ One conversational kitchen that connects dated household meal plans, pantry-awar
 ## Evidence on Hand
 
 - Requirements: `docs/vision_and_requirements.md`; UX flows: `docs/ux_user_flows.md`; architecture: `docs/system_architecture.md`.
-- Provider logos in `frontend/public/` (Instamart, Swiggy, Zepto, Blinkit).
+- Provider logos in `frontend/public/` (Instamart, Swiggy).
 - No testimonials, user counts, benchmarks, or commercial claims exist; none may be fabricated.
 
 ## Product Principles

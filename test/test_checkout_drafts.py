@@ -24,7 +24,7 @@ def persisted_row(payload: dict) -> dict:
     return {
         "id": "draft-1",
         "profile_id": "profile-1",
-        "provider": "zepto",
+        "provider": "test_grocer",
         "provider_environment": "production",
         "created_at": "2026-08-03T00:00:00+00:00",
         "updated_at": "2026-08-03T00:00:00+00:00",
@@ -48,7 +48,7 @@ class CheckoutDraftTests(unittest.TestCase):
     def successful_result(self) -> dict:
         native_item = self.native_item()
         product = {
-            "name": "Zepto Milk",
+            "name": "Test Grocer Milk",
             "productVariantId": "variant-1",
             "storeProductId": "store-product-1",
             "availableQuantity": 10,
@@ -88,9 +88,9 @@ class CheckoutDraftTests(unittest.TestCase):
                 [native_item],
                 self.successful_result(),
                 "address-1",
-                "zepto",
+                "test_grocer",
                 "production",
-                "Zepto",
+                "Test Grocer",
             )
 
         self.assertEqual(review["status"], "ready")
@@ -169,9 +169,9 @@ class CheckoutDraftTests(unittest.TestCase):
                 [native_item],
                 result,
                 "address-1",
-                "zepto",
+                "test_grocer",
                 "production",
-                "Zepto",
+                "Test Grocer",
             )
 
         self.assertEqual(review["status"], "blocked")

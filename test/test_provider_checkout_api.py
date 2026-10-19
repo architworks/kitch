@@ -42,7 +42,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         return {
             "id": "draft-1",
             "profile_id": "profile-1",
-            "provider": "zepto",
+            "provider": "test_grocer",
             "provider_environment": "production",
             "selected_address_id": "address-1",
             "selected_native_item_ids": ["1"],
@@ -308,7 +308,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_order_time_change_stops_before_provider_checkout(self):
         row = self.draft_row()
         adapter = SimpleNamespace(
-            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            descriptor=lambda: SimpleNamespace(environment="production", label="Test Grocer"),
             revalidate_cart=AsyncMock(return_value={"status": "success", "changed": True}),
             place_order=AsyncMock(),
         )
@@ -323,7 +323,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(ProviderOperationError) as caught:
                 await service.place_order(
-                    "zepto",
+                    "test_grocer",
                     {
                         "review_id": "draft-1",
                         "confirmation_token": "token-1",
@@ -340,7 +340,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         from app.checkout_drafts import draft_row_to_review
         row = {**self.draft_row(), "last_validated_at": datetime.now(timezone.utc).isoformat()}
         adapter = SimpleNamespace(
-            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            descriptor=lambda: SimpleNamespace(environment="production", label="Test Grocer"),
             revalidate_cart=AsyncMock(return_value={"status": "success", "items": []}),
             place_order=AsyncMock(return_value={"status": "success", "provider_order_ids": ["order-1"]}),
         )
@@ -355,7 +355,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.save_order_outcome", return_value={**row, "status": "ordered"}),
         ):
             await service.place_order(
-                "zepto",
+                "test_grocer",
                 {
                     "review_id": "draft-1",
                     "confirmation_token": "token-1",
@@ -371,7 +371,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         from app.checkout_drafts import draft_row_to_review
         row = {**self.draft_row(), "last_validated_at": datetime.now(timezone.utc).isoformat()}
         adapter = SimpleNamespace(
-            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            descriptor=lambda: SimpleNamespace(environment="production", label="Test Grocer"),
             revalidate_cart=AsyncMock(return_value={"status": "success", "items": []}),
             place_order=AsyncMock(),
         )
@@ -384,7 +384,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.save_revalidated_draft", return_value=(changed, True)),
         ):
             with self.assertRaises(ProviderOperationError) as caught:
-                await service.place_order("zepto", {
+                await service.place_order("test_grocer", {
                     "review_id": "draft-1", "confirmation_token": "token-1",
                     "approved_snapshot_hash": row["snapshot_hash"], "order_review_acknowledged": True,
                 })
@@ -424,7 +424,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unchanged_review_persists_order_outcome(self):
         row = self.draft_row()
         adapter = SimpleNamespace(
-            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            descriptor=lambda: SimpleNamespace(environment="production", label="Test Grocer"),
             revalidate_cart=AsyncMock(return_value={"status": "success", "changed": False}),
             place_order=AsyncMock(return_value={
                 "status": "success",
@@ -445,7 +445,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.save_order_outcome", return_value=final) as save_outcome,
         ):
             response = await service.place_order(
-                "zepto",
+                "test_grocer",
                 {
                     "review_id": "draft-1",
                     "confirmation_token": "token-1",
@@ -461,7 +461,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
         row = self.draft_row()
         refreshed = {**row, "last_validated_at": "2026-10-11T00:00:00+00:00"}
         adapter = SimpleNamespace(
-            descriptor=lambda: SimpleNamespace(environment="production", label="Zepto"),
+            descriptor=lambda: SimpleNamespace(environment="production", label="Test Grocer"),
             revalidate_cart=AsyncMock(return_value={"status": "success", "changed": False}),
         )
         service = self.service(adapter)
@@ -472,7 +472,7 @@ class ProviderCheckoutServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("app.grocery_checkout.get_grocery_cart", return_value=[]),
             patch("app.grocery_checkout.save_revalidated_draft", return_value=(refreshed, False)),
         ):
-            response = await service.revalidate("zepto")
+            response = await service.revalidate("test_grocer")
         adapter.revalidate_cart.assert_awaited_once()
         self.assertEqual(response["draft"]["last_validated_at"], refreshed["last_validated_at"])
 

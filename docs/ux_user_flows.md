@@ -123,7 +123,7 @@ Users should be able to:
 3. Modify one meal without damaging the rest of the plan.
 4. Update pantry stock manually, conversationally, or from a fridge photo.
 5. Generate a grocery list from the current plan and pantry.
-6. Sync eligible grocery rows to Zepto or Swiggy Instamart for review.
+6. Sync eligible grocery rows to Swiggy Instamart for review.
 7. Save brand preferences for future grocery preparation.
 8. Log personal food intake from text or a plate photo.
 9. See personal daily nutrition progress.
@@ -335,8 +335,7 @@ Example prompts:
 The native grocery cart is structured backend state. The Groceries page presents
 one visible, prerequisite-locked workflow: native cart review, ordering-app
 selection, delivery address, provider transfer, provider cart review, then
-payment and order. Zepto and Swiggy Instamart are backend-described providers;
-Blinkit is disabled with `Coming soon`.
+payment and order. Swiggy Instamart is a backend-described provider.
 
 The native cart is also allowed to contain standalone `source=manual` intent
 that did not come from a recipe. For example:
@@ -361,7 +360,7 @@ Example prompts:
 
 - "Open my groceries so I can order them."
 - "Put tomorrow's groceries in Instamart."
-- "Help me review this cart in Zepto."
+- "Help me review this cart in Instamart."
 - "Move my grocery list to Instamart."
 - "Add one Dairy Milk chocolate and sync my cart to Instamart."
 
@@ -370,8 +369,8 @@ Example prompts:
 1. Native intent may come from recipe planning, standalone chat changes, or
    manual UI edits. The user may review and select eligible rows in the UI, but
    opening that screen is not mandatory for an explicit chat synchronization.
-2. The user chooses Zepto or Swiggy Instamart. Blinkit remains visible and
-   disabled. Kitch remembers the household's last selection.
+2. The user chooses Swiggy Instamart. Kitch remembers the household's last
+   selection.
 3. If required, the user connects or reconnects the provider. Instamart shows
    its environment and uses a household-owned OAuth connection.
 4. The user selects a saved delivery address.
@@ -447,10 +446,9 @@ provider success.
 
 ### Current Product Boundary
 
-Zepto and Instamart implement one backend contract. Instamart is limited to the
+Instamart implements the backend provider contract and is limited to the
 Swiggy `/im` MCP surface; Food and Dineout are inaccessible. Production Instamart
-remains gated until Swiggy approval and a successful staging soak. Blinkit live
-cart insertion is not implemented.
+remains gated until Swiggy approval and a successful staging soak.
 
 ---
 
@@ -645,7 +643,6 @@ These are future product areas:
 
 - Multi-household registration.
 - Auth-backed household membership.
-- Blinkit MCP cart insertion.
 - Richer provider substitution review.
 
 ---
