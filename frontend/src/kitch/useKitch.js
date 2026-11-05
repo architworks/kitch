@@ -84,6 +84,7 @@ export function useKitch() {
   const chatMessagesRef = useRef(null);
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
   const confirmedGroceryItemsRef = useRef([]);
+  const pendingGroceryDeletesRef = useRef(new Set());
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [liveStateUser, setLiveStateUser] = useState("");
   const [householdBootstrap, setHouseholdBootstrap] = useState(null);
@@ -1285,9 +1286,16 @@ export function useKitch() {
 
   const deleteGroceryCartItem = async (item) => {
     if (providerSyncInFlightRef.current || !item?.id) return;
+    // One delete per row at a time: a second click while the first is in
+    // flight would only find the row already gone.
+    if (pendingGroceryDeletesRef.current.has(item.id)) return;
+    pendingGroceryDeletesRef.current.add(item.id);
 
     invalidateProviderReview();
     beginGroceryMutation();
+    // Remove the row straight away; the server's cart replaces this, or the
+    // last confirmed cart comes back if the delete fails.
+    setCustomGroceryItems(current => current.filter(row => row.id !== item.id));
     try {
       const res = await apiFetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "DELETE"
@@ -1299,8 +1307,10 @@ export function useKitch() {
       }
     } catch (e) {
       console.error("Failed to delete grocery cart item", e);
+      setCustomGroceryItems(confirmedGroceryItemsRef.current);
       triggerBannerAlert(apiErrorMessage(e, "Could not delete the grocery item."));
     } finally {
+      pendingGroceryDeletesRef.current.delete(item.id);
       endGroceryMutation();
     }
   };

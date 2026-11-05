@@ -1586,7 +1586,12 @@ def delete_grocery_cart_item(
     item_id: str,
     user_name: str | None = None,
 ) -> bool:
-    _confirmed_row(
+    """Delete one native cart row; False when it was already gone.
+
+    A repeated delete (a double click, or a retry after a slow response)
+    finds nothing left, which is not a storage failure.
+    """
+    rows = _read_rows(
         "delete_grocery_cart_item",
         "grocery_cart_items",
         lambda: supabase.table("grocery_cart_items")
@@ -1595,7 +1600,7 @@ def delete_grocery_cart_item(
         .eq("id", item_id)
         .execute(),
     )
-    return True
+    return bool(rows)
 
 
 def clear_planned_grocery_cart(user_name: str | None = None) -> bool:

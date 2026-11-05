@@ -1748,7 +1748,8 @@ async def delete_grocery_cart_item_endpoint(item_id: str):
     """Deletes one native grocery cart row."""
     try:
         res = delete_grocery_cart_item(item_id)
-        return {"status": "success" if res else "failed", "grocery_cart": get_grocery_cart()}
+        # Already gone counts as done: the person wanted it off the list.
+        return {"status": "success" if res else "already_removed", "grocery_cart": get_grocery_cart()}
     except Exception:
         logger.exception("Native cart delete failed")
         raise HTTPException(status_code=500, detail="Kitch could not remove that grocery item.")
