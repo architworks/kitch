@@ -8,8 +8,6 @@ import math
 from typing import Any
 from uuid import uuid4
 
-from google.genai.types import Content, Part
-
 from app.agent.run_limits import (
     RUN_LIMIT_MESSAGE,
     RUN_TIMEOUT_SECONDS,
@@ -96,6 +94,9 @@ async def _reconcile_with_agent(
         f"PROPOSED PANTRY:\n{json.dumps(proposed_pantry, ensure_ascii=False)}\n"
         f"NATIVE CART:\n{json.dumps(cart, ensure_ascii=False)}"
     )
+    # Imported here so plain requests don't load Google's AI types at startup.
+    from google.genai.types import Content, Part
+
     text = ""
     user_id = get_household_profile_id()
     try:

@@ -1419,45 +1419,52 @@ async def get_state_endpoint(user_name: str, include_meal_plan: bool = True):
     """
     try:
         active_user = canonical_user_name(user_name)
-        def load_state() -> Dict[str, Any]:
-            profile = get_household_profile()
-            timezone_name = str(profile.get("timezone_name") or "Asia/Kolkata")
-            today = datetime.now(household_zone(timezone_name)).date()
-            pantry = get_pantry_stock()
-            diary = get_macro_diary(
-                active_user,
-                today,
-                today,
-                timezone_name,
-            )
-            meal_plan = (
-                build_meal_plan_week(None, timezone_name)
-                if include_meal_plan
-                else None
-            )
-            recent_recipe_plans = list_recipe_grocery_plans(limit=1)
-            return {
-                "profile": profile,
-                "household_members": get_household_members(),
-                "nutrition_targets": get_nutrition_targets(active_user),
-                "pantry_stock": pantry,
-                "pantry": {
-                    "revision": int(profile.get("pantry_revision") or 0),
-                    "reviewedAt": profile.get("pantry_reviewed_at"),
-                    "items": pantry,
-                },
-                "macro_diary": diary,
-                "meal_plan": meal_plan,
-                "grocery_cart": get_grocery_cart(),
-                # The Recipes page needs the complete saved artifact. Metadata
-                # is sufficient only for internal before/after change
-                # detection in the chat endpoint.
-                "latest_recipe_grocery_plan": (
-                    recent_recipe_plans[0] if recent_recipe_plans else None
-                ),
-            }
+        # The profile gives the timezone; every other read is independent, so
+        # they run at the same time instead of one database trip after another.
+        # Each thread gets a copy of the request context (household identity).
+        profile = await asyncio.to_thread(get_household_profile)
+        timezone_name = str(profile.get("timezone_name") or "Asia/Kolkata")
+        today = datetime.now(household_zone(timezone_name)).date()
 
-        return await asyncio.to_thread(load_state)
+        async def no_meal_plan() -> None:
+            return None
+
+        (
+            pantry, diary, meal_plan, recent_recipe_plans,
+            household_members, nutrition_targets, grocery_cart,
+        ) = await asyncio.gather(
+            asyncio.to_thread(get_pantry_stock),
+            asyncio.to_thread(get_macro_diary, active_user, today, today, timezone_name),
+            (
+                asyncio.to_thread(build_meal_plan_week, None, timezone_name)
+                if include_meal_plan
+                else no_meal_plan()
+            ),
+            asyncio.to_thread(list_recipe_grocery_plans, limit=1),
+            asyncio.to_thread(get_household_members),
+            asyncio.to_thread(get_nutrition_targets, active_user),
+            asyncio.to_thread(get_grocery_cart),
+        )
+        return {
+            "profile": profile,
+            "household_members": household_members,
+            "nutrition_targets": nutrition_targets,
+            "pantry_stock": pantry,
+            "pantry": {
+                "revision": int(profile.get("pantry_revision") or 0),
+                "reviewedAt": profile.get("pantry_reviewed_at"),
+                "items": pantry,
+            },
+            "macro_diary": diary,
+            "meal_plan": meal_plan,
+            "grocery_cart": grocery_cart,
+            # The Recipes page needs the complete saved artifact. Metadata
+            # is sufficient only for internal before/after change
+            # detection in the chat endpoint.
+            "latest_recipe_grocery_plan": (
+                recent_recipe_plans[0] if recent_recipe_plans else None
+            ),
+        }
     except Exception:
         logger.exception("Live state load failed")
         raise HTTPException(status_code=500, detail="Kitch could not load the household state.")
