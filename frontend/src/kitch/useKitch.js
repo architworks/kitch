@@ -1282,10 +1282,14 @@ export function useKitch() {
       setGroceryItemNameDraft("");
       return;
     }
+    // Close the editor straight away so the new name shows at once; reopen it
+    // with the typed name if the save fails.
+    setEditingGroceryItemId(null);
+    setGroceryItemNameDraft("");
     const saved = await updateGroceryCartItemDetails(item, { name: nextName });
-    if (saved) {
-      setEditingGroceryItemId(null);
-      setGroceryItemNameDraft("");
+    if (!saved) {
+      setEditingGroceryItemId(item.id);
+      setGroceryItemNameDraft(nextName);
     }
   };
 
