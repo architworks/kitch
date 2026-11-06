@@ -85,6 +85,8 @@ export function useKitch() {
   const [customGroceryItems, setCustomGroceryItems] = useState([]);
   const confirmedGroceryItemsRef = useRef([]);
   const pendingGroceryDeletesRef = useRef(new Set());
+  // A row added on screen but not yet saved has a temporary id; edits wait for the real one.
+  const isUnsavedGroceryRow = item => String(item?.id ?? "").startsWith("pending-");
   const [latestRecipeGroceryPlan, setLatestRecipeGroceryPlan] = useState(null);
   const [liveStateUser, setLiveStateUser] = useState("");
   const [householdBootstrap, setHouseholdBootstrap] = useState(null);
@@ -1165,10 +1167,13 @@ export function useKitch() {
   };
 
   const updateGroceryCartItemDetails = async (item, updates) => {
-    if (providerSyncInFlightRef.current || !item?.id) return;
+    if (providerSyncInFlightRef.current || !item?.id || isUnsavedGroceryRow(item)) return;
 
     invalidateProviderReview();
     beginGroceryMutation();
+    // Show the change straight away; the server's cart replaces it, or the
+    // last confirmed cart comes back if the save fails.
+    setCustomGroceryItems(current => current.map(row => (row.id === item.id ? { ...row, ...updates } : row)));
     try {
       const res = await apiFetch(apiUrl(`/api/grocery/cart/items/${item.id}`), {
         method: "PATCH",
@@ -1242,7 +1247,7 @@ export function useKitch() {
   };
 
   const adjustGroceryCartItemAmount = (item, delta) => {
-    if (providerSyncInFlightRef.current || !item?.id) return;
+    if (providerSyncInFlightRef.current || !item?.id || isUnsavedGroceryRow(item)) return;
 
     const pending = pendingGroceryItemUpdatesRef.current.get(item.id) || {
       updates: {},
@@ -1285,7 +1290,7 @@ export function useKitch() {
   };
 
   const deleteGroceryCartItem = async (item) => {
-    if (providerSyncInFlightRef.current || !item?.id) return;
+    if (providerSyncInFlightRef.current || !item?.id || isUnsavedGroceryRow(item)) return;
     // One delete per row at a time: a second click while the first is in
     // flight would only find the row already gone.
     if (pendingGroceryDeletesRef.current.has(item.id)) return;
@@ -1355,6 +1360,13 @@ export function useKitch() {
     };
 
     beginGroceryMutation();
+    // Show the new row straight away with a temporary id, and clear the form.
+    // The server's cart replaces it; on failure it goes and the form refills.
+    const pendingRow = { ...requestedItem, id: `pending-${Date.now()}` };
+    setCustomGroceryItems(current => [...current, pendingRow]);
+    setGroceryCustomName("");
+    setGroceryCustomAmount(1);
+    setGroceryCustomUnit("piece");
     try {
       const res = await apiFetch(apiUrl("/api/grocery/cart/items"), {
         method: "POST",
@@ -1366,12 +1378,13 @@ export function useKitch() {
       if (data.grocery_cart) {
         applyConfirmedGroceryCart(data.grocery_cart);
       }
-      setGroceryCustomName("");
-      setGroceryCustomAmount(1);
-      setGroceryCustomUnit("piece");
       triggerBannerAlert(`Added custom item: "${name}" to ${category}!`);
     } catch (e) {
       console.error("Failed to add grocery cart item", e);
+      setCustomGroceryItems(current => current.filter(row => row.id !== pendingRow.id));
+      setGroceryCustomName(name);
+      setGroceryCustomAmount(amount);
+      setGroceryCustomUnit(unit || "piece");
       triggerBannerAlert(apiErrorMessage(e, "Could not add the grocery item."));
     } finally {
       endGroceryMutation();
