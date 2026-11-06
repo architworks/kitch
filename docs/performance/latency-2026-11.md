@@ -17,3 +17,5 @@ Notes:
 - A, 6 Nov 2026: one `/grocery/providers` call took 15.2 s (a cold path), the other four 1.8–2.0 s.
 - B, 6 Nov 2026: `x-vercel-id` reads `bom1::hnd1`. The first `/grocery/providers` batch failed once with a browser "Failed to fetch"; the rerun is shown.
 - C, 6 Nov 2026 (`91055fb`): the first `/grocery/providers` call on the new deployment took 14.2 s again. Cause: listing providers built the checkout service, which imports the Instamart cart agent and Vertex AI. Fixed in the next commit by reading the provider registry directly.
+- After that fix (`f3db13f`), first calls on a fresh deployment: `/grocery/providers` 297 (269–950), with the 950 ms first call a normal cold start. A full app load on a fresh deployment finished all backend calls in about 2.8 s.
+- UI checks on production (`e4e9360`), 7 Nov 2026: a new cart item shows within 50 ms, a rename within 60 ms (the edit box now closes at once), and a double-clicked delete removes the row within 60 ms with no error. The server cart matched afterwards.
