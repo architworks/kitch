@@ -1839,7 +1839,9 @@ async def calculate_grocery_endpoint(payload: Dict[str, Any]):
 # 7. Provider-neutral grocery commerce
 @app.get("/api/grocery/providers")
 async def grocery_providers_endpoint():
-    response = grocery_checkout_service.providers()
+    # Read the registry directly: building the checkout service imports the
+    # cart agent and Vertex AI, which cost ~14 s on a cold instance.
+    response = {"providers": provider_registry.descriptors()}
     response["selected_provider"] = get_selected_grocery_provider()
     return response
 
