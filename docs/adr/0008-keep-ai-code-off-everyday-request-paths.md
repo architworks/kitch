@@ -62,6 +62,36 @@ a 14-second freeze on first use.
   trips, but it would duplicate the logic in several existing Python readers.
   With the database a few milliseconds away, the gain no longer justifies it.
 
+## Addendum (7 November 2026): keep the backend warm after idle
+
+The rejection of warm-up pings above was about the 14-second Groceries freeze,
+which had a code cause that we removed. A second, separate delay remained:
+Vercel stops the Python backend after it has been idle, and the next request
+waits for a new instance. That took 4.27 s after 20 minutes idle, then 0.29 s
+once warm. Supabase was not involved; its queries during a slow login
+returned in milliseconds. This delay has no code cause. It is how serverless
+hosting behaves for a low-traffic app.
+
+Decision: an external monitor (UptimeRobot, free plan) requests
+`/backend/api/health/live` every 5 minutes. That endpoint touches no database
+and does no model work.
+
+- **Cost:** about 8,640 calls a month. That is under 1% of the Hobby plan's
+  1 million calls, a minute or two of its 4 hours of CPU time, and about
+  1.5 GB-hours of its 360. Vercel charges memory only while a request runs.
+- **Why external:** Vercel's own cron on Hobby runs at most once a day.
+  GitHub Actions schedules are disabled after 60 days without commits, which
+  would silently bring the cold starts back.
+- **Why not make startup lighter instead:** importing the Instamart modules
+  only when needed would shorten the login wait, but users would then wait the
+  same amount when they first open Instamart. Keeping the instance warm
+  removes both waits.
+- **Side benefit:** the monitor also emails the owner if the backend goes down.
+
+The home screen also stopped loading in a chain. It used to run the sign-in
+check, then the meal plan, then the rest of the household state. It now loads
+the meal plan and the household state together after the sign-in check.
+
 ## Consequences
 
 - New endpoints that only read data should not touch
