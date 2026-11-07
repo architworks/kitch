@@ -929,22 +929,23 @@ export function useKitch() {
     if (!householdBootstrap?.initialized) return undefined;
     let ignore = false;
 
+    // The meal plan and the rest of the household state are independent, so
+    // load them at the same time instead of one after the other.
     async function loadState() {
-      try {
-        await loadMealPlanWeek();
-      } catch (error) {
+      const mealPlan = loadMealPlanWeek().catch(error => {
         console.error("Failed to load the current meal-plan week", error);
-      }
-      if (ignore) return;
-      try {
-        const data = await fetchLiveState(activeUser, { includeMealPlan: false });
-        if (!ignore) {
-          applyLiveState(activeUser, data);
-          setLiveStateUser(activeUser);
-        }
-      } catch (e) {
-        console.error("Failed to sync live state with Kitch storage", e);
-      }
+      });
+      const liveState = fetchLiveState(activeUser, { includeMealPlan: false })
+        .then(data => {
+          if (!ignore) {
+            applyLiveState(activeUser, data);
+            setLiveStateUser(activeUser);
+          }
+        })
+        .catch(e => {
+          console.error("Failed to sync live state with Kitch storage", e);
+        });
+      await Promise.all([mealPlan, liveState]);
     }
 
     loadState();
