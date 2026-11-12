@@ -218,3 +218,11 @@
 .powered-by { display: inline-flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
 .powered-by img { width: 24px; height: 24px; border-radius: 6px; }
 .totals .unitemised dt, .totals .unitemised dd { color: var(--turmeric-ink); }
+
+/* Saved addresses load in the background; say so while they arrive */
+.address-loading { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; font-size: 14px; color: var(--ink-2); }
+.address-loading-dots { display: inline-flex; gap: 4px; }
+.address-loading-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--mute); animation: typing 1.2s infinite ease-in-out; }
+.address-loading-dots i:nth-child(2) { animation-delay: 0.15s; }
+.address-loading-dots i:nth-child(3) { animation-delay: 0.3s; }
+@media (prefers-reduced-motion: reduce) { .address-loading-dots i { animation: none; opacity: 0.6; } }

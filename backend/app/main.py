@@ -1,6 +1,7 @@
 # Kitch: FastAPI Production Gateway Server (Google ADK 2.0)
 
 import asyncio
+import threading
 import hashlib
 import logging
 import os
@@ -172,20 +173,47 @@ async def memory_readiness() -> Dict[str, Any]:
 
 
 class _LazyGroceryCheckoutService:
-    """Defer checkout-agent construction until a grocery-provider request."""
+    """Build the checkout agent once, off the request loop.
+
+    Building it imports the agent framework and Vertex AI, which takes about
+    10 s on a cold instance. Done on the event loop, that froze every other
+    request on the instance (a Disconnect click timed out behind an address
+    lookup). `ready()` builds it in a worker thread, and startup preloads it
+    in the background when Instamart is enabled, so neither startup nor the
+    first grocery-app request waits on it.
+    """
 
     def __init__(self) -> None:
         self._service = None
+        self._lock = threading.Lock()
 
     def _load(self):
         if self._service is None:
-            from app.grocery_checkout import GroceryCheckoutService
+            with self._lock:
+                if self._service is None:
+                    from app.grocery_checkout import GroceryCheckoutService
 
-            self._service = GroceryCheckoutService()
+                    self._service = GroceryCheckoutService()
         return self._service
+
+    async def ready(self):
+        if self._service is not None:
+            return self._service
+        return await asyncio.to_thread(self._load)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._load(), name)
+
+
+def _instamart_enabled() -> bool:
+    return os.environ.get("SWIGGY_INSTAMART_ENABLED", "false").lower() in {"1", "true", "yes"}
+
+
+async def _preload_grocery_checkout_service() -> None:
+    try:
+        await grocery_checkout_service.ready()
+    except Exception as error:  # A failed preload must never stop the app.
+        print(f"Grocery checkout preload failed; it will load on first use: {type(error).__name__}")
 
 
 def is_explicit_recipe_detail_prompt(message: str) -> bool:
@@ -599,10 +627,17 @@ async def lifespan(app: FastAPI):
         if deleted_count:
             print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
         retention_task = asyncio.create_task(delete_past_meal_plans_at_household_midnight())
+    preload_task = (
+        asyncio.create_task(_preload_grocery_checkout_service())
+        if _instamart_enabled()
+        else None
+    )
     print("🚀 Starting Kitch ADK 2.0 Backend Gateway Service...")
     try:
         yield
     finally:
+        if preload_task is not None and not preload_task.done():
+            preload_task.cancel()
         if retention_task is not None:
             retention_task.cancel()
             try:
@@ -1923,12 +1958,12 @@ async def disconnect_provider_endpoint(provider_id: str):
 
 @app.get("/api/grocery/providers/{provider_id}/addresses")
 async def provider_addresses_endpoint(provider_id: str):
-    return await grocery_checkout_service.addresses(provider_id)
+    return await (await grocery_checkout_service.ready()).addresses(provider_id)
 
 
 @app.get("/api/grocery/providers/{provider_id}/cart")
 async def provider_live_cart_endpoint(provider_id: str):
-    return await grocery_checkout_service.live_cart(provider_id)
+    return await (await grocery_checkout_service.ready()).live_cart(provider_id)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/sync")
@@ -1936,12 +1971,12 @@ async def provider_checkout_sync_endpoint(
     provider_id: str,
     payload: Dict[str, Any] | None = None,
 ):
-    return await grocery_checkout_service.sync(provider_id, payload or {})
+    return await (await grocery_checkout_service.ready()).sync(provider_id, payload or {})
 
 
 @app.get("/api/grocery/providers/{provider_id}/checkout")
 async def provider_checkout_draft_endpoint(provider_id: str):
-    return grocery_checkout_service.draft(provider_id)
+    return (await grocery_checkout_service.ready()).draft(provider_id)
 
 
 @app.patch("/api/grocery/providers/{provider_id}/checkout")
@@ -1949,12 +1984,12 @@ async def update_provider_checkout_endpoint(
     provider_id: str,
     payload: Dict[str, Any],
 ):
-    return grocery_checkout_service.update_draft(provider_id, payload)
+    return (await grocery_checkout_service.ready()).update_draft(provider_id, payload)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/revalidate")
 async def revalidate_provider_checkout_endpoint(provider_id: str):
-    return await grocery_checkout_service.revalidate(provider_id)
+    return await (await grocery_checkout_service.ready()).revalidate(provider_id)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/place-order")
@@ -1963,18 +1998,18 @@ async def place_provider_order_endpoint(
     payload: Dict[str, Any],
 ):
     _require_owner("place grocery orders")
-    return await grocery_checkout_service.place_order(provider_id, payload)
+    return await (await grocery_checkout_service.ready()).place_order(provider_id, payload)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/release-attempt")
 async def release_unresolved_checkout_endpoint(provider_id: str, payload: Dict[str, Any]):
     _require_owner("start a new grocery order")
-    return grocery_checkout_service.release_unresolved_attempt(provider_id, payload)
+    return (await grocery_checkout_service.ready()).release_unresolved_attempt(provider_id, payload)
 
 
 @app.post("/api/grocery/providers/{provider_id}/checkout/payment-status")
 async def provider_payment_status_endpoint(provider_id: str):
-    return await grocery_checkout_service.payment_status(provider_id)
+    return await (await grocery_checkout_service.ready()).payment_status(provider_id)
 
 @app.get("/api/health/live")
 async def liveness_check():

@@ -461,8 +461,20 @@ function Checkout({ k }) {
                   })}
                 </select>
               </label>
-              <p className="muted small-note">{k.providerStatusDescription}</p>
-              {k.providerAddressLoadError && <p className="form-error">{k.providerAddressLoadError}</p>}
+              {k.isProviderAddressLoading ? (
+                <p className="address-loading" role="status">
+                  <span className="address-loading-dots" aria-hidden="true"><i /><i /><i /></span>
+                  Getting your saved addresses from {label}. This can take a few seconds.
+                </p>
+              ) : (
+                <p className="muted small-note">{k.providerStatusDescription}</p>
+              )}
+              {!k.isProviderAddressLoading && k.providerAddressLoadError && (
+                <p className="form-error">
+                  {k.providerAddressLoadError}{" "}
+                  <button type="button" className="btn quiet sm" onClick={() => k.syncProviderAddresses()}>Try again</button>
+                </p>
+              )}
             </div>
           )}
         </Step>

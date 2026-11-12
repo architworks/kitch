@@ -414,7 +414,9 @@ export function useKitch() {
     setIsProviderAddressLoading(true);
     setProviderAddressLoadError("");
     try {
-      const res = await apiFetch(apiUrl(selectedProviderAddressesRoute));
+      const res = await apiFetch(apiUrl(selectedProviderAddressesRoute), {
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS
+      });
       await requireSuccessfulResponse(res);
       const data = await res.json();
       const addresses = data.addresses || null;
@@ -442,7 +444,11 @@ export function useKitch() {
       console.error(`Failed to load ${selectedProviderLabel} delivery addresses`, e);
       setProviderSavedAddresses(null);
       setSelectedProviderAddress("");
-      setProviderAddressLoadError(e?.message || `Could not load ${selectedProviderLabel} delivery addresses.`);
+      setProviderAddressLoadError(
+        e?.name === "AbortError"
+          ? `${selectedProviderLabel} took too long to send your saved addresses. Try again in a moment.`
+          : apiErrorMessage(e, `Could not load ${selectedProviderLabel} delivery addresses.`)
+      );
       return null;
     } finally {
       setIsProviderAddressLoading(false);
@@ -954,6 +960,16 @@ export function useKitch() {
     };
   }, [activeUser, applyLiveState, householdBootstrap?.initialized, loadMealPlanWeek]);
 
+  // Learn the grocery-app connection as soon as the household loads, so a
+  // connected owner's Swiggy addresses can start loading in the background.
+  useEffect(() => {
+    if (!householdBootstrap?.initialized || !isHouseholdOwner) return undefined;
+    const timer = window.setTimeout(() => {
+      syncProviderRegistry();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [householdBootstrap?.initialized, isHouseholdOwner, syncProviderRegistry]);
+
   useEffect(() => {
     if (activeTab !== "groceries") return undefined;
     const timer = window.setTimeout(() => {
@@ -995,11 +1011,23 @@ export function useKitch() {
     return () => { ignore = true; };
   }, [activeTab, memberOrderStatusRoute]);
 
+  // Start loading saved addresses in the background as soon as the app knows
+  // the grocery app is connected, on any tab, so they are usually ready by the
+  // time the owner reaches the delivery step. Opening Groceries retries only
+  // when an earlier attempt failed.
   useEffect(() => {
-    if (activeTab !== "groceries" || !selectedProviderAddressesRoute) return undefined;
+    if (!selectedProviderAddressesRoute || selectedProviderRegistryState !== "connected") return undefined;
     const timer = window.setTimeout(() => syncProviderAddresses(), 0);
     return () => window.clearTimeout(timer);
-  }, [activeTab, selectedProviderAddressesRoute, syncProviderAddresses]);
+  }, [selectedProviderAddressesRoute, selectedProviderRegistryState, syncProviderAddresses]);
+
+  useEffect(() => {
+    if (activeTab !== "groceries" || !providerAddressLoadError || isProviderAddressLoading) return undefined;
+    const timer = window.setTimeout(() => syncProviderAddresses(), 0);
+    return () => window.clearTimeout(timer);
+    // Retry once per visit to Groceries, not on every error change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
