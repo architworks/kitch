@@ -372,18 +372,22 @@ def _configured_allowed_origins() -> list[str]:
 def _provider_callback_destination(provider_id: str) -> str:
     """Return where the browser goes after a provider connects.
 
-    Hosted Kitch sends an absolute URL on the app's own domain. A relative
-    redirect from the backend service was completed by Vercel with the
-    deployment's own *.vercel.app address, which logged the user out of view.
-    The domain comes from SWIGGY_OAUTH_REDIRECT_URI, the address Swiggy
-    whitelisted, unless FRONTEND_URL overrides it.
+    On Vercel, the platform sets FRONTEND_URL itself (from the service named
+    "frontend" in vercel.json) to the deployment's own *.vercel.app address,
+    where the user is signed out. So on Vercel, FRONTEND_URL is ignored and the
+    browser returns to the domain of SWIGGY_OAUTH_REDIRECT_URI, the address
+    Swiggy whitelisted. KITCH_FRONTEND_URL is an explicit override that
+    Vercel never sets; FRONTEND_URL still works for local development.
     """
-    frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    frontend_url = os.environ.get("KITCH_FRONTEND_URL", "").strip()
+    if not frontend_url and os.environ.get("VERCEL", "") != "1":
+        frontend_url = os.environ.get("FRONTEND_URL", "").strip()
     if not frontend_url:
         redirect_uri = os.environ.get("SWIGGY_OAUTH_REDIRECT_URI", "").strip()
         parsed = urlparse(redirect_uri)
         if parsed.scheme == "https" and parsed.netloc:
             frontend_url = f"https://{parsed.netloc}"
+    frontend_url = frontend_url.rstrip("/")
     suffix = f"/?provider_connection={provider_id}&connection_status=connected"
     return f"{frontend_url}{suffix}" if frontend_url else suffix
 

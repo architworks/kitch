@@ -287,7 +287,8 @@ Provider retention defaults are configured with
 | `SWIGGY_OAUTH_SCOPE` | Delegated scope; defaults to `mcp:tools`. |
 | `SWIGGY_OAUTH_CLIENT_NAME` | Dynamic-registration client name. |
 | `SWIGGY_INSTAMART_PRODUCTION_APPROVED` | Explicit production approval gate. |
-| `FRONTEND_URL` | Optional cross-origin browser destination after OAuth callback; omit for same-origin deployment. |
+| `FRONTEND_URL` | Local development only: browser destination after the OAuth callback (for example `http://localhost:3000`). Ignored on Vercel, which sets it to the deployment's own `*.vercel.app` address. |
+| `KITCH_FRONTEND_URL` | Optional explicit destination after the OAuth callback, honoured everywhere. Hosted Kitch normally omits it and returns to the domain of `SWIGGY_OAUTH_REDIRECT_URI`. |
 
 One dynamic OAuth client is stored per environment and one encrypted
 connection per household/provider/environment. OAuth state is single-use and

@@ -57,11 +57,12 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("FRONTEND_URL", None)
             os.environ.pop("SWIGGY_OAUTH_REDIRECT_URI", None)
+            os.environ.pop("KITCH_FRONTEND_URL", None)
             self.assertEqual(
                 main._provider_callback_destination("swiggy_instamart"),
                 "/?provider_connection=swiggy_instamart&connection_status=connected",
             )
-        with patch.dict(os.environ, {"FRONTEND_URL": "https://kitch.example/"}):
+        with patch.dict(os.environ, {"FRONTEND_URL": "https://kitch.example/", "VERCEL": ""}):
             self.assertEqual(
                 main._provider_callback_destination("swiggy_instamart"),
                 "https://kitch.example/?provider_connection=swiggy_instamart&connection_status=connected",
@@ -84,6 +85,24 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 main._provider_callback_destination("swiggy_instamart"),
                 "/?provider_connection=swiggy_instamart&connection_status=connected",
             )
+
+    def test_vercel_injected_frontend_url_is_ignored(self):
+        # Vercel sets FRONTEND_URL to the deployment's own *.vercel.app
+        # address; following it signed the user out after connecting Swiggy.
+        with patch.dict(os.environ, {
+            "VERCEL": "1",
+            "FRONTEND_URL": "https://meal-and-grocery-agent-abc123.vercel.app",
+            "SWIGGY_OAUTH_REDIRECT_URI": "https://kitch.example/backend/api/grocery/providers/swiggy_instamart/oauth/callback",
+        }):
+            os.environ.pop("KITCH_FRONTEND_URL", None)
+            self.assertEqual(
+                main._provider_callback_destination("swiggy_instamart"),
+                "https://kitch.example/?provider_connection=swiggy_instamart&connection_status=connected",
+            )
+            with patch.dict(os.environ, {"KITCH_FRONTEND_URL": "https://override.example/"}):
+                self.assertTrue(
+                    main._provider_callback_destination("swiggy_instamart").startswith("https://override.example/?")
+                )
 
     def test_confirmation_action_is_recovered_from_nested_tool_response(self):
         action = main._confirmation_action_from_tool_response({
