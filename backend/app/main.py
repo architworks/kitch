@@ -210,8 +210,10 @@ def _instamart_enabled() -> bool:
 
 
 async def _preload_grocery_checkout_service() -> None:
+    started = time.monotonic()
     try:
         await grocery_checkout_service.ready()
+        print(f"Grocery checkout agent preloaded in {time.monotonic() - started:.1f}s")
     except Exception as error:  # A failed preload must never stop the app.
         print(f"Grocery checkout preload failed; it will load on first use: {type(error).__name__}")
 
@@ -1923,6 +1925,7 @@ async def start_provider_connection_endpoint(provider_id: str):
 
 @app.get("/api/grocery/providers/{provider_id}/oauth/callback")
 async def provider_oauth_callback_endpoint(
+    request: Request,
     provider_id: str,
     code: str = "",
     state: str = "",
@@ -1937,7 +1940,15 @@ async def provider_oauth_callback_endpoint(
             status_code=422,
         )
     await adapter.oauth.complete(code, state)
-    return RedirectResponse(_provider_callback_destination(provider_id))
+    destination = _provider_callback_destination(provider_id)
+    # Diagnostic (no secrets): where the browser is sent and which host the
+    # request arrived on, to trace a redirect that ended on *.vercel.app.
+    print(
+        "Provider callback redirect: "
+        f"to={destination.split('?')[0]} host={request.headers.get('host')} "
+        f"forwarded_host={request.headers.get('x-forwarded-host')}"
+    )
+    return RedirectResponse(destination)
 
 
 @app.delete("/api/grocery/providers/{provider_id}/connection")
