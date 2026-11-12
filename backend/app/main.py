@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+from urllib.parse import urlparse
 import secrets
 import sys
 import time
@@ -339,8 +340,20 @@ def _configured_allowed_origins() -> list[str]:
 
 
 def _provider_callback_destination(provider_id: str) -> str:
-    """Return a same-origin callback destination unless explicitly overridden."""
+    """Return where the browser goes after a provider connects.
+
+    Hosted Kitch sends an absolute URL on the app's own domain. A relative
+    redirect from the backend service was completed by Vercel with the
+    deployment's own *.vercel.app address, which logged the user out of view.
+    The domain comes from SWIGGY_OAUTH_REDIRECT_URI, the address Swiggy
+    whitelisted, unless FRONTEND_URL overrides it.
+    """
     frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    if not frontend_url:
+        redirect_uri = os.environ.get("SWIGGY_OAUTH_REDIRECT_URI", "").strip()
+        parsed = urlparse(redirect_uri)
+        if parsed.scheme == "https" and parsed.netloc:
+            frontend_url = f"https://{parsed.netloc}"
     suffix = f"/?provider_connection={provider_id}&connection_status=connected"
     return f"{frontend_url}{suffix}" if frontend_url else suffix
 

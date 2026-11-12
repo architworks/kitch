@@ -56,6 +56,7 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
     def test_provider_callback_defaults_to_same_origin(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("FRONTEND_URL", None)
+            os.environ.pop("SWIGGY_OAUTH_REDIRECT_URI", None)
             self.assertEqual(
                 main._provider_callback_destination("swiggy_instamart"),
                 "/?provider_connection=swiggy_instamart&connection_status=connected",
@@ -64,6 +65,24 @@ class HealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 main._provider_callback_destination("swiggy_instamart"),
                 "https://kitch.example/?provider_connection=swiggy_instamart&connection_status=connected",
+            )
+
+    def test_provider_callback_returns_to_the_whitelisted_domain(self):
+        # A relative redirect was completed by Vercel with the deployment's
+        # *.vercel.app address; hosted Kitch must name its own domain.
+        with patch.dict(os.environ, {
+            "SWIGGY_OAUTH_REDIRECT_URI": "https://kitch.example/backend/api/grocery/providers/swiggy_instamart/oauth/callback",
+        }):
+            os.environ.pop("FRONTEND_URL", None)
+            self.assertEqual(
+                main._provider_callback_destination("swiggy_instamart"),
+                "https://kitch.example/?provider_connection=swiggy_instamart&connection_status=connected",
+            )
+        with patch.dict(os.environ, {"SWIGGY_OAUTH_REDIRECT_URI": "http://localhost:8000/cb"}):
+            os.environ.pop("FRONTEND_URL", None)
+            self.assertEqual(
+                main._provider_callback_destination("swiggy_instamart"),
+                "/?provider_connection=swiggy_instamart&connection_status=connected",
             )
 
     def test_confirmation_action_is_recovered_from_nested_tool_response(self):
