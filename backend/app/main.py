@@ -172,15 +172,27 @@ async def memory_readiness() -> Dict[str, Any]:
     return await _memory_runtime().memory_readiness()
 
 
+_PROCESS_STARTED = time.monotonic()
+# Startup steps, in order. The warm-up screen ticks a step only when the server
+# reports it here; nothing advances on a timer.
+STARTUP_STAGES = ("starting", "assistant", "instamart", "ready")
+_startup = {"stage": "starting", "error": None}
+
+
+def _set_startup_stage(stage: str) -> None:
+    _startup["stage"] = stage
+
+
 class _LazyGroceryCheckoutService:
-    """Build the checkout agent once, off the request loop.
+    """Build the Instamart checkout agent once, off the request loop.
 
     Building it imports the agent framework and Vertex AI, which takes about
     10 s on a cold instance. Done on the event loop, that froze every other
-    request on the instance (a Disconnect click timed out behind an address
-    lookup). `ready()` builds it in a worker thread, and startup preloads it
-    in the background when Instamart is enabled, so neither startup nor the
-    first grocery-app request waits on it.
+    request on the instance. `ready()` builds it in a worker thread; startup
+    starts that build in the background when Instamart is enabled and reports
+    each step through /api/health/startup, which the warm-up screen polls (the
+    polling also keeps Vercel from freezing the instance mid-load). Any
+    request that needs the agent waits for the same build instead of failing.
     """
 
     def __init__(self) -> None:
@@ -191,9 +203,15 @@ class _LazyGroceryCheckoutService:
         if self._service is None:
             with self._lock:
                 if self._service is None:
+                    _set_startup_stage("assistant")
+                    import google.adk  # noqa: F401  (the agent framework)
+                    import app.agent.memory  # noqa: F401  (Vertex AI memory)
+
+                    _set_startup_stage("instamart")
                     from app.grocery_checkout import GroceryCheckoutService
 
                     self._service = GroceryCheckoutService()
+                    _set_startup_stage("ready")
         return self._service
 
     async def ready(self):
@@ -213,8 +231,10 @@ async def _preload_grocery_checkout_service() -> None:
     started = time.monotonic()
     try:
         await grocery_checkout_service.ready()
-        print(f"Grocery checkout agent preloaded in {time.monotonic() - started:.1f}s")
+        print(f"Grocery checkout agent loaded in {time.monotonic() - started:.1f}s")
     except Exception as error:  # A failed preload must never stop the app.
+        _startup["error"] = type(error).__name__
+        _set_startup_stage("ready")
         print(f"Grocery checkout preload failed; it will load on first use: {type(error).__name__}")
 
 
@@ -633,11 +653,14 @@ async def lifespan(app: FastAPI):
         if deleted_count:
             print(f"Meal-plan retention removed {deleted_count} past dated rows at startup.")
         retention_task = asyncio.create_task(delete_past_meal_plans_at_household_midnight())
-    preload_task = (
-        asyncio.create_task(_preload_grocery_checkout_service())
-        if _instamart_enabled()
-        else None
-    )
+    # Start loading the Instamart checkout agent in the background and report
+    # each step through /api/health/startup. Without Instamart there is nothing
+    # to load at startup.
+    preload_task = None
+    if _instamart_enabled() and grocery_checkout_service._service is None:
+        preload_task = asyncio.create_task(_preload_grocery_checkout_service())
+    else:
+        _set_startup_stage("ready")
     print("🚀 Starting Kitch ADK 2.0 Backend Gateway Service...")
     try:
         yield
@@ -715,6 +738,7 @@ async def persistence_postcondition(request: Request, call_next):
             claims = session_from_request(request)
             public_path = request.url.path in {
                 "/api/auth/google", "/api/auth/session", "/api/health/live", "/api/health/ready",
+                "/api/health/startup",
             } or request.url.path.startswith("/api/invites/")
             if claims:
                 # Membership and role are read from the database on every
@@ -2032,6 +2056,25 @@ async def liveness_check():
     return {
         "status": "alive",
         "service": "kitch-backend",
+    }
+
+
+@app.get("/api/health/startup")
+async def startup_status(since: str = ""):
+    """Report which startup step this instance is on, for the warm-up screen.
+
+    Public and content-free: step names only. When `since` names the step the
+    caller already saw, the answer waits up to 4 s for the next one, so the
+    screen updates the moment a step finishes and the instance keeps working
+    instead of being frozen between requests.
+    """
+    deadline = time.monotonic() + 4
+    while since and _startup["stage"] == since and _startup["stage"] != "ready" and time.monotonic() < deadline:
+        await asyncio.sleep(0.25)
+    return {
+        "stage": _startup["stage"],
+        "instamart": _instamart_enabled(),
+        "uptime_s": round(time.monotonic() - _PROCESS_STARTED, 1),
     }
 
 

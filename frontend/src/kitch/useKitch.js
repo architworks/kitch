@@ -33,6 +33,7 @@ import {
   PROVIDER_OPERATION_TIMEOUT_MS,
   apiUrl,
   apiFetch,
+  fetchServerStartup,
   getMealTitle,
   hasMealTitle,
   hasPlannedMeals,
@@ -137,6 +138,10 @@ export function useKitch() {
   const [deleteAccountError, setDeleteAccountError] = useState("");
   const [startupState, setStartupState] = useState({ attempts: 0, retrying: false, failed: false, message: "" });
   const startupRunRef = useRef(0);
+  // The server's own startup steps, for the warm-up screen. `answered` turns
+  // true on the first reply; `ready` once the server reports every step done.
+  const [serverStartup, setServerStartup] = useState({ answered: false, stage: "starting", instamart: true, ready: false });
+  const [connectingProviderId, setConnectingProviderId] = useState("");
   const [timeGreeting, setTimeGreeting] = useState("Welcome");
   const googleButtonRef = useRef(null);
   const [memberEditorOpen, setMemberEditorOpen] = useState(false);
@@ -568,6 +573,44 @@ export function useKitch() {
     const timer = window.setTimeout(() => { startSession(); }, 0);
     return () => window.clearTimeout(timer);
   }, [startSession]);
+
+  // Coming back from the provider's sign-in with the Back button restores this
+  // page from the browser's cache; the Connect button must not stay busy.
+  useEffect(() => {
+    const onPageShow = (event) => { if (event.persisted) setConnectingProviderId(""); };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  // Follow the server's startup steps until it reports them all done. Each
+  // request waits on the server for the next step, so the screen moves the
+  // moment a step finishes. If the wake window passes, the app opens anyway:
+  // anything still loading then shows its own wait.
+  useEffect(() => {
+    let cancelled = false;
+    const deadline = Date.now() + STARTUP_WAKE_WINDOW_MS;
+    (async () => {
+      let since = "";
+      while (!cancelled) {
+        if (Date.now() >= deadline) {
+          setServerStartup(current => ({ ...current, ready: true }));
+          return;
+        }
+        try {
+          const status = await fetchServerStartup(since);
+          if (cancelled) return;
+          const ready = status.stage === "ready";
+          setServerStartup({ answered: true, stage: status.stage, instamart: Boolean(status.instamart), ready });
+          if (ready) return;
+          since = status.stage;
+        } catch {
+          // Not answering yet: the server is still starting.
+          await new Promise(resolve => window.setTimeout(resolve, 1000));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setTimeGreeting(getTimeBasedGreeting()), 0);
@@ -1655,15 +1698,26 @@ export function useKitch() {
   };
 
   const startProviderConnection = async (provider) => {
-    if (!provider?.routes?.connectionStart || providerSyncInFlightRef.current) return;
+    if (!provider?.routes?.connectionStart || providerSyncInFlightRef.current || connectingProviderId) return;
+    // Stay visibly busy until the provider's sign-in page opens, so a slow
+    // moment never looks like a dead click.
+    setConnectingProviderId(provider.id);
     try {
-      const res = await apiFetch(apiUrl(provider.routes.connectionStart), { method: "POST" });
+      const res = await apiFetch(apiUrl(provider.routes.connectionStart), {
+        method: "POST",
+        timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS
+      });
       await requireSuccessfulResponse(res);
       const data = await res.json();
       if (!data.authorization_url) throw new Error("The provider did not return an authorization URL.");
       window.location.assign(data.authorization_url);
     } catch (e) {
-      triggerBannerAlert(apiErrorMessage(e, `Could not connect ${provider.label}.`));
+      setConnectingProviderId("");
+      triggerBannerAlert(
+        e?.name === "AbortError"
+          ? `${provider.label} took too long to open its sign-in. Try again in a moment.`
+          : apiErrorMessage(e, `Could not connect ${provider.label}.`)
+      );
     }
   };
 
@@ -2723,6 +2777,8 @@ export function useKitch() {
     providerPaymentCheckedAt,
     startupState,
     startSession,
+    serverStartup,
+    connectingProviderId,
     notices,
     dismissNotice,
     noticeIdRef,

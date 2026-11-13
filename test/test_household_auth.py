@@ -38,7 +38,7 @@ import os
 import sys
 os.environ["KITCH_DATABASE_BACKEND"] = "supabase"
 os.environ["KITCH_AUTH_SESSION_SECRET"] = "s" * 40
-# With Instamart on, startup preloads the checkout agent in the background
+# With Instamart on, startup loads the checkout agent in the background
 # (see test_grocery_checkout_preload.py); with it off, nothing may load.
 os.environ["SWIGGY_INSTAMART_ENABLED"] = "false"
 from fastapi.testclient import TestClient

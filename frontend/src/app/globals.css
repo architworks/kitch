@@ -100,6 +100,7 @@ input, textarea { caret-color: var(--green); }
 .btn:hover:not(:disabled) { border-color: var(--sage-2); background: #fff; }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; }
+.btn[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }
 .btn.primary { background: var(--green); border-color: var(--green); color: var(--on-olive); }
 .btn.primary:hover:not(:disabled) { background: var(--green-hover); border-color: var(--green-hover); }
 .btn.soft { background: var(--sage); border-color: transparent; color: var(--green); }
@@ -213,3 +214,11 @@ input, textarea { caret-color: var(--green); }
 .loading-card { display: grid; gap: 12px; align-content: start; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* Three small dots for a wait that is in progress (busy buttons, status lines) */
+.wait-dots { display: inline-flex; gap: 4px; flex: none; }
+.wait-dots i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.25; animation: typing 1.2s infinite ease-in-out; }
+.wait-dots i:nth-child(2) { animation-delay: 0.15s; }
+.wait-dots i:nth-child(3) { animation-delay: 0.3s; }
+.wait-dots.amber { color: #f1c27f; }
+@media (prefers-reduced-motion: reduce) { .wait-dots i { animation: none; opacity: 0.6; } }

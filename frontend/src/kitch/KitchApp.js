@@ -11,6 +11,7 @@ import NutritionView from "./components/NutritionView.js";
 import AboutView from "./components/AboutView.js";
 import { Composer, ChatDrawer } from "./components/Chat.js";
 import { ConfirmDialog, MemberDialog, ProviderTransferDialog, PhotoScanDialog, Notices } from "./components/Overlays.js";
+import { subscribeSlowRequests, fetchServerStartup } from "./lib/helpers.js";
 
 const NAV = [
   { key: "planner", label: "Household", short: "Home", icon: "household" },
@@ -19,6 +20,44 @@ const NAV = [
   { key: "analytics", label: "Nutrition", short: "Nutrition", icon: "chart" },
   { key: "about", label: "About Kitch", short: "About", icon: "info", desktopOnly: true }
 ];
+
+// A server can restart mid-session (Vercel replaces idle instances). When an
+// ordinary request has waited 3 s, ask the server how long it has been up; the
+// pill appears only if it has just started (or is too busy starting to say).
+// It never blocks the screen and leaves the moment the request finishes.
+const FRESH_SERVER_S = 120;
+
+function WarmupPill() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    let pendingCheck = 0;
+    return subscribeSlowRequests(count => {
+      if (count === 0) {
+        pendingCheck += 1;
+        setVisible(false);
+        return;
+      }
+      const check = ++pendingCheck;
+      const tooBusyToAnswer = window.setTimeout(() => { if (check === pendingCheck) setVisible(true); }, 1500);
+      fetchServerStartup()
+        .then(status => {
+          if (check !== pendingCheck) return;
+          setVisible(status.uptime_s === null ? false : status.uptime_s < FRESH_SERVER_S || status.stage !== "ready");
+        })
+        .catch(() => { if (check === pendingCheck) setVisible(true); })
+        .finally(() => window.clearTimeout(tooBusyToAnswer));
+    });
+  }, []);
+
+  if (!visible) return null;
+  return (
+    <div className="warmup-pill" role="status">
+      <span className="wait-dots amber" aria-hidden="true"><i /><i /><i /></span>
+      <span>The kitchen dozed off · Unlocking it again<small>Your change is on its way; nothing is lost.</small></span>
+    </div>
+  );
+}
 
 const initialOf = (name) => String(name || "?").trim().slice(0, 1).toUpperCase() || "?";
 
@@ -114,11 +153,15 @@ export default function KitchApp() {
 
   const { authState, householdBootstrap } = k;
 
-  if (authState.loading) return <SplashScreen startup={k.startupState} onRetry={k.startSession} />;
+  // The splash stays until the server reports every startup step done, so
+  // nothing in the app is half-ready when it opens.
+  if (authState.loading || !k.serverStartup.ready) {
+    return <SplashScreen startup={k.startupState} onRetry={k.startSession} server={k.serverStartup} />;
+  }
   if (authState.required && !authState.authenticated) return <SignInScreen k={k} />;
   if (authState.consentRequired) return <ConsentScreen k={k} />;
   if (authState.setupRequired) return <HouseholdSetupScreen k={k} />;
-  if (householdBootstrap === null) return <SplashScreen />;
+  if (householdBootstrap === null) return <SplashScreen server={k.serverStartup} />;
   if (!householdBootstrap.initialized) return <OnboardingScreen k={k} />;
 
   const view = {
@@ -190,6 +233,7 @@ export default function KitchApp() {
       <ChatDrawer k={k} go={go} inputRef={composerRef} />
 
       <Notices k={k} />
+      <WarmupPill />
       {k.scanningOverlay.active && <PhotoScanDialog k={k} />}
       {k.isProviderSyncing && <ProviderTransferDialog k={k} />}
       {k.confirmationDialog && <ConfirmDialog k={k} />}

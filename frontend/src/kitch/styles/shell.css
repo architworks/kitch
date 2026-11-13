@@ -118,3 +118,9 @@
   .card-pad { padding: 18px 16px; }
   .page-title { font-size: 28px; }
 }
+
+/* Mid-session warm-up pill: only when a request has waited 3 s on a server
+   that has just restarted; the screen stays usable underneath. */
+.warmup-pill { position: fixed; z-index: 80; left: 0; right: 0; bottom: 104px; margin: 0 auto; width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 14px; border-radius: 999px; background: var(--ink); color: #f4f1e8; box-shadow: var(--shadow-float); font-size: 14px; line-height: 1.35; animation: rise-in 220ms var(--ease-out); }
+.warmup-pill small { display: block; font-size: 12.5px; color: #d8d4c1; }
+@media (prefers-reduced-motion: reduce) { .warmup-pill { animation: none; } }

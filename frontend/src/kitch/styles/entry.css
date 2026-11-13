@@ -32,10 +32,20 @@
 .warmup.waking .warmup-body, .warmup.failed .warmup-body { opacity: 1; }
 .warmup-time { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; color: #f1c27f; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .warmup-dot { width: 7px; height: 7px; border-radius: 50%; background: #f1c27f; animation: glow 1.4s ease-in-out infinite; }
+/* Startup steps: one line each so the list never changes shape; the current
+   step's plain-language detail lives in the amber status line below. */
+.warmup-steps { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 9px; width: min(300px, 100%); text-align: left; }
+.warmup-steps li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center; color: var(--on-olive-2); font-size: 14.5px; line-height: 1.3; }
+.warmup-steps li.now { color: var(--on-olive); font-weight: 600; }
+.warmup-mark { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid rgb(251 245 233 / 0.4); transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out); }
+.warmup-steps li.now .warmup-mark { border-color: transparent; background: #f1c27f; animation: glow 1.4s ease-in-out infinite; }
+.warmup-steps li.done .warmup-mark { border-color: transparent; background: #b8d4a8; display: grid; place-items: center; }
+.warmup-steps li.done .warmup-mark::after { content: ""; width: 6px; height: 3px; border: 2px solid #34371f; border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
 .warmup-actions { display: grid; justify-items: center; gap: 10px; margin-top: 8px; }
 .warmup-detail { color: var(--on-olive-2); font-size: 13px; max-width: 44ch; opacity: 0.8; }
 @media (prefers-reduced-motion: reduce) {
   .steam i { animation: none; opacity: 0.5; transform: none; }
+  .warmup-steps li.now .warmup-mark { animation: none; }
 }
 
 /* Sign-in */

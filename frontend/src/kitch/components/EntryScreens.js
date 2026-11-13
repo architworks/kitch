@@ -11,10 +11,30 @@ function Mark({ size = 40 }) {
   return <img src="/kitch-chef-hat.svg" alt="" width={size} height={size} />;
 }
 
-// The first screen after a quiet spell on Vercel: the backend may need most of
-// a minute to wake. Copy follows real elapsed time and real retries; nothing
-// pretends to be progress it isn't.
-export function SplashScreen({ startup, onRetry }) {
+// The first screen after a quiet spell on Vercel: the server may need most of
+// a minute to wake. Every step ticks only when it really finishes (the server
+// reports its own steps; the last one is the household's data arriving), the
+// timer is real elapsed time, and nothing pretends to be progress it isn't.
+function warmupSteps(server) {
+  const answered = Boolean(server?.answered);
+  const stage = server?.stage || "starting";
+  const steps = [
+    { key: "kitchen", label: "Unlocking the kitchen", detail: "Starting Kitch’s server", done: answered }
+  ];
+  // Without Instamart nothing heavy loads at startup, so these steps don't exist.
+  if (server?.instamart !== false) {
+    steps.push(
+      { key: "utensils", label: "Laying out the utensils", detail: "Loading the cooking assistant and its tools", done: answered && (stage === "instamart" || stage === "ready") },
+      { key: "shelf", label: "Stocking the Instamart shelf", detail: "Getting the grocery-ordering tools ready", done: answered && stage === "ready" }
+    );
+  }
+  // The last step ends when the household data arrives and this screen closes.
+  steps.push({ key: "notebook", label: "Grabbing my pen and notebook", detail: "Reading your plans, pantry and lists", done: false });
+  const current = steps.find(step => !step.done) || steps[steps.length - 1];
+  return { steps, current };
+}
+
+export function SplashScreen({ startup, onRetry, server }) {
   const [elapsed, setElapsed] = useState(0);
   const failed = Boolean(startup?.failed);
 
@@ -26,15 +46,16 @@ export function SplashScreen({ startup, onRetry }) {
   }, [failed, startup?.attempts]);
 
   const waking = elapsed >= 3 || startup?.retrying;
+  const { steps, current } = warmupSteps(server);
   const title = failed ? "Kitch couldn’t wake up" : waking ? "Warming up the kitchen" : "Opening your kitchen";
   const body = failed
     ? "The kitchen server didn’t answer. Your plans, pantry and lists are safe; nothing changed."
-    : startup?.retrying
+    : startup?.retrying && !server?.answered
       ? "The server isn’t answering yet. Kitch keeps trying on its own."
       : elapsed >= 20
-        ? "Still lighting the stove. Thanks for waiting; it’s nearly there."
+        ? "Nearly there. Thanks for waiting."
         : waking
-          ? "Kitch has been resting, so the first visit after a quiet spell takes a little longer. Usually under a minute."
+          ? "Kitch has been resting, so the first visit takes a little longer."
           : "";
 
   return (
@@ -54,7 +75,21 @@ export function SplashScreen({ startup, onRetry }) {
             {startup?.message && <p className="warmup-detail">{startup.message}</p>}
           </div>
         ) : waking && (
-          <p className="warmup-time"><span className="warmup-dot" />Waking for {elapsed}s</p>
+          <>
+            <ol className="warmup-steps" aria-label="Startup steps">
+              {steps.map(step => {
+                const state = step.done ? "done" : step === current ? "now" : "later";
+                return (
+                  <li key={step.key} className={state}>
+                    <span className="warmup-mark" aria-hidden="true" />
+                    <span>{step.label}{state === "now" ? "…" : ""}</span>
+                    <span className="visually-hidden">{step.done ? " (done)" : state === "now" ? " (in progress)" : ""}</span>
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="warmup-time"><span className="warmup-dot" /><span aria-live="polite">{current.detail}</span><span aria-hidden="true"> · {elapsed}s</span></p>
+          </>
         )}
       </div>
     </main>

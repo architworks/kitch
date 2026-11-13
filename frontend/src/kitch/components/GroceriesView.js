@@ -421,8 +421,10 @@ function Checkout({ k }) {
                   <button type="button" className="btn quiet sm" disabled={busy} onClick={() => k.disconnectProvider(p)}>Disconnect</button>
                 </>
               ) : (
-                <button type="button" className="btn primary sm" disabled={busy || p.production_gated || !k.isHouseholdOwner} title={k.isHouseholdOwner ? undefined : "Only the household owner can connect a grocery app"} onClick={() => k.startProviderConnection(p)}>
-                  {k.providerConnectionState === "reconnect_required" ? `Reconnect ${label}` : `Connect ${label}`}
+                <button type="button" className="btn primary sm" aria-busy={k.connectingProviderId === p.id} disabled={busy || p.production_gated || !k.isHouseholdOwner || Boolean(k.connectingProviderId)} title={k.isHouseholdOwner ? undefined : "Only the household owner can connect a grocery app"} onClick={() => k.startProviderConnection(p)}>
+                  {k.connectingProviderId === p.id
+                    ? <><span className="wait-dots" aria-hidden="true"><i /><i /><i /></span>{`Knocking on ${p.id === "swiggy_instamart" ? "Swiggy" : label}’s door…`}</>
+                    : k.providerConnectionState === "reconnect_required" ? `Reconnect ${label}` : `Connect ${label}`}
                 </button>
               )}
             </div>
@@ -438,8 +440,10 @@ function Checkout({ k }) {
             <Locked title={k.providerStatusLabel}>
               {k.providerStatusDescription}
               {p.requires_connection && !p.production_gated && (
-                <button type="button" className="btn sm" onClick={() => k.startProviderConnection(p)}>
-                  {k.providerConnectionState === "reconnect_required" ? "Reconnect" : "Connect"}
+                <button type="button" className="btn sm" aria-busy={k.connectingProviderId === p.id} disabled={Boolean(k.connectingProviderId)} onClick={() => k.startProviderConnection(p)}>
+                  {k.connectingProviderId === p.id
+                    ? <><span className="wait-dots" aria-hidden="true"><i /><i /><i /></span>{`Knocking on ${p.id === "swiggy_instamart" ? "Swiggy" : label}’s door…`}</>
+                    : k.providerConnectionState === "reconnect_required" ? "Reconnect" : "Connect"}
                 </button>
               )}
             </Locked>
@@ -464,7 +468,7 @@ function Checkout({ k }) {
               {k.isProviderAddressLoading ? (
                 <p className="address-loading" role="status">
                   <span className="address-loading-dots" aria-hidden="true"><i /><i /><i /></span>
-                  Getting your saved addresses from {label}. This can take a few seconds.
+                  Checking where to deliver: getting your saved addresses from {label}.
                 </p>
               ) : (
                 <p className="muted small-note">{k.providerStatusDescription}</p>

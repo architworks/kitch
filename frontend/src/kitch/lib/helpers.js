@@ -145,9 +145,22 @@ export const getTimeBasedGreeting = (date = new Date()) => {
 };
 
 export const CONFIGURED_API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "").trim().replace(/\/$/, "");
-export const API_REQUEST_TIMEOUT_MS = 20_000;
+// Ordinary requests allow a minute: a server restarting mid-session can take
+// that long, and it should show the warm-up pill, never an error.
+export const API_REQUEST_TIMEOUT_MS = 60_000;
 export const AGENT_REQUEST_TIMEOUT_MS = 120_000;
 export const PROVIDER_OPERATION_TIMEOUT_MS = 240_000;
+
+// Ordinary requests still waiting after this long are reported to the
+// warm-up pill, which checks whether the server has just restarted.
+const SLOW_REQUEST_MS = 3_000;
+let slowRequestCount = 0;
+const slowRequestListeners = new Set();
+const announceSlowRequests = () => slowRequestListeners.forEach(listener => listener(slowRequestCount));
+export const subscribeSlowRequests = (listener) => {
+  slowRequestListeners.add(listener);
+  return () => slowRequestListeners.delete(listener);
+};
 
 export const apiUrl = (path) => {
   if (CONFIGURED_API_BASE_URL) return `${CONFIGURED_API_BASE_URL}${path}`;
@@ -158,14 +171,45 @@ export const apiUrl = (path) => {
 };
 
 export const apiFetch = (url, options = {}) => {
-  const { timeoutMs = API_REQUEST_TIMEOUT_MS, ...requestOptions } = options;
+  // Long Swiggy and agent operations set their own limit and have their own
+  // progress UI, so only ordinary requests feed the warm-up pill.
+  const {
+    timeoutMs = API_REQUEST_TIMEOUT_MS,
+    trackSlow = timeoutMs === API_REQUEST_TIMEOUT_MS,
+    ...requestOptions
+  } = options;
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  let markedSlow = false;
+  const slowTimer = trackSlow
+    ? globalThis.setTimeout(() => {
+      markedSlow = true;
+      slowRequestCount += 1;
+      announceSlowRequests();
+    }, SLOW_REQUEST_MS)
+    : null;
   return globalThis.fetch(url, {
     credentials: "include",
     ...requestOptions,
     signal: requestOptions.signal || controller.signal
-  }).finally(() => globalThis.clearTimeout(timeout));
+  }).finally(() => {
+    globalThis.clearTimeout(timeout);
+    if (slowTimer) globalThis.clearTimeout(slowTimer);
+    if (markedSlow) {
+      slowRequestCount -= 1;
+      announceSlowRequests();
+    }
+  });
+};
+
+// Which startup step the server is on (see /api/health/startup). Passing the
+// step already seen makes the server answer as soon as the next one begins.
+export const fetchServerStartup = async (since = "") => {
+  const query = since ? `?since=${encodeURIComponent(since)}` : "";
+  const res = await apiFetch(apiUrl(`/api/health/startup${query}`), { timeoutMs: 15_000, trackSlow: false });
+  if (res.status === 404) return { stage: "ready", instamart: false, uptime_s: null };
+  if (!res.ok) throw new Error(`Startup status ${res.status}`);
+  return res.json();
 };
 
 export const getMealTitle = (meal, fallback = "No recipe set") => {
